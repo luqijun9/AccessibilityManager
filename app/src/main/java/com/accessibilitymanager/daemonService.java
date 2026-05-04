@@ -69,6 +69,7 @@ public class daemonService extends Service {
         @Override
         public void onChange(boolean selfChange) {
             super.onChange(selfChange);
+            if (selfChange) return;
             String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             if (s == null) s = "";
             boolean settingChanged = !tmpSettingValue.equals(s);
@@ -80,13 +81,25 @@ public class daemonService extends Service {
     }
 
 
+    private boolean isServiceInSetting(String serviceName, String setting) {
+        if (setting == null || setting.isEmpty()) return false;
+        String[] parts = Pattern.compile("/").split(serviceName);
+        if (parts.length < 2) return false;
+        String shortForm = parts[0] + "/" + parts[1];
+        String longForm = parts[0] + "/" + parts[0] + parts[1];
+        for (String entry : Pattern.compile(":").split(setting)) {
+            if (entry.equals(shortForm) || entry.equals(longForm)) return true;
+        }
+        return false;
+    }
+
     private void doDaemon(String s) {
         String list = sp.getString("daemon", "");
         String[] serviceNames = Pattern.compile(":").split(list);
         StringBuilder add = new StringBuilder();
         StringBuilder add1 = new StringBuilder();
         for (String serviceName : serviceNames) {
-            if (serviceName == null || serviceName.equals("null") || serviceName.length() == 0 || s.contains(serviceName) || !l.contains(serviceName))
+            if (serviceName == null || serviceName.equals("null") || serviceName.length() == 0 || isServiceInSetting(serviceName, s) || !l.contains(serviceName))
                 continue;
 
             ApplicationInfo applicationInfo = new ApplicationInfo();
