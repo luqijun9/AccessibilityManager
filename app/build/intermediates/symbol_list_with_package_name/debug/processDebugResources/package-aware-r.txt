@@ -1,0 +1,22 @@
+com.accessibilitymanager
+color bg
+color fg
+drawable icon
+drawable lock
+drawable lock1
+drawable tile
+id a
+id b
+id boot
+id c
+id e
+id hide
+id ib
+id list
+id s
+id toast
+layout activity_main
+layout item
+menu arrange
+mipmap icon
+style AppTheme

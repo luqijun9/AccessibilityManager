@@ -1,0 +1,50 @@
+[
+    {
+        "merged": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-release-4:\\layout_item.xml.flat",
+        "source": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-main-5:\\layout\\item.xml"
+    },
+    {
+        "merged": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-release-4:\\layout_activity_main.xml.flat",
+        "source": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-main-5:\\layout\\activity_main.xml"
+    },
+    {
+        "merged": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-release-4:\\mipmap-anydpi-v26_icon.xml.flat",
+        "source": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-main-5:\\mipmap-anydpi-v26\\icon.xml"
+    },
+    {
+        "merged": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-release-4:\\drawable-anydpi-v23_tile.xml.flat",
+        "source": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-pngs-0:\\drawable-anydpi-v23\\tile.xml"
+    },
+    {
+        "merged": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-release-4:\\menu_arrange.xml.flat",
+        "source": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-main-5:\\menu\\arrange.xml"
+    },
+    {
+        "merged": "com.accessibilitymanager.app-release-4:/menu_arrange.xml.flat",
+        "source": "com.accessibilitymanager.app-main-5:/menu/arrange.xml"
+    },
+    {
+        "merged": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-release-4:\\drawable-anydpi-v24_icon.xml.flat",
+        "source": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-pngs-0:\\drawable-anydpi-v24\\icon.xml"
+    },
+    {
+        "merged": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-release-4:\\drawable_lock.png.flat",
+        "source": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-main-5:\\drawable\\lock.png"
+    },
+    {
+        "merged": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-release-4:\\drawable_lock1.png.flat",
+        "source": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-main-5:\\drawable\\lock1.png"
+    },
+    {
+        "merged": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-release-4:\\drawable-anydpi-v21_lock1.xml.flat",
+        "source": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-pngs-0:\\drawable-anydpi-v21\\lock1.xml"
+    },
+    {
+        "merged": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-release-4:\\drawable-anydpi-v21_lock.xml.flat",
+        "source": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-pngs-0:\\drawable-anydpi-v21\\lock.xml"
+    },
+    {
+        "merged": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-release-4:\\mipmap_icon.png.flat",
+        "source": "C:\\Users\\LP\\.gradle\\daemon\\8.13\\com.accessibilitymanager.app-main-5:\\mipmap\\icon.png"
+    }
+]

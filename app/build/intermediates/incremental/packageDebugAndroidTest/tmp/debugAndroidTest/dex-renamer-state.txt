@@ -1,0 +1,4 @@
+#Mon May 04 22:28:40 CST 2026
+base.0=C\:\\Users\\LP\\Desktop\\AccessibilityManager-main\\app\\build\\intermediates\\dex\\debugAndroidTest\\mergeDexDebugAndroidTest\\classes.dex
+path.0=classes.dex
+renamed.0=classes.dex

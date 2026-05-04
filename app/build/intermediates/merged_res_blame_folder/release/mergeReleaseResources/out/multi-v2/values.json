@@ -1,0 +1,43 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.accessibilitymanager.app-mergeReleaseResources-2:/values/values.xml",
+            "map": [
+                {
+                    "source": "C:\\Users\\LP\\Desktop\\AccessibilityManager-main\\app\\src\\main\\res\\values\\styles.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "57",
+                        "endColumns": "72",
+                        "endOffsets": "125"
+                    },
+                    "to": {
+                        "startLines": "4",
+                        "startColumns": "4",
+                        "startOffsets": "129",
+                        "endColumns": "72",
+                        "endOffsets": "197"
+                    }
+                },
+                {
+                    "source": "C:\\Users\\LP\\Desktop\\AccessibilityManager-main\\app\\src\\main\\res\\values\\colors.xml",
+                    "from": {
+                        "startLines": "2,3",
+                        "startColumns": "4,4",
+                        "startOffsets": "57,95",
+                        "endColumns": "36,36",
+                        "endOffsets": "89,127"
+                    },
+                    "to": {
+                        "startLines": "2,3",
+                        "startColumns": "4,4",
+                        "startOffsets": "55,92",
+                        "endColumns": "36,36",
+                        "endOffsets": "87,124"
+                    }
+                }
+            ]
+        }
+    ]
+}

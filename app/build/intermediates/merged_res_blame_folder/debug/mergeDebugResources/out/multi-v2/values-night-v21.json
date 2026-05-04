@@ -1,0 +1,28 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.accessibilitymanager.app-mergeDebugResources-2:/values-night-v21/values-night-v21.xml",
+            "map": [
+                {
+                    "source": "C:\\Users\\LP\\Desktop\\AccessibilityManager-main\\app\\src\\main\\res\\values-night-v21\\styles.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "57",
+                        "endLines": "4",
+                        "endColumns": "12",
+                        "endOffsets": "197"
+                    },
+                    "to": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endLines": "4",
+                        "endColumns": "12",
+                        "endOffsets": "193"
+                    }
+                }
+            ]
+        }
+    ]
+}

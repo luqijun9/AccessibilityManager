@@ -1,0 +1,26 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.accessibilitymanager.app-mergeDebugResources-2:/values-v31/values-v31.xml",
+            "map": [
+                {
+                    "source": "C:\\Users\\LP\\Desktop\\AccessibilityManager-main\\app\\src\\main\\res\\values-v31\\colors.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "57",
+                        "endColumns": "62",
+                        "endOffsets": "115"
+                    },
+                    "to": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "62",
+                        "endOffsets": "113"
+                    }
+                }
+            ]
+        }
+    ]
+}

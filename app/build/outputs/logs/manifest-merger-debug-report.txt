@@ -1,0 +1,146 @@
+-- Merging decision tree log ---
+provider#rikka.shizuku.ShizukuProvider
+INJECTED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:31:9-37:82
+	android:enabled
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:34:13-35
+	android:authorities
+		INJECTED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:33:13-59
+	android:multiprocess
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:36:13-41
+	android:exported
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:35:13-36
+	android:permission
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:37:13-79
+	android:name
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:32:13-57
+manifest
+ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:2:1-52:12
+INJECTED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:2:1-52:12
+INJECTED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:2:1-52:12
+INJECTED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:2:1-52:12
+MERGED from [dev.rikka.shizuku:provider:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\a939b587a151e8c092e64391dc95921f\transformed\jetified-provider-13.1.0\AndroidManifest.xml:2:1-18:12
+MERGED from [dev.rikka.shizuku:api:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\e20117b5537970f388fdf2ad4d9868ac\transformed\jetified-api-13.1.0\AndroidManifest.xml:2:1-9:12
+MERGED from [dev.rikka.shizuku:shared:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\8d71cd330ea5fe0398746c46e5343408\transformed\jetified-shared-13.1.0\AndroidManifest.xml:2:1-9:12
+MERGED from [dev.rikka.shizuku:aidl:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\c42c1c5f325bd33d6936be16ba197973\transformed\jetified-aidl-13.1.0\AndroidManifest.xml:2:1-9:12
+	package
+		INJECTED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml
+	android:versionName
+		INJECTED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml
+	xmlns:tools
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:3:5-51
+	android:versionCode
+		INJECTED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml
+	xmlns:android
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:2:11-69
+uses-permission#android.permission.QUERY_ALL_PACKAGES
+ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:5:5-77
+	android:name
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:5:22-74
+uses-permission#android.permission.WRITE_SECURE_SETTINGS
+ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:6:5-80
+	android:name
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:6:22-77
+uses-permission#android.permission.FOREGROUND_SERVICE
+ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:7:5-77
+	android:name
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:7:22-74
+uses-permission#android.permission.RECEIVE_BOOT_COMPLETED
+ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:8:5-81
+	android:name
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:8:22-78
+uses-permission#android.permission.POST_NOTIFICATIONS
+ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:9:5-77
+	android:name
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:9:22-74
+uses-sdk
+ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:11:5-122
+INJECTED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:11:5-122
+INJECTED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:11:5-122
+MERGED from [dev.rikka.shizuku:provider:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\a939b587a151e8c092e64391dc95921f\transformed\jetified-provider-13.1.0\AndroidManifest.xml:6:5-8:41
+MERGED from [dev.rikka.shizuku:provider:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\a939b587a151e8c092e64391dc95921f\transformed\jetified-provider-13.1.0\AndroidManifest.xml:6:5-8:41
+MERGED from [dev.rikka.shizuku:api:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\e20117b5537970f388fdf2ad4d9868ac\transformed\jetified-api-13.1.0\AndroidManifest.xml:5:5-7:41
+MERGED from [dev.rikka.shizuku:api:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\e20117b5537970f388fdf2ad4d9868ac\transformed\jetified-api-13.1.0\AndroidManifest.xml:5:5-7:41
+MERGED from [dev.rikka.shizuku:shared:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\8d71cd330ea5fe0398746c46e5343408\transformed\jetified-shared-13.1.0\AndroidManifest.xml:5:5-7:41
+MERGED from [dev.rikka.shizuku:shared:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\8d71cd330ea5fe0398746c46e5343408\transformed\jetified-shared-13.1.0\AndroidManifest.xml:5:5-7:41
+MERGED from [dev.rikka.shizuku:aidl:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\c42c1c5f325bd33d6936be16ba197973\transformed\jetified-aidl-13.1.0\AndroidManifest.xml:5:5-7:41
+MERGED from [dev.rikka.shizuku:aidl:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\c42c1c5f325bd33d6936be16ba197973\transformed\jetified-aidl-13.1.0\AndroidManifest.xml:5:5-7:41
+	tools:overrideLibrary
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:11:15-119
+	android:targetSdkVersion
+		INJECTED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml
+application
+ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:13:5-50:19
+INJECTED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:13:5-50:19
+MERGED from [dev.rikka.shizuku:provider:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\a939b587a151e8c092e64391dc95921f\transformed\jetified-provider-13.1.0\AndroidManifest.xml:12:5-16:19
+MERGED from [dev.rikka.shizuku:provider:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\a939b587a151e8c092e64391dc95921f\transformed\jetified-provider-13.1.0\AndroidManifest.xml:12:5-16:19
+	android:extractNativeLibs
+		INJECTED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml
+	android:label
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:15:9-31
+	tools:ignore
+		ADDED from [dev.rikka.shizuku:provider:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\a939b587a151e8c092e64391dc95921f\transformed\jetified-provider-13.1.0\AndroidManifest.xml:12:18-69
+	android:icon
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:14:9-36
+	android:theme
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:16:9-40
+activity#com.accessibilitymanager.MainActivity
+ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:17:9-27:20
+	android:launchMode
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:21:13-44
+	android:exported
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:20:13-36
+	android:configChanges
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:19:13-91
+	android:name
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:18:13-41
+intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
+ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:22:13-26:29
+action#android.intent.action.MAIN
+ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:23:17-69
+	android:name
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:23:25-66
+category#android.intent.category.LAUNCHER
+ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:25:17-77
+	android:name
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:25:27-74
+service#com.accessibilitymanager.daemonService
+ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:28:9-30:39
+	android:exported
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:30:13-36
+	android:name
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:29:13-42
+receiver#com.accessibilitymanager.StartReceiver
+ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:39:9-48:20
+	android:exported
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:42:13-36
+	android:directBootAware
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:41:13-43
+	android:name
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:40:13-42
+intent-filter#action:name:android.intent.action.BOOT_COMPLETED+action:name:android.intent.action.LOCKED_BOOT_COMPLETED+action:name:android.intent.action.QUICKBOOT_POWERON
+ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:43:13-47:29
+action#android.intent.action.LOCKED_BOOT_COMPLETED
+ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:44:17-86
+	android:name
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:44:25-83
+action#android.intent.action.QUICKBOOT_POWERON
+ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:45:17-82
+	android:name
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:45:25-79
+action#android.intent.action.BOOT_COMPLETED
+ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:46:17-79
+	android:name
+		ADDED from C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:46:25-76
+uses-permission#moe.shizuku.manager.permission.API_V23
+ADDED from [dev.rikka.shizuku:provider:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\a939b587a151e8c092e64391dc95921f\transformed\jetified-provider-13.1.0\AndroidManifest.xml:10:5-78
+	android:name
+		ADDED from [dev.rikka.shizuku:provider:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\a939b587a151e8c092e64391dc95921f\transformed\jetified-provider-13.1.0\AndroidManifest.xml:10:22-75
+meta-data#moe.shizuku.client.V3_SUPPORT
+ADDED from [dev.rikka.shizuku:provider:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\a939b587a151e8c092e64391dc95921f\transformed\jetified-provider-13.1.0\AndroidManifest.xml:13:9-15:36
+	android:value
+		ADDED from [dev.rikka.shizuku:provider:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\a939b587a151e8c092e64391dc95921f\transformed\jetified-provider-13.1.0\AndroidManifest.xml:15:13-33
+	android:name
+		ADDED from [dev.rikka.shizuku:provider:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\a939b587a151e8c092e64391dc95921f\transformed\jetified-provider-13.1.0\AndroidManifest.xml:14:13-57

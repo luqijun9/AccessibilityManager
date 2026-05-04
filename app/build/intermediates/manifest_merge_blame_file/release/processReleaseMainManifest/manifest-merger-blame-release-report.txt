@@ -1,0 +1,114 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.accessibilitymanager"
+4    android:versionCode="8"
+5    android:versionName="8" >
+6
+7    <uses-sdk
+7-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:11:5-122
+8        android:minSdkVersion="18"
+9        android:targetSdkVersion="33" />
+10
+11    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+11-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:5:5-77
+11-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:5:22-74
+12    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+12-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:6:5-80
+12-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:6:22-77
+13    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+13-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:7:5-77
+13-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:7:22-74
+14    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+14-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:8:5-81
+14-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:8:22-78
+15    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+15-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:9:5-77
+15-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:9:22-74
+16    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+16-->[dev.rikka.shizuku:provider:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\a939b587a151e8c092e64391dc95921f\transformed\jetified-provider-13.1.0\AndroidManifest.xml:10:5-78
+16-->[dev.rikka.shizuku:provider:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\a939b587a151e8c092e64391dc95921f\transformed\jetified-provider-13.1.0\AndroidManifest.xml:10:22-75
+17
+18    <application
+18-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:13:5-50:19
+19        android:extractNativeLibs="true"
+20        android:icon="@mipmap/icon"
+20-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:14:9-36
+21        android:label="无障碍管理器"
+21-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:15:9-31
+22        android:testOnly="true"
+23        android:theme="@style/AppTheme" >
+23-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:16:9-40
+24        <activity
+24-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:17:9-27:20
+25            android:name="com.accessibilitymanager.MainActivity"
+25-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:18:13-41
+26            android:configChanges="keyboardHidden|smallestScreenSize|fontScale|screenSize"
+26-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:19:13-91
+27            android:exported="true"
+27-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:20:13-36
+28            android:launchMode="singleTask" >
+28-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:21:13-44
+29            <intent-filter>
+29-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:22:13-26:29
+30                <action android:name="android.intent.action.MAIN" />
+30-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:23:17-69
+30-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:23:25-66
+31
+32                <category android:name="android.intent.category.LAUNCHER" />
+32-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:25:17-77
+32-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:25:27-74
+33            </intent-filter>
+34        </activity>
+35
+36        <service
+36-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:28:9-30:39
+37            android:name="com.accessibilitymanager.daemonService"
+37-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:29:13-42
+38            android:exported="true" />
+38-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:30:13-36
+39
+40        <provider
+41            android:name="rikka.shizuku.ShizukuProvider"
+41-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:32:13-57
+42            android:authorities="com.accessibilitymanager.shizuku"
+42-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:33:13-59
+43            android:enabled="true"
+43-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:34:13-35
+44            android:exported="true"
+44-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:35:13-36
+45            android:multiprocess="false"
+45-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:36:13-41
+46            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+46-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:37:13-79
+47
+48        <receiver
+48-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:39:9-48:20
+49            android:name="com.accessibilitymanager.StartReceiver"
+49-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:40:13-42
+50            android:directBootAware="true"
+50-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:41:13-43
+51            android:exported="true" >
+51-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:42:13-36
+52            <intent-filter>
+52-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:43:13-47:29
+53                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+53-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:44:17-86
+53-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:44:25-83
+54                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+54-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:45:17-82
+54-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:45:25-79
+55                <action android:name="android.intent.action.BOOT_COMPLETED" />
+55-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:46:17-79
+55-->C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\AndroidManifest.xml:46:25-76
+56            </intent-filter>
+57        </receiver>
+58
+59        <meta-data
+59-->[dev.rikka.shizuku:provider:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\a939b587a151e8c092e64391dc95921f\transformed\jetified-provider-13.1.0\AndroidManifest.xml:13:9-15:36
+60            android:name="moe.shizuku.client.V3_SUPPORT"
+60-->[dev.rikka.shizuku:provider:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\a939b587a151e8c092e64391dc95921f\transformed\jetified-provider-13.1.0\AndroidManifest.xml:14:13-57
+61            android:value="true" />
+61-->[dev.rikka.shizuku:provider:13.1.0] C:\Users\LP\.gradle\caches\8.13\transforms\a939b587a151e8c092e64391dc95921f\transformed\jetified-provider-13.1.0\AndroidManifest.xml:15:13-33
+62    </application>
+63
+64</manifest>

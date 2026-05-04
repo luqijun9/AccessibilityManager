@@ -1,0 +1,8 @@
+com.accessibilitymanager.app-pngs-0 C:\Users\LP\Desktop\AccessibilityManager-main\app\build\generated\res\pngs\release
+com.accessibilitymanager.app-resValues-1 C:\Users\LP\Desktop\AccessibilityManager-main\app\build\generated\res\resValues\release
+com.accessibilitymanager.app-updated_navigation_xml-2 C:\Users\LP\Desktop\AccessibilityManager-main\app\build\generated\updated_navigation_xml\release
+com.accessibilitymanager.app-mergeReleaseResources-3 C:\Users\LP\Desktop\AccessibilityManager-main\app\build\intermediates\incremental\release\mergeReleaseResources\merged.dir
+com.accessibilitymanager.app-mergeReleaseResources-4 C:\Users\LP\Desktop\AccessibilityManager-main\app\build\intermediates\incremental\release\mergeReleaseResources\stripped.dir
+com.accessibilitymanager.app-release-5 C:\Users\LP\Desktop\AccessibilityManager-main\app\build\intermediates\merged_res\release\mergeReleaseResources
+com.accessibilitymanager.app-main-6 C:\Users\LP\Desktop\AccessibilityManager-main\app\src\main\res
+com.accessibilitymanager.app-release-7 C:\Users\LP\Desktop\AccessibilityManager-main\app\src\release\res
