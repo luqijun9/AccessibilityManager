@@ -342,7 +342,10 @@ public class MainActivity extends Activity {
         menu.findItem(R.id.boot).setChecked(sp.getBoolean("boot", true));
         menu.findItem(R.id.toast).setChecked(sp.getBoolean("toast", true));
         menu.findItem(R.id.useronly).setChecked(sp.getBoolean("useronly", false));
-        menu.findItem(R.id.fixmode).setChecked(sp.getBoolean("fixmode", false));
+        boolean crashFixEnabled = sp.getBoolean("crashfix", true);
+        menu.findItem(R.id.crashfix).setChecked(crashFixEnabled);
+        menu.findItem(R.id.fixmode).setChecked(sp.getBoolean("fixmode", true));
+        menu.findItem(R.id.fixmode).setEnabled(crashFixEnabled);
         menu.findItem(R.id.hide).setChecked(sp.getBoolean("hide", true));
         return super.onPrepareOptionsMenu(menu);
     }
@@ -373,6 +376,10 @@ public class MainActivity extends Activity {
                     listView.setAdapter(new adapter(tmp));
                 }
             });
+        } else if (itemId == R.id.crashfix) {
+            sp.edit().putBoolean("crashfix", !menuItem.isChecked()).apply();
+            menuItem.setChecked(!menuItem.isChecked());
+            invalidateOptionsMenu();
         } else if (itemId == R.id.fixmode) {
             sp.edit().putBoolean("fixmode", !menuItem.isChecked()).apply();
             menuItem.setChecked(!menuItem.isChecked());

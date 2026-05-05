@@ -30,6 +30,8 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 public class daemonService extends Service {
@@ -46,6 +48,7 @@ public class daemonService extends Service {
     private volatile boolean mIsCheckingCrashed = false;
     private int mFixRetryRemaining = 1;
     private final Object mFixLock = new Object();
+    private final Map<String, Long> mLastFixTime = new ConcurrentHashMap<>();
 
     final private BroadcastReceiver myReceiver = new BroadcastReceiver() {
         @Override
@@ -69,7 +72,6 @@ public class daemonService extends Service {
         @Override
         public void onChange(boolean selfChange) {
             super.onChange(selfChange);
-            if (selfChange) return;
             String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             if (s == null) s = "";
             boolean settingChanged = !tmpSettingValue.equals(s);
@@ -81,25 +83,17 @@ public class daemonService extends Service {
     }
 
 
-    private boolean isServiceInSetting(String serviceName, String setting) {
-        if (setting == null || setting.isEmpty()) return false;
-        String[] parts = Pattern.compile("/").split(serviceName);
-        if (parts.length < 2) return false;
-        String shortForm = parts[0] + "/" + parts[1];
-        String longForm = parts[0] + "/" + parts[0] + parts[1];
-        for (String entry : Pattern.compile(":").split(setting)) {
-            if (entry.equals(shortForm) || entry.equals(longForm)) return true;
-        }
-        return false;
-    }
-
     private void doDaemon(String s) {
         String list = sp.getString("daemon", "");
+        LogUtil.log(daemonService.this, "[保活] doDaemon被调用，当前setting长度=" + (s != null ? s.length() : 0));
         String[] serviceNames = Pattern.compile(":").split(list);
         StringBuilder add = new StringBuilder();
         StringBuilder add1 = new StringBuilder();
         for (String serviceName : serviceNames) {
-            if (serviceName == null || serviceName.equals("null") || serviceName.length() == 0 || isServiceInSetting(serviceName, s) || !l.contains(serviceName))
+            if (serviceName == null || serviceName.equals("null") || serviceName.length() == 0 || !l.contains(serviceName))
+                continue;
+            String[] parts = Pattern.compile("/").split(serviceName);
+            if (parts.length >= 2 && (s.contains(parts[0] + "/" + parts[1]) || s.contains(parts[0] + "/" + parts[0] + parts[1])))
                 continue;
 
             ApplicationInfo applicationInfo = new ApplicationInfo();
@@ -109,6 +103,7 @@ public class daemonService extends Service {
             } catch (PackageManager.NameNotFoundException ignored) {
             }
             String packageLabel = applicationInfo.loadLabel(packageManager).toString();
+            LogUtil.log(daemonService.this, "[保活] 检测到服务缺失：" + serviceName + " (" + packageLabel + ")");
             add.append(serviceName).append(":");
             add1.append(packageLabel).append("\n");
             if (sp.getBoolean("toast", true))
@@ -120,6 +115,8 @@ public class daemonService extends Service {
             notification.setContentText(add1 + new SimpleDateFormat("时间：H:mm ss秒", Locale.getDefault()).format(Calendar.getInstance().getTime())).setContentTitle("已保活以下无障碍服务：");
             systemService.notify(1, notification.build());
             LogUtil.log(daemonService.this, "[保活] 已重新开启被关闭的服务：" + add1.toString().replace("\n", " "));
+        } else {
+            tmpSettingValue = s;
         }
     }
 
@@ -129,6 +126,7 @@ public class daemonService extends Service {
     }
 
     private void checkCrashedServices(String source) {
+        if (!sp.getBoolean("crashfix", true)) return;
         if (mIsCheckingCrashed) return;
         String daemonList = sp.getString("daemon", "");
         if (daemonList.length() == 0) return;
@@ -196,11 +194,17 @@ public class daemonService extends Service {
                                 }
                                 LogUtil.log(daemonService.this, "[崩溃检测] 修复后复查仍崩溃，进行重试(" + retryRemaining + ")：" + cs);
                                 mFixRetryRemaining--;
+                                mLastFixTime.put(cs, System.currentTimeMillis());
                                 String serviceToFix = cs;
                                 new Thread(() -> fixCrashedService(serviceToFix, true)).start();
                             } else {
+                                Long lastFix = mLastFixTime.get(cs);
+                                if (lastFix != null && System.currentTimeMillis() - lastFix < 8000) {
+                                    continue;
+                                }
                                 LogUtil.log(daemonService.this, "[崩溃检测] 检测到保活服务崩溃：" + cs);
                                 mFixRetryRemaining = 1;
+                                mLastFixTime.put(cs, System.currentTimeMillis());
                                 String serviceToFix = cs;
                                 new Thread(() -> fixCrashedService(serviceToFix, false)).start();
                             }
@@ -227,7 +231,7 @@ public class daemonService extends Service {
             return;
         }
 
-        boolean noForceStop = sp.getBoolean("fixmode", false);
+        boolean useForceStop = sp.getBoolean("fixmode", true);
 
         ApplicationInfo applicationInfo = new ApplicationInfo();
         try {
@@ -241,21 +245,9 @@ public class daemonService extends Service {
                     (isRetry ? "重试重启崩溃服务 " : "重启崩溃服务 ") + packageLabel, Toast.LENGTH_SHORT).show());
 
         String logPrefix = isRetry ? "[崩溃修复-重试]" : "[崩溃修复]";
-        if (noForceStop) {
-            LogUtil.log(daemonService.this, logPrefix + " 开始修复(仅关闭服务模式) " + serviceName);
-        } else {
-            LogUtil.log(daemonService.this, logPrefix + " 开始修复(强杀进程模式) " + serviceName + " ← 执行 force-stop " + pkgName);
-        }
 
-        String enabled = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-        if (enabled == null) enabled = "";
-        String newEnabled = enabled.replace(serviceName + ":", "")
-                .replace(":" + serviceName, "")
-                .replace(serviceName, "");
-        newEnabled = newEnabled.replace("::", ":").replaceAll("^:|:$", "");
-        tmpSettingValue = newEnabled;
-
-        if (!noForceStop) {
+        if (useForceStop) {
+            LogUtil.log(daemonService.this, logPrefix + " 强杀进程：" + serviceName + " ← force-stop " + pkgName);
             try {
                 Process forceStop = Runtime.getRuntime().exec("su");
                 DataOutputStream fos = new DataOutputStream(forceStop.getOutputStream());
@@ -266,53 +258,26 @@ public class daemonService extends Service {
                 forceStop.waitFor();
             } catch (Exception ignored) {
             }
-
             try {
                 Thread.sleep(500);
             } catch (InterruptedException ignored) {
             }
+            LogUtil.log(daemonService.this, logPrefix + " force-stop 已执行，等待系统移除服务后保活重新启用 " + serviceName);
+        } else {
+            LogUtil.log(daemonService.this, logPrefix + " 仅关闭服务：" + serviceName);
+            String enabled = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (enabled == null) enabled = "";
+            String newEnabled = enabled.replace(serviceName + ":", "")
+                    .replace(":" + serviceName, "")
+                    .replace(serviceName, "");
+            newEnabled = newEnabled.replace("::", ":").replaceAll("^:|:$", "");
+            Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, newEnabled);
+            try {
+                Thread.sleep(300);
+            } catch (InterruptedException ignored) {
+            }
+            LogUtil.log(daemonService.this, logPrefix + " 服务已关闭，等待保活重新启用 " + serviceName);
         }
-
-        Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
-
-        LogUtil.log(daemonService.this, logPrefix + " 已移除 " + serviceName + "，等待重新添加");
-
-        try {
-            Thread.sleep(500);
-        } catch (InterruptedException ignored) {
-        }
-
-        String checkAfterDisable = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-        if (checkAfterDisable == null) checkAfterDisable = "";
-
-        if (checkAfterDisable.isEmpty())
-            tmpSettingValue = serviceName;
-        else
-            tmpSettingValue = checkAfterDisable + ":" + serviceName;
-
-        Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
-        Settings.Secure.putString(getContentResolver(), Settings.Secure.ACCESSIBILITY_ENABLED, "1");
-
-        try {
-            Thread.sleep(300);
-        } catch (InterruptedException ignored) {
-        }
-
-        String verifyEnabled = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-        if (verifyEnabled == null) verifyEnabled = "";
-
-        if (!verifyEnabled.contains(serviceName)) {
-            LogUtil.log(daemonService.this, logPrefix + " 重新启用失败：" + serviceName + "，将安排复查");
-            mHandler.post(() -> {
-                notification.setContentText((isRetry ? "重试" : "") + "重新启用失败：" + packageLabel)
-                        .setContentTitle("无障碍保活异常");
-                systemService.notify(1, notification.build());
-            });
-            schedulePostFixCheck();
-            return;
-        }
-
-        LogUtil.log(daemonService.this, logPrefix + " 修复成功：" + serviceName + " 已重新启用");
 
         mHandler.post(() -> {
             notification.setContentText("已重启崩溃服务：" + packageLabel + "\n"
