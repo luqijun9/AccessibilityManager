@@ -1,6 +1,6 @@
-.gradle
+.gradle/
 /.idea/*
-/build
-# 编译缓存
-app/.cxx/
+build/
 app/build/
+local.properties
+*.iml
