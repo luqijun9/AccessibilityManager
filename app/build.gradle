@@ -9,8 +9,8 @@ android {
         applicationId "com.accessibilitymanager"
         minSdk 18
         targetSdk 33
-        versionCode 8
-        versionName "8"
+        versionCode 10
+        versionName "10.1"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
