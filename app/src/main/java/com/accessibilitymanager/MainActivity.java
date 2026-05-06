@@ -40,8 +40,10 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.accessibility.AccessibilityManager;
 import android.widget.BaseAdapter;
+import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.Switch;
@@ -175,6 +177,26 @@ public class MainActivity extends Activity {
 
 
         //如果设备一次都没打开过无障碍设置界面，则下面这个设置项值不存在，同时本APP是无法获取到无障碍设置列表的。所以要在这里加个判断，如果从来没开启过，则需要本APP来给这个设置项写入1来开启。
+
+        new Thread(() -> {
+            ShellUtil.reset();
+            ShellUtil.getPermissionState();
+            boolean crashFix = sp.getBoolean("crashfix", false);
+            boolean autoDisabled = sp.getBoolean("crashfix_auto_disabled", false);
+            if (crashFix && !ShellUtil.hasAnyPermission()) {
+                sp.edit().putBoolean("crashfix", false).putBoolean("crashfix_auto_disabled", true).apply();
+                runOnUiThread(() -> new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("权限不足")
+                        .setMessage("崩溃修复功能需要root或Shizuku权限，当前未检测到任何权限，已自动关闭崩溃修复功能。")
+                        .setPositiveButton("确定", null)
+                        .create().show());
+            } else if (!crashFix && autoDisabled && ShellUtil.hasAnyPermission()) {
+                sp.edit().putBoolean("crashfix", true).putBoolean("crashfix_auto_disabled", false).apply();
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "已检测到权限，崩溃修复已重新开启", Toast.LENGTH_SHORT).show());
+            }
+            runOnUiThread(() -> invalidateOptionsMenu());
+        }).start();
+
         if (Settings.Secure.getString(getContentResolver(), Settings.Secure.ACCESSIBILITY_ENABLED) != null) {
             runOnUiThread(new Runnable() {
                 @Override
@@ -287,7 +309,10 @@ public class MainActivity extends Activity {
         super.onBackPressed();
     }
 
-    private final Shizuku.OnRequestPermissionResultListener RL = (requestCode, grantResult) -> check();
+    private final Shizuku.OnRequestPermissionResultListener RL = (requestCode, grantResult) -> {
+        ShellUtil.reset();
+        check();
+    };
 
     //检查Shizuku权限，申请Shizuku权限的函数
     private void check() {
@@ -342,11 +367,26 @@ public class MainActivity extends Activity {
         menu.findItem(R.id.boot).setChecked(sp.getBoolean("boot", true));
         menu.findItem(R.id.toast).setChecked(sp.getBoolean("toast", true));
         menu.findItem(R.id.useronly).setChecked(sp.getBoolean("useronly", false));
-        boolean crashFixEnabled = sp.getBoolean("crashfix", true);
+        boolean crashFixEnabled = sp.getBoolean("crashfix", false);
         menu.findItem(R.id.crashfix).setChecked(crashFixEnabled);
         menu.findItem(R.id.fixmode).setChecked(sp.getBoolean("fixmode", true));
         menu.findItem(R.id.fixmode).setEnabled(crashFixEnabled);
         menu.findItem(R.id.hide).setChecked(sp.getBoolean("hide", true));
+        menu.findItem(R.id.delay_daemon).setChecked(sp.getBoolean("delay_daemon", false));
+
+        MenuItem permItem = menu.findItem(R.id.perm_status);
+        if (permItem != null && permItem.getActionView() != null) {
+            TextView tv = (TextView) permItem.getActionView();
+            int state = ShellUtil.getPermissionState();
+            if (state == ShellUtil.PERM_ROOT) {
+                tv.setText("root");
+            } else if (state == ShellUtil.PERM_SHIZUKU) {
+                tv.setText("shizuku");
+            } else {
+                tv.setText("");
+            }
+        }
+
         return super.onPrepareOptionsMenu(menu);
     }
 
@@ -377,12 +417,32 @@ public class MainActivity extends Activity {
                 }
             });
         } else if (itemId == R.id.crashfix) {
-            sp.edit().putBoolean("crashfix", !menuItem.isChecked()).apply();
-            menuItem.setChecked(!menuItem.isChecked());
+            boolean newState = !menuItem.isChecked();
+            if (newState) {
+                ShellUtil.reset();
+                ShellUtil.getPermissionState();
+                if (!ShellUtil.hasAnyPermission()) {
+                    menuItem.setChecked(false);
+                    new AlertDialog.Builder(this)
+                            .setTitle("权限不足")
+                            .setMessage("崩溃修复功能需要root或Shizuku权限，当前未检测到任何权限。\n\n请获取root权限或安装Shizuku并授权后重试。")
+                            .setPositiveButton("确定", null)
+                            .create().show();
+                    invalidateOptionsMenu();
+                    return true;
+                }
+            }
+            sp.edit().putBoolean("crashfix", newState).putBoolean("crashfix_auto_disabled", false).apply();
+            menuItem.setChecked(newState);
             invalidateOptionsMenu();
         } else if (itemId == R.id.fixmode) {
             sp.edit().putBoolean("fixmode", !menuItem.isChecked()).apply();
             menuItem.setChecked(!menuItem.isChecked());
+        } else if (itemId == R.id.delay_daemon) {
+            sp.edit().putBoolean("delay_daemon", !menuItem.isChecked()).apply();
+            menuItem.setChecked(!menuItem.isChecked());
+        } else if (itemId == R.id.notify_custom) {
+            showNotifyCustomDialog();
         } else if (itemId == R.id.viewlog) {
             String logContent = LogUtil.readTodayLog(this);
             if (logContent.length() == 0) logContent = "今日暂无日志记录";
@@ -418,6 +478,7 @@ public class MainActivity extends Activity {
             textView.setTextSize(12f);
             textView.setText(ssb);
             scrollView.addView(textView);
+            scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
             new AlertDialog.Builder(this)
                     .setTitle("今日运行日志")
                     .setView(scrollView)
@@ -706,6 +767,56 @@ public class MainActivity extends Activity {
         }
 
 
+    }
+
+    private void showNotifyCustomDialog() {
+        String currentTitle = sp.getString("notify_title", "海绵宝宝，猜猜我有几颗糖");
+        String currentText = sp.getString("notify_text", "猜对了两颗都给你！");
+
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(40, 20, 40, 20);
+
+        final EditText titleInput = new EditText(this);
+        titleInput.setHint("通知标题");
+        titleInput.setText(currentTitle);
+        titleInput.setSingleLine();
+        layout.addView(titleInput);
+
+        final EditText textInput = new EditText(this);
+        textInput.setHint("通知内容");
+        textInput.setText(currentText);
+        textInput.setSingleLine();
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.topMargin = 20;
+        textInput.setLayoutParams(params);
+        layout.addView(textInput);
+
+        new AlertDialog.Builder(this)
+                .setTitle("自定义通知栏文字")
+                .setView(layout)
+                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        String newTitle = titleInput.getText().toString().trim();
+                        String newText = textInput.getText().toString().trim();
+                        if (newTitle.isEmpty()) newTitle = "海绵宝宝，猜猜我有几颗糖";
+                        if (newText.isEmpty()) newText = "猜对了两颗都给你！";
+                        sp.edit().putString("notify_title", newTitle).apply();
+                        sp.edit().putString("notify_text", newText).apply();
+                        Toast.makeText(MainActivity.this, "已保存，保活服务重启后生效", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("恢复默认", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        sp.edit().putString("notify_title", "海绵宝宝，猜猜我有几颗糖").apply();
+                        sp.edit().putString("notify_text", "猜对了两颗都给你！").apply();
+                        Toast.makeText(MainActivity.this, "已恢复默认，保活服务重启后生效", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .create().show();
     }
 
     //查看APP是否可以写入安全设置
