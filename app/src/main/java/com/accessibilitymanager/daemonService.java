@@ -86,12 +86,8 @@ public class daemonService extends Service {
             if (settingChanged) {
                 doDaemon(s);
             }
-            if (!mIsFixing) {
-                if (settingChanged) {
-                    mHandler.postDelayed(() -> checkCrashedServices("设置变化"), 1000);
-                } else {
-                    checkCrashedServices("设置变化");
-                }
+            if (!mIsFixing && settingChanged) {
+                mHandler.postDelayed(() -> checkCrashedServices("设置变化"), 1000);
             }
         }
     }
@@ -143,7 +139,7 @@ public class daemonService extends Service {
             Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
             final String text = add1.toString();
             mHandler.post(() -> {
-                notification.setContentText(text + new SimpleDateFormat("时间：H:mm ss秒", Locale.getDefault()).format(Calendar.getInstance().getTime())).setContentTitle("已保活以下无障碍服务：");
+                notification.setContentText(text + new SimpleDateFormat("时间：H:mm:ss秒", Locale.getDefault()).format(Calendar.getInstance().getTime())).setContentTitle("已保活以下无障碍服务：");
                 systemService.notify(1, notification.build());
             });
             LogUtil.log(daemonService.this, "[保活] 已重新开启被关闭的服务：" + add1.toString().replace("\n", " "));
@@ -328,7 +324,7 @@ public class daemonService extends Service {
 
         mHandler.post(() -> {
             notification.setContentText("已重启崩溃服务：" + packageLabel + "\n"
-                            + new SimpleDateFormat("时间：H:mm ss秒", Locale.getDefault()).format(Calendar.getInstance().getTime()))
+                            + new SimpleDateFormat("时间：H:mm:ss秒", Locale.getDefault()).format(Calendar.getInstance().getTime()))
                     .setContentTitle("无障碍保活");
             systemService.notify(1, notification.build());
         });
