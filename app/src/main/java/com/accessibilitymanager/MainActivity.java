@@ -835,6 +835,14 @@ public class MainActivity extends Activity {
         return !perm;
     }
 
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == 0 && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            StartForeGroundDaemon();
+        }
+    }
+
     //启动前台服务，进行保活!
     void StartForeGroundDaemon() {
 

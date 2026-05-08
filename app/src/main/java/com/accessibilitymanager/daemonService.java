@@ -114,8 +114,20 @@ public class daemonService extends Service {
         String[] serviceNames = Pattern.compile(":").split(list);
         StringBuilder add = new StringBuilder();
         StringBuilder add1 = new StringBuilder();
+
+        List<String> installedServices = new ArrayList<>();
+        try {
+            List<AccessibilityServiceInfo> installedList = ((AccessibilityManager) getApplicationContext()
+                    .getSystemService(Context.ACCESSIBILITY_SERVICE)).getInstalledAccessibilityServiceList();
+            for (AccessibilityServiceInfo info : installedList) {
+                installedServices.add(info.getId());
+            }
+        } catch (Exception ignored) {
+            installedServices = l;
+        }
+
         for (String serviceName : serviceNames) {
-            if (serviceName == null || serviceName.equals("null") || serviceName.length() == 0 || !l.contains(serviceName))
+            if (serviceName == null || serviceName.equals("null") || serviceName.length() == 0 || !installedServices.contains(serviceName))
                 continue;
             String[] parts = Pattern.compile("/").split(serviceName);
             if (parts.length >= 2 && (s.contains(parts[0] + "/" + parts[1]) || s.contains(parts[0] + "/" + parts[0] + parts[1])))
@@ -429,7 +441,12 @@ public class daemonService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        return super.onStartCommand(intent, flags, startId);
+        if (intent != null) {
+            String currentSetting = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (currentSetting == null) currentSetting = "";
+            doDaemon(currentSetting);
+        }
+        return START_STICKY;
     }
 
 }
