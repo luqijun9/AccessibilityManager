@@ -5,3 +5,4 @@ app/build/
 local.properties
 *.iml
 app/release
+/.vscode/settings.json
