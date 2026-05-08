@@ -19,8 +19,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:maxLines="2"
-            android:text="未忽略电池优化，后台可能被清理\n请在耗电管理中允许后台运行"
+            android:text="未忽略电池优化，后台可能被系统清理\n请加锁并在耗电管理中允许后台运行"
             android:textSize="14sp" />
 
         <TextView

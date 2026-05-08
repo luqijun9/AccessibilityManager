@@ -350,36 +350,9 @@ public class MainActivity extends Activity {
     }
 
     private void openBatteryOptimizationSettings() {
-        String pkg = getPackageName();
-        // 尝试 ColorOS 耗电管理页面
-        try {
-            Intent intent = new Intent("com.coloros.safecenter.action.OPTIMIZE_APP_POWER_MANAGEMENT");
-            intent.putExtra("pkgName", pkg);
-            intent.setPackage("com.coloros.safecenter");
-            startActivity(intent);
-            return;
-        } catch (Exception ignored) {}
-        // 尝试 ColorOS 旧版本
-        try {
-            Intent intent = new Intent();
-            intent.setClassName("com.coloros.safecenter", "com.coloros.safecenter.powermanager.PowerManagerActivity");
-            intent.putExtra("pkgName", pkg);
-            startActivity(intent);
-            return;
-        } catch (Exception ignored) {}
-        // 回退：打开应用详细信息页（所有系统都支持，里面有耗电管理入口）
-        try {
-            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-            intent.setData(Uri.parse("package:" + pkg));
-            startActivity(intent);
-        } catch (Exception ignored) {
-            // 最终回退：标准 Android 电池优化弹窗
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                try {
-                    startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + pkg)));
-                } catch (Exception ignored2) {}
-            }
-        }
+        Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+        intent.setData(Uri.parse("package:" + getPackageName()));
+        startActivity(intent);
     }
 
     private final Shizuku.OnRequestPermissionResultListener RL = (requestCode, grantResult) -> {
