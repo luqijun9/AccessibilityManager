@@ -73,6 +73,10 @@ public class MainActivity extends Activity {
     PackageManager pm;
     boolean perm = false;
     private boolean listenerAdded = false;
+    LinearLayout batteryWarning;
+    TextView batteryWarningText;
+    TextView batteryWarningGo;
+    TextView batteryWarningDismiss;
 
     //自定义一个内容监视器
     class SettingsValueChangeContentObserver extends ContentObserver {
@@ -157,6 +161,17 @@ public class MainActivity extends Activity {
 
         listView = findViewById(R.id.list);
 
+        batteryWarning = findViewById(R.id.battery_warning);
+        batteryWarningText = findViewById(R.id.battery_warning_text);
+        batteryWarningGo = findViewById(R.id.battery_warning_go);
+        batteryWarningDismiss = findViewById(R.id.battery_warning_dismiss);
+
+        batteryWarningGo.setOnClickListener(v -> openBatteryOptimizationSettings());
+
+        batteryWarningDismiss.setOnClickListener(v -> {
+            sp.edit().putBoolean("battery_warning_dismissed", true).apply();
+            batteryWarning.setVisibility(View.GONE);
+        });
 
         //获得当前开启的无障碍服务列表
         settingValue = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
@@ -251,6 +266,8 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {
             }
         }
+
+        checkBatteryOptimization();
     }
 
     private void Sort() {
@@ -307,6 +324,62 @@ public class MainActivity extends Activity {
     public void onBackPressed() {
         finish();
         super.onBackPressed();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        checkBatteryOptimization();
+    }
+
+    private void checkBatteryOptimization() {
+        if (sp.getBoolean("battery_warning_dismissed", false)) {
+            batteryWarning.setVisibility(View.GONE);
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (powerManager != null && powerManager.isIgnoringBatteryOptimizations(getPackageName())) {
+                batteryWarning.setVisibility(View.GONE);
+            } else {
+                batteryWarning.setVisibility(View.VISIBLE);
+            }
+        } else {
+            batteryWarning.setVisibility(View.GONE);
+        }
+    }
+
+    private void openBatteryOptimizationSettings() {
+        String pkg = getPackageName();
+        // 尝试 ColorOS 耗电管理页面
+        try {
+            Intent intent = new Intent("com.coloros.safecenter.action.OPTIMIZE_APP_POWER_MANAGEMENT");
+            intent.putExtra("pkgName", pkg);
+            intent.setPackage("com.coloros.safecenter");
+            startActivity(intent);
+            return;
+        } catch (Exception ignored) {}
+        // 尝试 ColorOS 旧版本
+        try {
+            Intent intent = new Intent();
+            intent.setClassName("com.coloros.safecenter", "com.coloros.safecenter.powermanager.PowerManagerActivity");
+            intent.putExtra("pkgName", pkg);
+            startActivity(intent);
+            return;
+        } catch (Exception ignored) {}
+        // 回退：打开应用详细信息页（所有系统都支持，里面有耗电管理入口）
+        try {
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            intent.setData(Uri.parse("package:" + pkg));
+            startActivity(intent);
+        } catch (Exception ignored) {
+            // 最终回退：标准 Android 电池优化弹窗
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                try {
+                    startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + pkg)));
+                } catch (Exception ignored2) {}
+            }
+        }
     }
 
     private final Shizuku.OnRequestPermissionResultListener RL = (requestCode, grantResult) -> {
@@ -852,10 +925,6 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "请授予通知权限", Toast.LENGTH_SHORT).show();
             return;
         }
-
-        //申请取消电池优化
-        if (Build.VERSION.SDK_INT >= 23 && !((PowerManager) getSystemService(Service.POWER_SERVICE)).isIgnoringBatteryOptimizations(getPackageName()))
-            startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName())));
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             startForegroundService(new Intent(this, daemonService.class));
