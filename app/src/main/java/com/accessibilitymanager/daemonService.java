@@ -114,21 +114,16 @@ public class daemonService extends Service {
         String[] serviceNames = Pattern.compile(":").split(list);
         StringBuilder add = new StringBuilder();
         StringBuilder add1 = new StringBuilder();
-
-        List<String> installedServices = new ArrayList<>();
-        try {
-            List<AccessibilityServiceInfo> installedList = ((AccessibilityManager) getApplicationContext()
-                    .getSystemService(Context.ACCESSIBILITY_SERVICE)).getInstalledAccessibilityServiceList();
-            for (AccessibilityServiceInfo info : installedList) {
-                installedServices.add(info.getId());
-            }
-        } catch (Exception ignored) {
-            installedServices = l;
-        }
-
+        StringBuilder cleanedDaemon = null;
         for (String serviceName : serviceNames) {
-            if (serviceName == null || serviceName.equals("null") || serviceName.length() == 0 || !installedServices.contains(serviceName))
+            if (serviceName == null || serviceName.equals("null") || serviceName.length() == 0)
                 continue;
+            if (!l.contains(serviceName)) {
+                if (cleanedDaemon == null) cleanedDaemon = new StringBuilder();
+                else cleanedDaemon.append(":");
+                cleanedDaemon.append(serviceName);
+                continue;
+            }
             String[] parts = Pattern.compile("/").split(serviceName);
             if (parts.length >= 2 && (s.contains(parts[0] + "/" + parts[1]) || s.contains(parts[0] + "/" + parts[0] + parts[1])))
                 continue;
@@ -145,6 +140,14 @@ public class daemonService extends Service {
             add1.append(packageLabel).append("\n");
             if (sp.getBoolean("toast", true))
                 mHandler.post(() -> Toast.makeText(daemonService.this, "保活" + packageLabel, Toast.LENGTH_SHORT).show());
+        }
+        if (cleanedDaemon != null) {
+            String cleanedList = list;
+            for (String stale : cleanedDaemon.toString().split(":")) {
+                cleanedList = cleanedList.replace(stale + ":", "").replace(":" + stale, "").replace(stale, "");
+            }
+            cleanedList = cleanedList.replace("::", ":").replaceAll("^:|:$", "");
+            sp.edit().putString("daemon", cleanedList).apply();
         }
         if (add.length() > 0) {
             tmpSettingValue = add + s;
@@ -383,11 +386,7 @@ public class daemonService extends Service {
         }
         packageManager = getPackageManager();
         Toast.makeText(daemonService.this, "启动保活", Toast.LENGTH_SHORT).show();
-        List<AccessibilityServiceInfo> list = ((AccessibilityManager) getApplicationContext().getSystemService(Context.ACCESSIBILITY_SERVICE)).getInstalledAccessibilityServiceList();
-        l = new ArrayList<>();
-        for (int i = 0; i < list.size(); i++) {
-            l.add(list.get(i).getId());
-        }
+        refreshInstalledServiceList();
         //注册监视器，读取当前设置项并存到tmpsettingValue
         mContentOb = new SettingsValueChangeContentObserver();
         getContentResolver().registerContentObserver(Settings.Secure.getUriFor(Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES), true, mContentOb);
@@ -442,11 +441,24 @@ public class daemonService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null) {
+            refreshInstalledServiceList();
             String currentSetting = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             if (currentSetting == null) currentSetting = "";
             doDaemon(currentSetting);
         }
         return START_STICKY;
+    }
+
+    private void refreshInstalledServiceList() {
+        l = new ArrayList<>();
+        try {
+            List<AccessibilityServiceInfo> list = ((AccessibilityManager) getApplicationContext()
+                    .getSystemService(Context.ACCESSIBILITY_SERVICE)).getInstalledAccessibilityServiceList();
+            for (AccessibilityServiceInfo info : list) {
+                l.add(info.getId());
+            }
+        } catch (Exception ignored) {
+        }
     }
 
 }
