@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # 必须，以便获取所有 tag 和历史
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -30,10 +30,22 @@ jobs:
       - name: Decode Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PATH: ${{ runner.temp }}/release.keystore   # 临时路径
+          KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
         run: |
           echo "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
           echo "KEYSTORE_PATH=$KEYSTORE_PATH" >> $GITHUB_ENV
+
+      # ---------- 新增：验证 keystore 存在 ----------
+      - name: Verify keystore file
+        run: |
+          if [ -f "$KEYSTORE_PATH" ]; then
+            echo "✅ Keystore file exists at $KEYSTORE_PATH"
+            # 可选：打印 keystore 的摘要（不泄露内容）
+            sha256sum "$KEYSTORE_PATH" | cut -d' ' -f1
+          else
+            echo "❌ Keystore file NOT found!"
+            exit 1
+          fi
 
       - name: Set signing environment variables
         run: |
@@ -41,7 +53,16 @@ jobs:
           echo "KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> $GITHUB_ENV
           echo "KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> $GITHUB_ENV
 
-      # ---------- 你的原有构建步骤 ----------
+      # ---------- 新增：检查签名环境变量是否设置 ----------
+      - name: Check signing env vars
+        run: |
+          echo "KEYSTORE_PASSWORD is set: ${{ secrets.KEYSTORE_PASSWORD != '' }}"
+          echo "KEY_ALIAS is set: ${{ secrets.KEY_ALIAS != '' }}"
+          echo "KEY_PASSWORD is set: ${{ secrets.KEY_PASSWORD != '' }}"
+          # 确认路径环境变量存在
+          echo "KEYSTORE_PATH=$KEYSTORE_PATH"
+
+      # ---------- 原有构建步骤 ----------
       - name: Get version
         id: get_version
         run: |
@@ -62,19 +83,48 @@ jobs:
         if: steps.check_tag.outputs.exists == 'false'
         run: ./gradlew assembleRelease
 
+      # ---------- 新增：验证 APK 签名 ----------
+      - name: Verify APK signature
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            echo "❌ No APK found to verify!"
+            exit 1
+          fi
+          echo "Verifying $APK_PATH"
+          
+          # 使用 jarsigner 验证签名并输出证书信息
+          echo "=== Signature verification output ==="
+          jarsigner -verify -verbose -certs "$APK_PATH" 2>&1 | tee signature_output.txt
+          
+          # 提取签名证书的 SHA-256 指纹（用于确认是否是你的 keystore）
+          CERT_FINGERPRINT=$(jarsigner -verify -verbose -certs "$APK_PATH" 2>&1 | grep -A2 "X.509" | grep "SHA-256" | head -1 | awk '{print $2}')
+          if [ -n "$CERT_FINGERPRINT" ]; then
+            echo "📱 Certificate SHA-256 fingerprint: $CERT_FINGERPRINT"
+            echo "✅ Verify this fingerprint matches your local keystore's fingerprint."
+          else
+            echo "⚠️ Could not extract fingerprint, but verification above should indicate success."
+          fi
+          
+          # 确保签名有效
+          if jarsigner -verify "$APK_PATH" >/dev/null 2>&1; then
+            echo "✅ APK signature is VALID"
+          else
+            echo "❌ APK signature is INVALID"
+            exit 1
+          fi
+
       - name: Generate changelog
         id: changelog
         if: steps.check_tag.outputs.exists == 'false'
         run: |
-          # 获取上一个 tag（如果存在）
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
           if [ -z "$PREV_TAG" ]; then
-            # 首次发布：显示所有提交
             CHANGELOG=$(git log --pretty="• %s")
           else
             CHANGELOG=$(git log --pretty="• %s" "$PREV_TAG..HEAD")
           fi
-          # 将多行内容写入输出，便于后续使用
           echo "log<<EOF" >> $GITHUB_OUTPUT
           echo "$CHANGELOG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
