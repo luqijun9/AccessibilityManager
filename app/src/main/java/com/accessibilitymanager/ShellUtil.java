@@ -7,6 +7,7 @@ import java.io.BufferedReader;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.util.concurrent.TimeUnit;
 
 import rikka.shizuku.Shizuku;
 
@@ -71,7 +72,11 @@ public class ShellUtil {
             }
             errReader.close();
 
-            p.waitFor();
+            boolean finished = p.waitFor(3, TimeUnit.SECONDS);
+            if (!finished) {
+                p.destroyForcibly();
+                return false;
+            }
             return output.toString().contains("root_ok");
         } catch (Exception e) {
             return false;
@@ -101,51 +106,5 @@ public class ShellUtil {
             }
         }
         throw new IOException("No root or shizuku permission");
-    }
-
-    public static boolean pingShell() {
-        try {
-            Process p = exec();
-            DataOutputStream os = new DataOutputStream(p.getOutputStream());
-            os.writeBytes("echo shell_alive\nexit\n");
-            os.flush();
-            os.close();
-
-            BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
-            StringBuilder output = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                output.append(line);
-            }
-            reader.close();
-
-            BufferedReader errReader = new BufferedReader(new InputStreamReader(p.getErrorStream()));
-            while (errReader.readLine() != null) {
-            }
-            errReader.close();
-
-            final Process waitP = p;
-            Thread wt = new Thread(() -> {
-                try { waitP.waitFor(); } catch (InterruptedException ignored) {}
-            });
-            wt.start();
-            wt.join(10000);
-            if (wt.isAlive()) {
-                waitP.destroy();
-                return false;
-            }
-            return output.toString().contains("shell_alive");
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    public static Process execWithRetry() throws IOException {
-        try {
-            return exec();
-        } catch (IOException e) {
-            reset();
-            return exec();
-        }
     }
 }
