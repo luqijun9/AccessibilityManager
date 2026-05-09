@@ -191,10 +191,25 @@ public class daemonService extends Service {
         mIsCheckingCrashed = true;
         new Thread(() -> {
             try {
+                if (!ShellUtil.pingShell()) {
+                    LogUtil.log(daemonService.this, "[崩溃检测] Shell不可用(深度睡眠恢复中)，尝试重置权限状态重试...");
+                    ShellUtil.reset();
+                    try {
+                        Thread.sleep(500);
+                    } catch (InterruptedException ignored) {
+                    }
+                    if (!ShellUtil.pingShell()) {
+                        LogUtil.log(daemonService.this, "[崩溃检测] Shell仍不可用，放弃本次检测");
+                        mIsCheckingCrashed = false;
+                        return;
+                    }
+                    LogUtil.log(daemonService.this, "[崩溃检测] Shell已恢复可用");
+                }
                 Process p;
                 try {
-                    p = ShellUtil.exec();
+                    p = ShellUtil.execWithRetry();
                 } catch (Exception e) {
+                    LogUtil.log(daemonService.this, "[崩溃检测] 获取Shell进程失败：" + e.getMessage());
                     mIsCheckingCrashed = false;
                     return;
                 }
@@ -211,9 +226,32 @@ public class daemonService extends Service {
                     allOutput.append(line).append("\n");
                 }
                 reader.close();
-                p.waitFor();
+
+                final Process waitProcess = p;
+                Thread waitThread = new Thread(() -> {
+                    try {
+                        waitProcess.waitFor();
+                    } catch (InterruptedException ignored) {
+                    }
+                });
+                waitThread.start();
+                waitThread.join(15000);
+                if (waitThread.isAlive()) {
+                    LogUtil.log(daemonService.this, "[崩溃检测] dumpsys执行超时(>15s)，强制结束进程");
+                    waitProcess.destroy();
+                    waitThread.interrupt();
+                    mIsCheckingCrashed = false;
+                    ShellUtil.reset();
+                    return;
+                }
 
                 String fullOutput = allOutput.toString();
+                if (fullOutput.trim().length() == 0) {
+                    LogUtil.log(daemonService.this, "[崩溃检测] dumpsys返回空内容，Shell可能异常，重置状态");
+                    ShellUtil.reset();
+                    mIsCheckingCrashed = false;
+                    return;
+                }
                 Matcher matcher = Pattern.compile("\\{\\{([^}]+)\\}\\}").matcher(fullOutput);
                 List<String> crashedServicesList = new ArrayList<>();
                 while (matcher.find()) {
@@ -272,6 +310,7 @@ public class daemonService extends Service {
                 }
                 mIsCheckingCrashed = false;
             } catch (Exception e) {
+                LogUtil.log(daemonService.this, "[崩溃检测] 异常：" + e.getMessage());
                 mIsCheckingCrashed = false;
             }
         }).start();
@@ -309,14 +348,25 @@ public class daemonService extends Service {
         if (useForceStop) {
             LogUtil.log(daemonService.this, logPrefix + " 强杀进程：" + serviceName + " ← force-stop " + pkgName);
             try {
-                Process forceStop = ShellUtil.exec();
+                Process forceStop = ShellUtil.execWithRetry();
                 DataOutputStream fos = new DataOutputStream(forceStop.getOutputStream());
                 fos.writeBytes("am force-stop " + pkgName + "\n");
                 fos.writeBytes("exit\n");
                 fos.flush();
                 fos.close();
-                forceStop.waitFor();
-            } catch (Exception ignored) {
+
+                final Process waitP = forceStop;
+                Thread wt = new Thread(() -> {
+                    try { waitP.waitFor(); } catch (InterruptedException ignored) {}
+                });
+                wt.start();
+                wt.join(10000);
+                if (wt.isAlive()) {
+                    LogUtil.log(daemonService.this, logPrefix + " force-stop执行超时");
+                    waitP.destroy();
+                }
+            } catch (Exception e) {
+                LogUtil.log(daemonService.this, logPrefix + " force-stop失败：" + e.getMessage());
             }
             try {
                 Thread.sleep(500);
@@ -445,6 +495,8 @@ public class daemonService extends Service {
             String currentSetting = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             if (currentSetting == null) currentSetting = "";
             doDaemon(currentSetting);
+            ShellUtil.reset();
+            checkCrashedServices("应用打开");
         }
         return START_STICKY;
     }
