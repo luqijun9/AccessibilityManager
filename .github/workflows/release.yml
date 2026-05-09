@@ -1,16 +1,20 @@
-name: Build & Release APK
+name: Android Release
 
 on:
   push:
-    tags:
-      - 'v*'  # 当你推送 v1.0、v2.0 这种标签时自动触发
+    branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -19,21 +23,46 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Grant execute permission for gradlew
+      - name: Grant execute permission
         run: chmod +x gradlew
 
-      - name: Build release APK
+      # 自动获取版本号 14.1
+      - name: Get version
+        id: get_version
+        run: |
+          VER=$(awk -F'"' '/versionName/ {print $2}' app/build.gradle)
+          echo "version=$VER" >> $GITHUB_OUTPUT
+          echo "tag=v$VER" >> $GITHUB_OUTPUT
+
+      # 避免重复创建tag
+      - name: Check tag exists
+        id: check_tag
+        run: |
+          if git rev-parse "${{ steps.get_version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      # 直接打包（你项目 already 可直接打）
+      - name: Build APK
+        if: steps.check_tag.outputs.exists == 'false'
         run: ./gradlew assembleRelease
 
-      - name: Upload APK to Artifacts
-        uses: actions/upload-artifact@v4
+      # 自动发布 → 只显示版本号 v14.1
+      - name: Create Release
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: softprops/gh-release@v2
         with:
-          name: release-apk
-          path: app/build/outputs/apk/release/*.apk
-
-      - name: Create Release and Upload APK
-        uses: softprops/action-gh-release@v2
-        with:
+          name: ${{ steps.get_version.outputs.tag }}  # 只显示 v14.1
+          tag_name: ${{ steps.get_version.outputs.tag }}
           files: app/build/outputs/apk/release/*.apk
+          body: |
+            ### 📦 自动构建
+            • 版本：${{ steps.get_version.outputs.version }}
+            • 构建时间：${{ github.event.head_commit.timestamp }}
+            • 提交：${{ github.event.head_commit.message }}
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
