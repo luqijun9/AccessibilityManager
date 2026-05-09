@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0   # 必须，以便获取所有 tag 和历史
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -36,7 +36,7 @@ jobs:
       - name: Check tag exists
         id: check_tag
         run: |
-          if git rev-parse "${{ steps.get_version.outputs.tag }}" >/dev/null 2>&1; then
+          if git show-ref --tags --quiet "${{ steps.get_version.outputs.tag }}"; then
             echo "exists=true" >> $GITHUB_OUTPUT
           else
             echo "exists=false" >> $GITHUB_OUTPUT
@@ -45,6 +45,23 @@ jobs:
       - name: Build APK
         if: steps.check_tag.outputs.exists == 'false'
         run: ./gradlew assembleRelease
+
+      - name: Generate changelog
+        id: changelog
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          # 获取上一个 tag（如果存在）
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -z "$PREV_TAG" ]; then
+            # 首次发布：显示所有提交
+            CHANGELOG=$(git log --pretty="• %s")
+          else
+            CHANGELOG=$(git log --pretty="• %s" "$PREV_TAG..HEAD")
+          fi
+          # 将多行内容写入输出，便于后续使用
+          echo "log<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create Release
         if: steps.check_tag.outputs.exists == 'false'
@@ -55,7 +72,7 @@ jobs:
           files: app/build/outputs/apk/release/*.apk
           body: |
             ### 📝 更新日志
-            $(git log --pretty="• %s" ${{ steps.get_version.outputs.tag }}...HEAD^)
+            ${{ steps.changelog.outputs.log }}
           draft: false
           prerelease: false
         env:
