@@ -26,7 +26,6 @@ jobs:
       - name: Grant execute permission
         run: chmod +x gradlew
 
-      # 自动获取版本号 14.1
       - name: Get version
         id: get_version
         run: |
@@ -34,7 +33,6 @@ jobs:
           echo "version=$VER" >> $GITHUB_OUTPUT
           echo "tag=v$VER" >> $GITHUB_OUTPUT
 
-      # 避免重复创建tag
       - name: Check tag exists
         id: check_tag
         run: |
@@ -44,17 +42,15 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
-      # 直接打包（你项目 already 可直接打）
       - name: Build APK
         if: steps.check_tag.outputs.exists == 'false'
         run: ./gradlew assembleRelease
 
-      # 自动发布 → 只显示版本号 v14.1
       - name: Create Release
         if: steps.check_tag.outputs.exists == 'false'
-        uses: softprops/gh-release@v2
+        uses: softprops/action-gh-release@v2  # 👈 这里修复了
         with:
-          name: ${{ steps.get_version.outputs.tag }}  # 只显示 v14.1
+          name: ${{ steps.get_version.outputs.tag }}
           tag_name: ${{ steps.get_version.outputs.tag }}
           files: app/build/outputs/apk/release/*.apk
           body: |
