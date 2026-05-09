@@ -26,6 +26,22 @@ jobs:
       - name: Grant execute permission
         run: chmod +x gradlew
 
+      # ---------- 签名文件还原 ----------
+      - name: Decode Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PATH: ${{ runner.temp }}/release.keystore   # 临时路径
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
+          echo "KEYSTORE_PATH=$KEYSTORE_PATH" >> $GITHUB_ENV
+
+      - name: Set signing environment variables
+        run: |
+          echo "KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
+          echo "KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> $GITHUB_ENV
+          echo "KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> $GITHUB_ENV
+
+      # ---------- 你的原有构建步骤 ----------
       - name: Get version
         id: get_version
         run: |
