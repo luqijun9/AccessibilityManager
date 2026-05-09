@@ -48,16 +48,14 @@ jobs:
 
       - name: Create Release
         if: steps.check_tag.outputs.exists == 'false'
-        uses: softprops/action-gh-release@v2  # 👈 这里修复了
+        uses: softprops/action-gh-release@v2
         with:
           name: ${{ steps.get_version.outputs.tag }}
           tag_name: ${{ steps.get_version.outputs.tag }}
           files: app/build/outputs/apk/release/*.apk
           body: |
-            ### 📦 自动构建
-            • 版本：${{ steps.get_version.outputs.version }}
-            • 构建时间：${{ github.event.head_commit.timestamp }}
-            • 提交：${{ github.event.head_commit.message }}
+            ### 📝 更新日志
+            $(git log --pretty="• %s" ${{ steps.get_version.outputs.tag }}...HEAD^)
           draft: false
           prerelease: false
         env:
