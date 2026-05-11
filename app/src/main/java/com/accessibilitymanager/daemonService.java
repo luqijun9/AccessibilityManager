@@ -32,7 +32,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -230,31 +229,27 @@ public class daemonService extends Service {
                     allOutput.append(line).append("\n");
                 }
                 reader.close();
-                boolean finished = p.waitFor(5, TimeUnit.SECONDS);
-                if (!finished) {
-                    p.destroyForcibly();
-                    LogUtil.log(daemonService.this, "[崩溃检测] dumpsys执行超时，强制终止");
-                    mIsCheckingCrashed = false;
-                    return;
-                }
+                p.waitFor();
 
                 String fullOutput = allOutput.toString();
-                Matcher matcher = Pattern.compile("\\{\\{([^}]+)\\}\\}").matcher(fullOutput);
+
+                Matcher rawLineMatcher = Pattern.compile("Crashed services:.*").matcher(fullOutput);
+                String rawCrashedLine;
+                if (rawLineMatcher.find()) {
+                    rawCrashedLine = rawLineMatcher.group().trim();
+                } else {
+                    rawCrashedLine = "Crashed services: (未找到此行)";
+                }
+                LogUtil.log(daemonService.this, "[崩溃检测] dumpsys原文: " + rawCrashedLine);
+
                 List<String> crashedServicesList = new ArrayList<>();
-                while (matcher.find()) {
-                    String svc = matcher.group(1).trim();
+                Matcher serviceMatcher = Pattern.compile("\\{([^{}]+)\\}").matcher(rawCrashedLine);
+                while (serviceMatcher.find()) {
+                    String svc = serviceMatcher.group(1).trim();
                     if (!svc.isEmpty()) {
                         crashedServicesList.add(svc);
                     }
                 }
-
-                StringBuilder originalCrashed = new StringBuilder();
-                Matcher originalMatcher = Pattern.compile("\\{\\{[^}]+\\}\\}").matcher(fullOutput);
-                while (originalMatcher.find()) {
-                    if (originalCrashed.length() > 0) originalCrashed.append("\n");
-                    originalCrashed.append(originalMatcher.group());
-                }
-                LogUtil.log(daemonService.this, "[崩溃检测] dumpsys crashed原文：" + originalCrashed.toString());
 
                 if (crashedServicesList.isEmpty()) {
                     mIsCheckingCrashed = false;
@@ -267,7 +262,7 @@ public class daemonService extends Service {
                     crashedLog.append(cs);
                 }
 
-                LogUtil.log(daemonService.this, "[崩溃检测] dumpsys返回崩溃服务：" + crashedLog.toString());
+                LogUtil.log(daemonService.this, "[崩溃检测] 检测到" + crashedServicesList.size() + "个崩溃服务：" + crashedLog.toString());
 
                 String[] trackedServices = daemonList.split(":");
                 final int retryRemaining = mFixRetryRemaining;
@@ -349,11 +344,7 @@ public class daemonService extends Service {
                 fos.writeBytes("exit\n");
                 fos.flush();
                 fos.close();
-                boolean finished = forceStop.waitFor(5, TimeUnit.SECONDS);
-                if (!finished) {
-                    forceStop.destroyForcibly();
-                    LogUtil.log(daemonService.this, logPrefix + " force-stop执行超时，强制终止");
-                }
+                forceStop.waitFor();
             } catch (Exception ignored) {
             }
             try {

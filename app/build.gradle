@@ -7,10 +7,10 @@ android {
 
     defaultConfig {
         applicationId "com.accessibilitymanager"
-        minSdk 26
+        minSdk 18
         targetSdk 33
         versionCode 17
-        versionName "15"
+        versionName "15.1"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }

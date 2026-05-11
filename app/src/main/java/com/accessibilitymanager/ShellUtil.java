@@ -7,7 +7,6 @@ import java.io.BufferedReader;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.util.concurrent.TimeUnit;
 
 import rikka.shizuku.Shizuku;
 
@@ -72,11 +71,7 @@ public class ShellUtil {
             }
             errReader.close();
 
-            boolean finished = p.waitFor(3, TimeUnit.SECONDS);
-            if (!finished) {
-                p.destroyForcibly();
-                return false;
-            }
+            p.waitFor();
             return output.toString().contains("root_ok");
         } catch (Exception e) {
             return false;
