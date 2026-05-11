@@ -16,14 +16,19 @@ public class StartReceiver extends BroadcastReceiver {
             final PendingResult pendingResult = goAsync();
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 IntentFilter filter = new IntentFilter(Intent.ACTION_USER_UNLOCKED);
-                context.registerReceiver(new BroadcastReceiver() {
+                BroadcastReceiver unlockReceiver = new BroadcastReceiver() {
                     @Override
                     public void onReceive(Context ctx, Intent i) {
                         ctx.unregisterReceiver(this);
                         startIfBootEnabled(ctx);
                         pendingResult.finish();
                     }
-                }, filter);
+                };
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    context.registerReceiver(unlockReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+                } else {
+                    context.registerReceiver(unlockReceiver, filter);
+                }
             } else {
                 startIfBootEnabled(context);
                 pendingResult.finish();

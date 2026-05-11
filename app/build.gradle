@@ -3,14 +3,14 @@ plugins {
 }
 
 android {
-    compileSdk 33
+    compileSdk 34
 
     defaultConfig {
         applicationId "com.accessibilitymanager"
         minSdk 18
-        targetSdk 33
+        targetSdk 34
         versionCode 17
-        versionName "15.1"
+        versionName "15.2"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -422,7 +422,11 @@ public class daemonService extends Service {
         tmpSettingValue = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         if (tmpSettingValue == null) tmpSettingValue = "";
 
-        registerReceiver(myReceiver, new IntentFilter("android.intent.action.USER_PRESENT"));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(myReceiver, new IntentFilter("android.intent.action.USER_PRESENT"), Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(myReceiver, new IntentFilter("android.intent.action.USER_PRESENT"));
+        }
         //发送前台通知
         String notifyTitle = sp.getString("notify_title", "海绵宝宝，猜猜我有几颗糖");
         String notifyText = sp.getString("notify_text", "猜对了两颗都给你！");
@@ -449,7 +453,11 @@ public class daemonService extends Service {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             notification.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
         }
-        startForeground(1, notification.build());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(1, notification.build(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+        } else {
+            startForeground(1, notification.build());
+        }
 
         //先做一次保活
         doDaemon(tmpSettingValue);
