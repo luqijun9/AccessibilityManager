@@ -240,7 +240,7 @@ public class daemonService extends Service {
                 } else {
                     rawCrashedLine = "Crashed services: (未找到此行)";
                 }
-                LogUtil.log(daemonService.this, "[崩溃检测] dumpsys原文: " + rawCrashedLine);
+                LogUtil.log(daemonService.this, "[崩溃检测] 返回 " + rawCrashedLine);
 
                 List<String> crashedServicesList = new ArrayList<>();
                 Matcher serviceMatcher = Pattern.compile("\\{([^{}]+)\\}").matcher(rawCrashedLine);
