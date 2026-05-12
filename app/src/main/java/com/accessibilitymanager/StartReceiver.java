@@ -42,6 +42,8 @@ public class StartReceiver extends BroadcastReceiver {
         SharedPreferences sp = context.getSharedPreferences("data", 0);
         if (!sp.getBoolean("boot", true)) return;
 
+        TimerReceiver.scheduleNext(context);
+
         Intent i = new Intent(context, daemonService.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             context.startForegroundService(i);

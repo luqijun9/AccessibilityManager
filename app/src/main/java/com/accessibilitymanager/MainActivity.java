@@ -413,6 +413,8 @@ public class MainActivity extends Activity {
         menu.findItem(R.id.useronly).setChecked(sp.getBoolean("useronly", false));
         boolean crashFixEnabled = sp.getBoolean("crashfix", false);
         menu.findItem(R.id.crashfix).setChecked(crashFixEnabled);
+        menu.findItem(R.id.periodic_check).setChecked(sp.getBoolean("periodic_check", true));
+        menu.findItem(R.id.periodic_check).setEnabled(crashFixEnabled);
         menu.findItem(R.id.fixmode).setChecked(sp.getBoolean("fixmode", true));
         menu.findItem(R.id.fixmode).setEnabled(crashFixEnabled);
         menu.findItem(R.id.hide).setChecked(sp.getBoolean("hide", true));
@@ -479,6 +481,15 @@ public class MainActivity extends Activity {
             sp.edit().putBoolean("crashfix", newState).putBoolean("crashfix_auto_disabled", false).apply();
             menuItem.setChecked(newState);
             invalidateOptionsMenu();
+        } else if (itemId == R.id.periodic_check) {
+            boolean newState = !menuItem.isChecked();
+            sp.edit().putBoolean("periodic_check", newState).apply();
+            menuItem.setChecked(newState);
+            if (newState) {
+                TimerReceiver.scheduleNext(this);
+            } else {
+                TimerReceiver.cancel(this);
+            }
         } else if (itemId == R.id.fixmode) {
             sp.edit().putBoolean("fixmode", !menuItem.isChecked()).apply();
             menuItem.setChecked(!menuItem.isChecked());
@@ -534,6 +545,8 @@ public class MainActivity extends Activity {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 ((ActivityManager) getSystemService(Service.ACTIVITY_SERVICE)).getAppTasks().get(0).setExcludeFromRecents(sp.getBoolean("hide", true));
             }
+        } else if (itemId == R.id.periodic_interval) {
+            showIntervalDialog();
         }
         return super.onMenuItemSelected(i, menuItem);
     }
@@ -861,6 +874,65 @@ public class MainActivity extends Activity {
                     }
                 })
                 .create().show();
+    }
+
+    private void showIntervalDialog() {
+        int currentInterval = sp.getInt("periodic_check_interval", 10);
+
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.HORIZONTAL);
+        layout.setPadding(40, 20, 40, 20);
+
+        final EditText input = new EditText(this);
+        input.setHint("10");
+        input.setText(String.valueOf(currentInterval));
+        input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        LinearLayout.LayoutParams inputParams = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        input.setLayoutParams(inputParams);
+        layout.addView(input);
+
+        TextView unit = new TextView(this);
+        unit.setText("分钟");
+        unit.setTextSize(16f);
+        if (night) unit.setTextColor(Color.WHITE);
+        LinearLayout.LayoutParams unitParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        unitParams.leftMargin = 16;
+        unit.setLayoutParams(unitParams);
+        layout.addView(unit);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("设置定时检测间隔（非精确时间）")
+                .setView(layout)
+                .setPositiveButton("确定", null)
+                .setNegativeButton("取消", null)
+                .create();
+        dialog.show();
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String inputStr = input.getText().toString().trim();
+                int minutes;
+                try {
+                    minutes = Integer.parseInt(inputStr);
+                } catch (NumberFormatException e) {
+                    Toast.makeText(MainActivity.this, "请输入有效数字", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                if (minutes < 1 || minutes > 1440) {
+                    Toast.makeText(MainActivity.this, "请输入1-1440之间的数字", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                sp.edit().putInt("periodic_check_interval", minutes).apply();
+                TimerReceiver.cancel(MainActivity.this);
+                LogUtil.log(MainActivity.this, "[定时检测] 已取消旧定时");
+                TimerReceiver.scheduleNext(MainActivity.this);
+                LogUtil.log(MainActivity.this, "[定时检测] 已设置新间隔 = " + minutes + " 分钟");
+                Toast.makeText(MainActivity.this, "定时检测间隔已设为 " + minutes + " 分钟", Toast.LENGTH_SHORT).show();
+                dialog.dismiss();
+            }
+        });
     }
 
     //查看APP是否可以写入安全设置

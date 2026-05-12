@@ -467,6 +467,7 @@ public class daemonService extends Service {
         doDaemon(tmpSettingValue);
         //启动时也检查一次崩溃
         checkCrashedServices("服务启动");
+        TimerReceiver.scheduleNext(this);
     }
 
 
@@ -474,6 +475,7 @@ public class daemonService extends Service {
     public void onDestroy() {
         super.onDestroy();
         cancelPostFixCheck();
+        TimerReceiver.cancel(this);
         unregisterReceiver(myReceiver);
         getContentResolver().unregisterContentObserver(mContentOb);
         Toast.makeText(daemonService.this, "停止保活", Toast.LENGTH_SHORT).show();
@@ -485,6 +487,11 @@ public class daemonService extends Service {
         String currentSetting = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         if (currentSetting == null) currentSetting = "";
         doDaemon(currentSetting);
+
+        String alarmSource = intent != null ? intent.getStringExtra("source") : null;
+        if ("Alarm".equals(alarmSource)) {
+            checkCrashedServices("Alarm");
+        }
 
         // 服务首次创建时，onCreate 中已触发过"服务启动"的崩溃检测。
         // 因此紧跟在 onCreate 之后的首次 onStartCommand 不需要再检测，避免重复。
