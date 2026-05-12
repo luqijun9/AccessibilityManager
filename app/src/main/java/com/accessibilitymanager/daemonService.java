@@ -53,6 +53,10 @@ public class daemonService extends Service {
     private volatile long mLastFixStartTime = 0;
     private final Object mFixLock = new Object();
     private final Map<String, Long> mLastFixTime = new ConcurrentHashMap<>();
+    // 标记 onStartCommand 是否是紧跟在 onCreate 之后的首次调用。
+    // 首次启动时 onCreate 已触发崩溃检测，onStartCommand 不应重复触发；
+    // 仅当 App 在服务已运行时再次调用 startService 才触发"服务刷新"检测。
+    private boolean mFirstCommandAfterCreate = true;
 
     final private BroadcastReceiver myReceiver = new BroadcastReceiver() {
         @Override
@@ -423,7 +427,7 @@ public class daemonService extends Service {
         if (tmpSettingValue == null) tmpSettingValue = "";
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(myReceiver, new IntentFilter("android.intent.action.USER_PRESENT"), Context.RECEIVER_NOT_EXPORTED);
+            registerReceiver(myReceiver, new IntentFilter("android.intent.action.USER_PRESENT"), Context.RECEIVER_EXPORTED);
         } else {
             registerReceiver(myReceiver, new IntentFilter("android.intent.action.USER_PRESENT"));
         }
@@ -481,7 +485,15 @@ public class daemonService extends Service {
         String currentSetting = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         if (currentSetting == null) currentSetting = "";
         doDaemon(currentSetting);
-        checkCrashedServices("服务重启");
+
+        // 服务首次创建时，onCreate 中已触发过"服务启动"的崩溃检测。
+        // 因此紧跟在 onCreate 之后的首次 onStartCommand 不需要再检测，避免重复。
+        // 只有当 App 在服务已运行时再次 startService（如打开界面刷新），
+        // 才触发一次"服务刷新"的崩溃检测。
+        if (!mFirstCommandAfterCreate) {
+            checkCrashedServices("服务刷新");
+        }
+        mFirstCommandAfterCreate = false;
         return START_STICKY;
     }
 

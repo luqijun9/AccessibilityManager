@@ -25,7 +25,7 @@ public class StartReceiver extends BroadcastReceiver {
                     }
                 };
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    context.registerReceiver(unlockReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+                    context.registerReceiver(unlockReceiver, filter, Context.RECEIVER_EXPORTED);
                 } else {
                     context.registerReceiver(unlockReceiver, filter);
                 }

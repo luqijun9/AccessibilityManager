@@ -219,11 +219,9 @@ public class MainActivity extends Activity {
                     listView.setAdapter(new adapter(tmp));
                 }
             });
-            for (int i = 0; i < l.size(); i++) {
-                AccessibilityServiceInfo info = l.get(i);
-                if (daemon.contains(info.getId())) {
-                    StartForeGroundDaemon();
-                }
+            // 只要有任意一个加锁服务，启动一次保活服务即可，不需要为每个加锁服务重复启动
+            if (!daemon.isEmpty()) {
+                StartForeGroundDaemon();
             }
 
         } else {
