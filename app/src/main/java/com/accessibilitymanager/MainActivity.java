@@ -98,8 +98,7 @@ public class MainActivity extends Activity {
                         int lastPosition = listView.getLastVisiblePosition();
                         for (int i = firstPosition; i <= lastPosition; i++) {
                             View view = listView.getChildAt(i - firstPosition);
-                            String[] packageName = Pattern.compile("/").split(tmp.get(i).getId());
-                            boolean isChecked = settingValue.contains(packageName[0] + "/" + packageName[1]) || settingValue.contains(packageName[0] + "/" + packageName[0] + packageName[1]);
+                            boolean isChecked = isServiceEnabled(tmp.get(i).getId(), settingValue);
                             (view.findViewById(R.id.ib)).setVisibility(isChecked ? View.VISIBLE : View.INVISIBLE);
                             ((Switch) view.findViewById(R.id.s)).setChecked(isChecked);
                         }
@@ -281,8 +280,8 @@ public class MainActivity extends Activity {
             public int compare(AccessibilityServiceInfo info1, AccessibilityServiceInfo info2) {
                 String id1 = info1.getId();
                 String id2 = info2.getId();
-                boolean top1 = top.contains(id1);
-                boolean top2 = top.contains(id2);
+                boolean top1 = containsService(top, id1);
+                boolean top2 = containsService(top, id2);
                 if (top1 && !top2) return -1;
                 if (!top1 && top2) return 1;
                 if (top1 && top2) {
@@ -310,10 +309,32 @@ public class MainActivity extends Activity {
 
     private boolean isServiceEnabled(String serviceId, String settingValue) {
         if (settingValue == null) return false;
-        String[] parts = Pattern.compile("/").split(serviceId);
-        if (parts.length < 2) return false;
-        return settingValue.contains(parts[0] + "/" + parts[1])
-                || settingValue.contains(parts[0] + "/" + parts[0] + parts[1]);
+        ComponentName target = ComponentName.unflattenFromString(serviceId);
+        if (target == null) return false;
+        for (String entry : settingValue.split(":")) {
+            if (entry.isEmpty()) continue;
+            ComponentName entryCn = ComponentName.unflattenFromString(entry);
+            if (target.equals(entryCn)) return true;
+        }
+        return false;
+    }
+
+
+    private boolean containsService(String list, String serviceId) {
+        if (list == null || list.isEmpty()) return false;
+        ComponentName target = ComponentName.unflattenFromString(serviceId);
+        if (target == null) return false;
+        for (String entry : list.split(":")) {
+            if (entry.isEmpty()) continue;
+            ComponentName entryCn = ComponentName.unflattenFromString(entry);
+            if (target.equals(entryCn)) return true;
+        }
+        return false;
+    }
+
+    private String normalizeServiceId(String serviceId) {
+        ComponentName cn = ComponentName.unflattenFromString(serviceId);
+        return cn != null ? cn.flattenToString() : serviceId;
     }
 
 
@@ -586,7 +607,9 @@ public class MainActivity extends Activity {
             holder.ib = convertView.findViewById(R.id.ib);
             convertView.setTag(holder);
             AccessibilityServiceInfo info = list.get(position);
-            String serviceName = info.getId();
+            String rawServiceName = info.getId();
+            String serviceName = normalizeServiceId(rawServiceName);
+            ComponentName serviceComponent = ComponentName.unflattenFromString(serviceName);
             String[] packageName = Pattern.compile("/").split(serviceName);
             Drawable icon = null;
             String Packagelabel = null;
@@ -595,7 +618,7 @@ public class MainActivity extends Activity {
             try {
                 icon = pm.getApplicationIcon(packageName[0]);
                 Packagelabel = String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(packageName[0], PackageManager.GET_META_DATA)));
-                ServiceLabel = pm.getServiceInfo(new ComponentName(packageName[0], packageName[0] + packageName[1]), PackageManager.MATCH_DEFAULT_ONLY).loadLabel(pm).toString();
+                ServiceLabel = pm.getServiceInfo(new ComponentName(packageName[0], packageName[1]), PackageManager.MATCH_DEFAULT_ONLY).loadLabel(pm).toString();
                 Description = info.loadDescription(pm);
             } catch (PackageManager.NameNotFoundException ignored) {
             }
@@ -605,8 +628,8 @@ public class MainActivity extends Activity {
             holder.texta.setText(Description == null || Description.length() == 0 ? "该服务没有描述" : Description);
 
 
-            holder.ib.setImageResource(daemon.contains(serviceName) ? R.drawable.lock1 : R.drawable.lock);
-//            holder.sw.setEnabled(!daemon.contains(serviceName));
+            holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
+//            holder.sw.setEnabled(!containsService(daemon, serviceName));
             holder.ib.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View view) {
@@ -614,14 +637,26 @@ public class MainActivity extends Activity {
                         createPermissionDialog();
                         return;
                     }
-                    daemon = daemon.contains(serviceName) ? daemon.replace(serviceName + ":", "") : serviceName + ":" + daemon;
+                    if (containsService(daemon, serviceName)) {
+                        String[] entries = daemon.split(":");
+                        StringBuilder newList = new StringBuilder();
+                        for (String entry : entries) {
+                            if (entry.isEmpty()) continue;
+                            if (serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
+                            if (newList.length() > 0) newList.append(":");
+                            newList.append(entry);
+                        }
+                        daemon = newList.toString();
+                    } else {
+                        daemon = serviceName + ":" + daemon;
+                    }
                     sp.edit().putString("daemon", daemon).apply();
-                    holder.ib.setImageResource(daemon.contains(serviceName) ? R.drawable.lock1 : R.drawable.lock);
-//                    holder.sw.setEnabled(!daemon.contains(serviceName));
+                    holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
+//                    holder.sw.setEnabled(!containsService(daemon, serviceName));
                     StartForeGroundDaemon();
                 }
             });
-            holder.sw.setChecked(settingValue.contains(packageName[0] + "/" + packageName[1]) || settingValue.contains(packageName[0] + "/" + packageName[0] + packageName[1]));
+            holder.sw.setChecked(isServiceEnabled(serviceName, settingValue));
             holder.ib.setVisibility(holder.sw.isChecked() ? View.VISIBLE : View.INVISIBLE);
             holder.sw.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -634,10 +669,23 @@ public class MainActivity extends Activity {
                         String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
                         if (s == null) s = "";
 
-                        if (holder.sw.isChecked())
-                            tmpSettingValue = serviceName + ":" + s;
-                        else
-                            tmpSettingValue = s.replace(serviceName + ":", "").replace(packageName[0] + "/" + packageName[0] + packageName[1] + ":", "").replace(serviceName, "").replace(packageName[0] + "/" + packageName[0] + packageName[1], "").replace(serviceName, "");
+                        if (holder.sw.isChecked()) {
+                            if (!isServiceEnabled(serviceName, s)) {
+                                tmpSettingValue = serviceName + ":" + s;
+                            } else {
+                                tmpSettingValue = s;
+                            }
+                        } else {
+                            StringBuilder sb = new StringBuilder();
+                            for (String entry : s.split(":")) {
+                                if (entry.isEmpty()) continue;
+                                ComponentName entryCn = ComponentName.unflattenFromString(entry);
+                                if (serviceComponent.equals(entryCn)) continue;
+                                if (sb.length() > 0) sb.append(":");
+                                sb.append(entry);
+                            }
+                            tmpSettingValue = sb.toString();
+                        }
 
                         Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
                         holder.ib.setVisibility(holder.sw.isChecked() ? View.VISIBLE : View.INVISIBLE);
@@ -751,11 +799,19 @@ public class MainActivity extends Activity {
             convertView.setOnLongClickListener(new View.OnLongClickListener() {
                 @Override
                 public boolean onLongClick(View view) {
-                    if (!top.contains(serviceName)) {
+                    if (!containsService(top, serviceName)) {
                         top = serviceName + ":" + top;
                         Toast.makeText(MainActivity.this, "已将" + finalServiceLabel + "置顶", Toast.LENGTH_SHORT).show();
                     } else {
-                        top = top.replace(serviceName + ":", "");
+                        String[] entries = top.split(":");
+                        StringBuilder newTop = new StringBuilder();
+                        for (String entry : entries) {
+                            if (entry.isEmpty()) continue;
+                            if (serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
+                            if (newTop.length() > 0) newTop.append(":");
+                            newTop.append(entry);
+                        }
+                        top = newTop.toString();
                         Toast.makeText(MainActivity.this, "已将" + finalServiceLabel + "取消置顶", Toast.LENGTH_SHORT).show();
                     }
                     sp.edit().putString("top", top).apply();

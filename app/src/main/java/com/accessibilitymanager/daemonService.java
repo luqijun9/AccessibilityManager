@@ -7,6 +7,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -132,14 +133,14 @@ public class daemonService extends Service {
         for (String serviceName : serviceNames) {
             if (serviceName == null || serviceName.equals("null") || serviceName.length() == 0)
                 continue;
-            if (!l.contains(serviceName)) {
+            String normalized = normalizeServiceId(serviceName);
+            if (!isServiceInList(normalized)) {
                 if (cleanedDaemon == null) cleanedDaemon = new StringBuilder();
                 else cleanedDaemon.append(":");
                 cleanedDaemon.append(serviceName);
                 continue;
             }
-            String[] parts = Pattern.compile("/").split(serviceName);
-            if (parts.length >= 2 && (s.contains(parts[0] + "/" + parts[1]) || s.contains(parts[0] + "/" + parts[0] + parts[1])))
+            if (isServiceInSettings(normalized, s))
                 continue;
 
             ApplicationInfo applicationInfo = new ApplicationInfo();
@@ -149,19 +150,36 @@ public class daemonService extends Service {
             } catch (PackageManager.NameNotFoundException ignored) {
             }
             String packageLabel = applicationInfo.loadLabel(packageManager).toString();
-            LogUtil.log(daemonService.this, "[保活] 检测到服务缺失：" + serviceName + " (" + packageLabel + ")");
-            add.append(serviceName).append(":");
+            LogUtil.log(daemonService.this, "[保活] 检测到服务缺失：" + normalized + " (" + packageLabel + ")");
+            add.append(normalized).append(":");
             add1.append(packageLabel).append("\n");
             if (sp.getBoolean("toast", true))
                 mHandler.post(() -> Toast.makeText(daemonService.this, "保活" + packageLabel, Toast.LENGTH_SHORT).show());
         }
         if (cleanedDaemon != null) {
-            String cleanedList = list;
+            java.util.Set<String> staleSet = new java.util.HashSet<>();
             for (String stale : cleanedDaemon.toString().split(":")) {
-                cleanedList = cleanedList.replace(stale + ":", "").replace(":" + stale, "").replace(stale, "");
+                if (!stale.isEmpty()) staleSet.add(stale);
             }
-            cleanedList = cleanedList.replace("::", ":").replaceAll("^:|:$", "");
-            sp.edit().putString("daemon", cleanedList).apply();
+            String[] entries = list.split(":");
+            StringBuilder newList = new StringBuilder();
+            for (String entry : entries) {
+                if (entry.isEmpty()) continue;
+                boolean isStale = false;
+                ComponentName entryCn = ComponentName.unflattenFromString(entry);
+                for (String stale : staleSet) {
+                    ComponentName staleCn = ComponentName.unflattenFromString(stale);
+                    if (staleCn != null && staleCn.equals(entryCn)) {
+                        isStale = true;
+                        break;
+                    }
+                }
+                if (!isStale) {
+                    if (newList.length() > 0) newList.append(":");
+                    newList.append(entry);
+                }
+            }
+            sp.edit().putString("daemon", newList.toString()).apply();
         }
         if (add.length() > 0) {
             tmpSettingValue = add + s;
@@ -193,6 +211,33 @@ public class daemonService extends Service {
         if (svc1.equals(svc2)) return true;
         if (svc1.startsWith(".") && (p1[0] + svc1).equals(svc2)) return true;
         if (svc2.startsWith(".") && (p2[0] + svc2).equals(svc1)) return true;
+        return false;
+    }
+
+    private String normalizeServiceId(String serviceId) {
+        ComponentName cn = ComponentName.unflattenFromString(serviceId);
+        return cn != null ? cn.flattenToString() : serviceId;
+    }
+
+    private boolean isServiceInSettings(String serviceId, String settingValue) {
+        if (settingValue == null) return false;
+        ComponentName target = ComponentName.unflattenFromString(serviceId);
+        if (target == null) return false;
+        for (String entry : settingValue.split(":")) {
+            if (entry.isEmpty()) continue;
+            ComponentName entryCn = ComponentName.unflattenFromString(entry);
+            if (target.equals(entryCn)) return true;
+        }
+        return false;
+    }
+
+    private boolean isServiceInList(String serviceId) {
+        ComponentName target = ComponentName.unflattenFromString(serviceId);
+        if (target == null) return false;
+        for (String entry : l) {
+            ComponentName entryCn = ComponentName.unflattenFromString(entry);
+            if (target.equals(entryCn)) return true;
+        }
         return false;
     }
 
@@ -359,11 +404,16 @@ public class daemonService extends Service {
             LogUtil.log(daemonService.this, logPrefix + " 仅关闭服务：" + serviceName);
             String enabled = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             if (enabled == null) enabled = "";
-            String newEnabled = enabled.replace(serviceName + ":", "")
-                    .replace(":" + serviceName, "")
-                    .replace(serviceName, "");
-            newEnabled = newEnabled.replace("::", ":").replaceAll("^:|:$", "");
-            Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, newEnabled);
+            ComponentName target = ComponentName.unflattenFromString(serviceName);
+            StringBuilder sb = new StringBuilder();
+            for (String entry : enabled.split(":")) {
+                if (entry.isEmpty()) continue;
+                ComponentName entryCn = ComponentName.unflattenFromString(entry);
+                if (target != null && target.equals(entryCn)) continue;
+                if (sb.length() > 0) sb.append(":");
+                sb.append(entry);
+            }
+            Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, sb.toString());
             try {
                 Thread.sleep(300);
             } catch (InterruptedException ignored) {
