@@ -18,21 +18,6 @@
         app:showAsAction="never"
         android:title="仅显示用户应用" />
     <item
-        android:id="@+id/crashfix"
-        android:checkable="true"
-        app:showAsAction="never"
-        android:title="启用崩溃修复" />
-    <item
-        android:id="@+id/periodic_check"
-        android:checkable="true"
-        app:showAsAction="never"
-        android:title="启用定时崩溃检测" />
-    <item
-        android:id="@+id/fixmode"
-        android:checkable="true"
-        app:showAsAction="never"
-        android:title="崩溃修复强杀进程" />
-    <item
         android:id="@+id/hide"
         android:checkable="true"
         app:showAsAction="never"
@@ -43,6 +28,25 @@
         app:showAsAction="never"
         android:title="延迟1秒保活" />
     <item
+        android:id="@+id/crashfix"
+        android:checkable="true"
+        app:showAsAction="never"
+        android:title="启用崩溃修复" />
+    <item
+    android:id="@+id/fixmode"
+        android:checkable="true"
+        app:showAsAction="never"
+        android:title="崩溃修复强杀进程" />
+    <item
+        android:id="@+id/periodic_check"
+        android:checkable="true"
+        app:showAsAction="never"
+        android:title="启用定时崩溃检测" />
+    <item
+        android:id="@+id/periodic_interval"
+        app:showAsAction="never"
+        android:title="设定检测间隔" />
+    <item
         android:id="@+id/notify_custom"
         app:showAsAction="never"
         android:title="自定义通知栏文字" />
@@ -50,10 +54,6 @@
         android:id="@+id/viewlog"
         app:showAsAction="always|withText"
         android:title="日志" />
-    <item
-        android:id="@+id/periodic_interval"
-        app:showAsAction="never"
-        android:title="定时检测间隔" />
     <item
         android:id="@+id/perm_status"
         app:showAsAction="always"
