@@ -12,6 +12,7 @@
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
         android:background="@android:color/transparent"
+        android:theme="@style/ToolbarOverlay"
         app:contentInsetStart="0dp"
         app:contentInsetEnd="0dp" />
 
