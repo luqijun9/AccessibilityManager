@@ -73,6 +73,8 @@ public class MainActivity extends AppCompatActivity {
     PackageManager pm;
     boolean perm = false;
     private boolean listenerAdded = false;
+    private boolean mPendingCrashFixRequest = false;
+    private Handler mHandler;
     LinearLayout batteryWarning;
     TextView batteryWarningText;
     TextView batteryWarningGo;
@@ -152,8 +154,9 @@ public class MainActivity extends AppCompatActivity {
             window.setNavigationBarColor(Color.TRANSPARENT);
         }
         setTitle("无障碍管理");
-        //注册shizuku授权结果监听器
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && checkPermission()) {
+        mHandler = new Handler();
+        //注册shizuku授权结果监听器，始终注册以支持崩溃修复权限回调
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             listenerAdded = true;
             Shizuku.addRequestPermissionResultListener(RL);
         }
@@ -216,16 +219,12 @@ public class MainActivity extends AppCompatActivity {
             ShellUtil.getPermissionState();
             boolean crashFix = sp.getBoolean("crashfix", false);
             boolean autoDisabled = sp.getBoolean("crashfix_auto_disabled", false);
-            if (crashFix && !ShellUtil.hasAnyPermission()) {
-                sp.edit().putBoolean("crashfix", false).putBoolean("crashfix_auto_disabled", true).apply();
-                runOnUiThread(() -> new AlertDialog.Builder(MainActivity.this)
-                        .setTitle("权限不足")
-                        .setMessage("崩溃修复功能需要root或Shizuku权限，当前未检测到任何权限，已自动关闭崩溃修复功能。")
-                        .setPositiveButton("确定", null)
-                        .create().show());
-            } else if (!crashFix && autoDisabled && ShellUtil.hasAnyPermission()) {
+            boolean hasPermission = ShellUtil.hasAnyPermission();
+            if (hasPermission && autoDisabled && !crashFix) {
                 sp.edit().putBoolean("crashfix", true).putBoolean("crashfix_auto_disabled", false).apply();
                 runOnUiThread(() -> Toast.makeText(MainActivity.this, "已检测到权限，崩溃修复已重新开启", Toast.LENGTH_SHORT).show());
+            } else if (!hasPermission && crashFix) {
+                runOnUiThread(() -> requestCrashFixPermission(true));
             }
             runOnUiThread(() -> invalidateOptionsMenu());
         }).start();
@@ -394,7 +393,20 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private final Shizuku.OnRequestPermissionResultListener RL = (requestCode, grantResult) -> {
+        LogUtil.log(MainActivity.this, "[权限] Shizuku回调, grantResult=" + grantResult + ", pendingCrashFix=" + mPendingCrashFixRequest);
         ShellUtil.reset();
+        if (mPendingCrashFixRequest) {
+            mPendingCrashFixRequest = false;
+            if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                LogUtil.log(MainActivity.this, "[权限] 用户已授权(grantResult=GRANTED)，立即启用崩溃修复");
+                ShellUtil.getPermissionState();
+                enableCrashFix();
+            } else {
+                LogUtil.log(MainActivity.this, "[权限] 用户拒绝授权(grantResult=" + grantResult + ")，标记自动禁用");
+                sp.edit().putBoolean("crashfix", false).putBoolean("crashfix_auto_disabled", true).apply();
+                showNoPermissionDialog(false);
+            }
+        }
         check();
     };
 
@@ -435,6 +447,86 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
+    private void requestCrashFixPermission(boolean fromStartup) {
+        LogUtil.log(this, "[权限] 请求权限 fromStartup=" + fromStartup);
+        ShellUtil.reset();
+        if (ShellUtil.hasAnyPermission()) {
+            LogUtil.log(this, "[权限] 已拥有权限，直接启用崩溃修复");
+            enableCrashFix();
+            return;
+        }
+
+        if (ShellUtil.isShizukuRunning()) {
+            LogUtil.log(this, "[权限] Shizuku运行中，发起授权请求");
+            mPendingCrashFixRequest = true;
+            try {
+                Shizuku.requestPermission(0);
+            } catch (Exception e) {
+                LogUtil.log(this, "[权限] Shizuku.requestPermission异常: " + e.getClass().getSimpleName());
+                mPendingCrashFixRequest = false;
+                showNoPermissionDialog(fromStartup);
+            }
+        } else {
+            LogUtil.log(this, "[权限] Shizuku未运行，显示权限不足对话框");
+            showNoPermissionDialog(fromStartup);
+        }
+    }
+
+    private void enableCrashFix() {
+        LogUtil.log(this, "[权限] 启用崩溃修复");
+        sp.edit().putBoolean("crashfix", true).putBoolean("crashfix_auto_disabled", false).apply();
+        invalidateOptionsMenu();
+        int state = ShellUtil.getPermissionState();
+        String permName = state == ShellUtil.PERM_ROOT ? "root" : (state == ShellUtil.PERM_SHIZUKU ? "shizuku" : "未知");
+        LogUtil.log(this, "[权限] 当前权限=" + permName + "(" + state + ")");
+        Toast.makeText(this, "已获取" + permName + "权限，崩溃修复已开启", Toast.LENGTH_SHORT).show();
+        if (!daemon.isEmpty()) {
+            StartForeGroundDaemon();
+        }
+    }
+
+    private void showNoPermissionDialog(boolean fromStartup) {
+        boolean shizukuRunning = ShellUtil.isShizukuRunning();
+        LogUtil.log(this, "[权限] 显示权限不足对话框 shizukuRunning=" + shizukuRunning + " fromStartup=" + fromStartup);
+        StringBuilder message = new StringBuilder();
+        if (fromStartup) {
+            sp.edit().putBoolean("crashfix", false).putBoolean("crashfix_auto_disabled", true).apply();
+            message.append("崩溃修复已开启但未检测到权限，已自动暂停。\n\n");
+        }
+        message.append("崩溃修复功能需要root或Shizuku权限。\n\n");
+        if (shizukuRunning) {
+            message.append("已检测到Shizuku正在运行，请授权本应用使用Shizuku。");
+        } else {
+            message.append("当前未检测到任何权限。\n请安装Shizuku并授权，或获取root权限后重试。");
+        }
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                .setTitle("权限不足")
+                .setMessage(message.toString());
+
+        if (shizukuRunning) {
+            builder.setPositiveButton("申请Shizuku权限", (dialog, which) -> {
+                LogUtil.log(MainActivity.this, "[权限] 对话框中点击申请Shizuku权限");
+                mPendingCrashFixRequest = true;
+                try {
+                    Shizuku.requestPermission(0);
+                } catch (Exception e) {
+                    LogUtil.log(MainActivity.this, "[权限] 对话框申请异常: " + e.getClass().getSimpleName());
+                    mPendingCrashFixRequest = false;
+                    Toast.makeText(this, "Shizuku权限申请失败", Toast.LENGTH_SHORT).show();
+                }
+            });
+            builder.setNeutralButton("取消", (dialog, which) -> {
+                LogUtil.log(MainActivity.this, "[权限] 对话框取消，崩溃修复已关闭");
+                Toast.makeText(MainActivity.this, "崩溃修复已关闭", Toast.LENGTH_SHORT).show();
+            });
+        } else {
+            builder.setPositiveButton("确定", null);
+        }
+
+        builder.create().show();
+        invalidateOptionsMenu();
+    }
 
     //一些收尾工作，取消注册监听器什么的
     @Override
@@ -517,13 +609,7 @@ public class MainActivity extends AppCompatActivity {
                 ShellUtil.reset();
                 ShellUtil.getPermissionState();
                 if (!ShellUtil.hasAnyPermission()) {
-                    menuItem.setChecked(false);
-                    new AlertDialog.Builder(this)
-                            .setTitle("权限不足")
-                            .setMessage("崩溃修复功能需要root或Shizuku权限，当前未检测到任何权限。\n\n请获取root权限或安装Shizuku并授权后重试。")
-                            .setPositiveButton("确定", null)
-                            .create().show();
-                    invalidateOptionsMenu();
+                    requestCrashFixPermission(false);
                     return true;
                 }
             }

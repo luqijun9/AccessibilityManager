@@ -1,6 +1,7 @@
 package com.accessibilitymanager;
 
 import android.content.Context;
+import android.util.Log;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -15,6 +16,7 @@ import java.util.Locale;
 public class LogUtil {
 
     private static final String LOG_DIR = "logs";
+    private static final String TAG = "AccMgr";
     private static final SimpleDateFormat DATE_FMT = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
     private static final SimpleDateFormat TIME_FMT = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
     private static final long SEPARATOR_INTERVAL = 5 * 60 * 1000L;
@@ -54,6 +56,7 @@ public class LogUtil {
             writer.write(line);
             writer.flush();
             writer.close();
+            Log.d(TAG, msg);
         } catch (Exception ignored) {
         }
     }

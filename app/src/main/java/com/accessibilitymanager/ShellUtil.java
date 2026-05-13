@@ -78,6 +78,17 @@ public class ShellUtil {
         }
     }
 
+    public static boolean isShizukuRunning() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                Shizuku.checkSelfPermission();
+                return true;
+            }
+        } catch (Exception e) {
+        }
+        return false;
+    }
+
     private static boolean checkShizuku() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
