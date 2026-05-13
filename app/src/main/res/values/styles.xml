@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="AppTheme" parent="@android:style/Theme.DeviceDefault"/>
+    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/bg</item>
+        <item name="colorPrimaryDark">#354190</item>
+        <item name="colorAccent">@color/bg</item>
+    </style>
+
+    <style name="PopupOverlay_Dark" parent="ThemeOverlay.AppCompat.Dark" />
+    <style name="PopupOverlay_Light" parent="ThemeOverlay.AppCompat.Light" />
 </resources>

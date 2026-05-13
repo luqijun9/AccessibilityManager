@@ -2,8 +2,7 @@ package com.accessibilitymanager;
 
 import android.Manifest;
 import android.accessibilityservice.AccessibilityServiceInfo;
-import android.app.ActionBar;
-import android.app.Activity;
+import androidx.appcompat.app.AppCompatActivity;
 import android.app.ActivityManager;
 import android.app.AlertDialog;
 import android.app.NotificationManager;
@@ -21,7 +20,6 @@ import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.database.ContentObserver;
 import android.graphics.Color;
-import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Build;
@@ -38,6 +36,7 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.WindowInsetsController;
 import android.view.accessibility.AccessibilityManager;
 import android.widget.BaseAdapter;
 import android.widget.EditText;
@@ -61,8 +60,9 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 import rikka.shizuku.Shizuku;
+import androidx.appcompat.widget.Toolbar;
 
-public class MainActivity extends Activity {
+public class MainActivity extends AppCompatActivity {
 
     private SettingsValueChangeContentObserver mContentOb;
     List<AccessibilityServiceInfo> l, tmp;
@@ -112,13 +112,36 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        //根据系统深色模式自动切换主题，同时存储下来深色模式的状态
-        if ((getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_NO) == Configuration.UI_MODE_NIGHT_NO) {
-            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
-            night = false;
-        }
+        int nightMode = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
+        night = nightMode == Configuration.UI_MODE_NIGHT_YES;
 
         setContentView(R.layout.activity_main);
+
+        Toolbar toolbar = findViewById(R.id.toolbar);
+        setSupportActionBar(toolbar);
+        toolbar.setTitleTextColor(night ? Color.WHITE : Color.BLACK);
+        toolbar.setPopupTheme(night ? R.style.PopupOverlay_Dark : R.style.PopupOverlay_Light);
+        Drawable overflowIcon = toolbar.getOverflowIcon();
+        if (overflowIcon != null) {
+            overflowIcon.setTint(night ? Color.WHITE : Color.BLACK);
+        }
+
+        if (!night) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                WindowInsetsController controller = getWindow().getInsetsController();
+                if (controller != null) {
+                    controller.setSystemBarsAppearance(
+                            WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS,
+                            WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS);
+                    controller.setSystemBarsAppearance(
+                            WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+                            WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
+                }
+            } else {
+                getWindow().getDecorView().setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+            }
+        }
 
         //设置导航栏透明，UI会好看些
         Window window = getWindow();
@@ -127,10 +150,6 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             window.setStatusBarColor(Color.TRANSPARENT);
             window.setNavigationBarColor(Color.TRANSPARENT);
-        }
-        ActionBar actionBar = getActionBar();
-        if (actionBar != null) {
-            actionBar.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         }
         setTitle("无障碍管理");
         //注册shizuku授权结果监听器
@@ -442,15 +461,24 @@ public class MainActivity extends Activity {
         menu.findItem(R.id.delay_daemon).setChecked(sp.getBoolean("delay_daemon", false));
 
         MenuItem permItem = menu.findItem(R.id.perm_status);
-        if (permItem != null && permItem.getActionView() != null) {
-            TextView tv = (TextView) permItem.getActionView();
+        if (permItem != null) {
             int state = ShellUtil.getPermissionState();
+            String text;
             if (state == ShellUtil.PERM_ROOT) {
-                tv.setText("root");
+                text = "root";
             } else if (state == ShellUtil.PERM_SHIZUKU) {
-                tv.setText("shizuku");
+                text = "shizuku";
             } else {
-                tv.setText("");
+                text = null;
+            }
+            if (text != null) {
+                SpannableStringBuilder ssb = new SpannableStringBuilder(text);
+                ssb.setSpan(new ForegroundColorSpan(night ? Color.WHITE : Color.BLACK),
+                        0, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                permItem.setTitle(ssb);
+                permItem.setVisible(true);
+            } else {
+                permItem.setVisible(false);
             }
         }
 
@@ -465,7 +493,7 @@ public class MainActivity extends Activity {
     }
 
     @Override
-    public boolean onMenuItemSelected(int i, MenuItem menuItem) {
+    public boolean onOptionsItemSelected(MenuItem menuItem) {
         int itemId = menuItem.getItemId();
         if (itemId == R.id.boot) {
             sp.edit().putBoolean("boot", !menuItem.isChecked()).apply();
@@ -569,7 +597,7 @@ public class MainActivity extends Activity {
         } else if (itemId == R.id.periodic_interval) {
             showIntervalDialog();
         }
-        return super.onMenuItemSelected(i, menuItem);
+        return super.onOptionsItemSelected(menuItem);
     }
 
     //这个是用于适配列表中的每一项设置项的显示

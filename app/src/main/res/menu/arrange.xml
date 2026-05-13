@@ -1,61 +1,61 @@
 <?xml version="1.0" encoding="utf-8"?>
-<menu xmlns:android="http://schemas.android.com/apk/res/android">
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <item
         android:id="@+id/boot"
         android:checkable="true"
-        android:showAsAction="never"
+        app:showAsAction="never"
         android:title="开机启动保活服务" />
     <item
         android:id="@+id/toast"
         android:checkable="true"
-        android:showAsAction="never"
+        app:showAsAction="never"
         android:title="显示Toast保活提示" />
     <item
         android:id="@+id/useronly"
         android:checkable="true"
-        android:showAsAction="never"
+        app:showAsAction="never"
         android:title="仅显示用户应用" />
     <item
         android:id="@+id/crashfix"
         android:checkable="true"
-        android:showAsAction="never"
+        app:showAsAction="never"
         android:title="启用崩溃修复" />
     <item
         android:id="@+id/periodic_check"
         android:checkable="true"
-        android:showAsAction="never"
+        app:showAsAction="never"
         android:title="启用定时崩溃检测" />
     <item
         android:id="@+id/fixmode"
         android:checkable="true"
-        android:showAsAction="never"
+        app:showAsAction="never"
         android:title="崩溃修复强杀进程" />
     <item
         android:id="@+id/hide"
         android:checkable="true"
-        android:showAsAction="never"
+        app:showAsAction="never"
         android:title="不显示后台" />
     <item
         android:id="@+id/delay_daemon"
         android:checkable="true"
-        android:showAsAction="never"
+        app:showAsAction="never"
         android:title="延迟1秒保活" />
     <item
         android:id="@+id/notify_custom"
-        android:showAsAction="never"
+        app:showAsAction="never"
         android:title="自定义通知栏文字" />
     <item
         android:id="@+id/viewlog"
-        android:showAsAction="always|withText"
+        app:showAsAction="always|withText"
         android:title="日志" />
     <item
         android:id="@+id/periodic_interval"
-        android:showAsAction="never"
+        app:showAsAction="never"
         android:title="定时检测间隔" />
     <item
         android:id="@+id/perm_status"
-        android:actionLayout="@layout/perm_indicator"
-        android:showAsAction="always"
+        app:showAsAction="always"
         android:title="" />
 </menu>
