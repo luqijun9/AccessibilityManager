@@ -29,11 +29,9 @@ import java.io.InputStreamReader;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -56,7 +54,8 @@ public class daemonService extends Service {
     private volatile long mLastFixStartTime = 0;
     private final Object mFixLock = new Object();
     private final Map<String, Long> mLastFixTime = new ConcurrentHashMap<>();
-    private final Set<String> mRecentlyCrashedLabels = new HashSet<>();
+    private volatile String mCrashedFixServiceName;
+    private volatile String mCrashedFixLabel;
     // 标记 onStartCommand 是否是紧跟在 onCreate 之后的首次调用。
     // 首次启动时 onCreate 已触发崩溃检测，onStartCommand 不应重复触发；
     // 仅当 App 在服务已运行时再次调用 startService 才触发"服务刷新"检测。
@@ -158,8 +157,14 @@ public class daemonService extends Service {
             add.append(normalized).append(":");
             add1.append(packageLabel).append("\n");
             if (sp.getBoolean("toast", true)) {
-                final boolean isCrashed = mRecentlyCrashedLabels.remove(packageLabel);
-                final String toastText = isCrashed ? "保活崩溃服务 " + packageLabel : "保活" + packageLabel;
+                final String crashedName = mCrashedFixServiceName;
+                final String crashedLabel = mCrashedFixLabel;
+                final boolean isCrashed = crashedName != null && serviceNameMatches(normalized, crashedName);
+                if (isCrashed) {
+                    mCrashedFixServiceName = null;
+                    mCrashedFixLabel = null;
+                }
+                final String toastText = isCrashed ? "保活崩溃服务 " + crashedLabel : "保活" + packageLabel;
                 mHandler.post(() -> Toast.makeText(daemonService.this, toastText, Toast.LENGTH_SHORT).show());
             }
         }
@@ -200,6 +205,8 @@ public class daemonService extends Service {
         } else {
             tmpSettingValue = s;
         }
+        mCrashedFixServiceName = null;
+        mCrashedFixLabel = null;
     }
 
     @Override
@@ -385,8 +392,8 @@ public class daemonService extends Service {
         }
         String packageLabel = applicationInfo.loadLabel(packageManager).toString();
 
-        mRecentlyCrashedLabels.add(packageLabel);
-        mHandler.postDelayed(() -> mRecentlyCrashedLabels.remove(packageLabel), 30000);
+        mCrashedFixServiceName = serviceName;
+        mCrashedFixLabel = packageLabel;
 
         String logPrefix = isRetry ? "[崩溃修复-重试]" : "[崩溃修复]";
 
