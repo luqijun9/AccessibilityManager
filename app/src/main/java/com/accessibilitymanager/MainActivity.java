@@ -564,17 +564,22 @@ public class MainActivity extends AppCompatActivity {
         MenuItem permItem = menu.findItem(R.id.perm_status);
         if (permItem != null) {
             int state = ShellUtil.getPermissionState();
+            boolean crashFixEnabled = sp.getBoolean("crashfix", false);
             String text;
+            int color = night ? Color.WHITE : Color.BLACK;
             if (state == ShellUtil.PERM_ROOT) {
                 text = "root";
             } else if (state == ShellUtil.PERM_SHIZUKU) {
                 text = "shizuku";
+            } else if (crashFixEnabled) {
+                text = "崩溃检测不可用";
+                color = Color.rgb(0xFF, 0x00, 0x00);
             } else {
                 text = null;
             }
             if (text != null) {
                 SpannableStringBuilder ssb = new SpannableStringBuilder(text);
-                ssb.setSpan(new ForegroundColorSpan(night ? Color.WHITE : Color.BLACK),
+                ssb.setSpan(new ForegroundColorSpan(color),
                         0, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 permItem.setTitle(ssb);
                 permItem.setVisible(true);
@@ -600,6 +605,13 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean onOptionsItemSelected(MenuItem menuItem) {
         int itemId = menuItem.getItemId();
+
+        if (itemId == R.id.perm_status) {
+            if (sp.getBoolean("crashfix", false) && !ShellUtil.hasAnyPermission()) {
+                showNoPermissionDialog(false);
+                return true;
+            }
+        }
 
         if (!mUseDialogSettings) {
             if (itemId == R.id.boot) {
