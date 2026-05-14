@@ -76,6 +76,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean listenerAdded = false;//是否添加了内容监视器
     private boolean mPendingCrashFixRequest = false;//是否有待处理的崩溃修复请求
     private boolean mUseDialogSettings = true;//是否使用对话框设置
+    private View mSettingsDialogView = null;//设置对话框View引用，用于Shizuku授权后刷新开关状态
 
     LinearLayout batteryWarning;//电池警告布局
     TextView batteryWarningText;//电池警告文本
@@ -219,15 +220,6 @@ public class MainActivity extends AppCompatActivity {
         new Thread(() -> {
             ShellUtil.reset();
             ShellUtil.getPermissionState();
-            boolean crashFix = sp.getBoolean("crashfix", false);
-            boolean autoDisabled = sp.getBoolean("crashfix_auto_disabled", false);
-            boolean hasPermission = ShellUtil.hasAnyPermission();
-            if (hasPermission && autoDisabled && !crashFix) {
-                sp.edit().putBoolean("crashfix", true).putBoolean("crashfix_auto_disabled", false).apply();
-                runOnUiThread(() -> Toast.makeText(MainActivity.this, "已检测到权限，崩溃修复已重新开启", Toast.LENGTH_SHORT).show());
-            } else if (!hasPermission && crashFix) {
-                runOnUiThread(() -> requestCrashFixPermission(true));
-            }
             runOnUiThread(() -> invalidateOptionsMenu());
         }).start();
 
@@ -486,6 +478,13 @@ public class MainActivity extends AppCompatActivity {
         LogUtil.log(this, "[权限] 启用崩溃修复");
         sp.edit().putBoolean("crashfix", true).putBoolean("crashfix_auto_disabled", false).apply();
         invalidateOptionsMenu();
+        if (mSettingsDialogView != null) {
+            Switch crashFixSwitch = mSettingsDialogView.findViewById(R.id.crashfix);
+            if (crashFixSwitch != null && !crashFixSwitch.isChecked()) {
+                crashFixSwitch.setChecked(true);
+                refreshCrashFixDependent(mSettingsDialogView);
+            }
+        }
         int state = ShellUtil.getPermissionState();
         String permName = state == ShellUtil.PERM_ROOT ? "root" : (state == ShellUtil.PERM_SHIZUKU ? "shizuku" : "未知");
         LogUtil.log(this, "[权限] 当前权限=" + permName + "(" + state + ")");
@@ -499,10 +498,6 @@ public class MainActivity extends AppCompatActivity {
         boolean shizukuRunning = ShellUtil.isShizukuRunning();
         LogUtil.log(this, "[权限] 显示权限不足对话框 shizukuRunning=" + shizukuRunning + " fromStartup=" + fromStartup);
         StringBuilder message = new StringBuilder();
-        if (fromStartup) {
-            sp.edit().putBoolean("crashfix", false).putBoolean("crashfix_auto_disabled", true).apply();
-            message.append("崩溃修复已开启但未检测到权限，已自动暂停。\n\n");
-        }
         message.append("崩溃修复功能需要root或Shizuku权限。\n\n");
         if (shizukuRunning) {
             message.append("已检测到Shizuku正在运行，请授权本应用使用Shizuku。");
@@ -645,7 +640,7 @@ public class MainActivity extends AppCompatActivity {
                 if (newState && !sp.getBoolean("unlock_crash_dialog_dismissed", false)) {
                     new AlertDialog.Builder(this)
                             .setTitle("提示")
-                            .setMessage("经过测试，开启自启动权限才可稳定接收解锁广播信号，建议去系统设置开启无障碍管理器自启动。")
+                            .setMessage("使用此功能需要满足以下条件：\n① 开启无障碍管理器的无障碍服务\n② 开启无障碍管理器的自启动权限\n否则可能无效!!!。")
                             .setNegativeButton("不再提示", (d, w) -> {
                                 sp.edit().putBoolean("unlock_crash_dialog_dismissed", true).apply();
                                 sp.edit().putBoolean("unlock_crash_check", true).apply();
@@ -738,6 +733,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void showSettingsDialog() {
         View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_settings, null);
+        mSettingsDialogView = dialogView;
 
         Switch switchBoot = dialogView.findViewById(R.id.boot);
         Switch switchToast = dialogView.findViewById(R.id.toast);
@@ -815,7 +811,7 @@ public class MainActivity extends AppCompatActivity {
             if (checked && !sp.getBoolean("unlock_crash_dialog_dismissed", false)) {
                 new AlertDialog.Builder(this)
                         .setTitle("提示")
-                        .setMessage("经过测试，开启自启动权限才可稳定接收解锁广播信号，建议去系统设置开启无障碍管理器自启动。")
+                        .setMessage("使用此功能需要满足以下条件：\n① 开启无障碍管理器的无障碍服务\n② 开启无障碍管理器的自启动权限\n否则可能无效!!!。")
                         .setNegativeButton("不再提示", (d, w) -> {
                             sp.edit().putBoolean("unlock_crash_dialog_dismissed", true).apply();
                             sp.edit().putBoolean("unlock_crash_check", true).apply();
@@ -862,11 +858,11 @@ public class MainActivity extends AppCompatActivity {
         crashTutorialBtn.setOnClickListener(v -> {
             new AlertDialog.Builder(this)
                     .setTitle("崩溃服务检测说明")
-                    .setMessage("1. 崩溃检测：自动检测无障碍服务是否出现假死（崩溃）状态，即服务已开启但无障碍设置中显示\"无法运行\"的情况,也就是失效了\n\n" +
-                            "2. 解锁设备时检测：请开启 无障碍管理器 自身的无障碍服务并加锁，否则可能无效\n\n" +
-                            "3. 崩溃修复：检测到崩溃后自动修复。默认方式为关闭后重新开启无障碍服务；如果修复后仍然崩溃，可勾选\"崩溃修复强行停止对应app\" ，强制停止对应应用后自动重新保活打开\n\n" +
-                            "4. 定时检测间隔：设置定时检测崩溃服务的时间间隔，建议不低于5分钟\n\n" +
-                            "5. 延迟1秒保活：保活操作过快可能导致失败，开启后将延迟1秒再执行保活，提高成功率")
+                    .setMessage("1. 崩溃检测：自动检测无障碍服务是否出现假死（崩溃）状态，即服务已开启但无障碍设置中显示\"无法运行\"的情况，服务开着但无效\n\n" +
+                            "2. 解锁设备时检测：使用前提\n①开启无障碍管理器自身的无障碍服务并加锁保活\n②开启无障碍管理器的自启动权限\n否则可能无效!!!\n\n" +
+                            "3. 崩溃修复强杀app：默认修复方式为直接关闭其无障碍服务再打开；如果修复后仍然崩溃，可勾选\"崩溃修复强杀app\" 功能，将强制停止对应app后自动重新保活打开服务\n\n" +
+                            "4. 定时检测间隔: 设置定时检测崩溃服务的时间间隔，建议不低于5分钟\n\n" +
+                            "5. 延迟1秒保活: 保活操作过快也许可能导致失败，开启后将延迟1秒再执行保活，也许能提高成功率")
                     .setPositiveButton("知道了", null)
                     .create().show();
         });

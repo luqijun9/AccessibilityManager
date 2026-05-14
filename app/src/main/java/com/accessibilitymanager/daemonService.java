@@ -198,7 +198,7 @@ public class daemonService extends Service {
             Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
             final String text = add1.toString();
             mHandler.post(() -> {
-                notification.setContentText(text + new SimpleDateFormat("时间：H:mm:ss秒", Locale.getDefault()).format(Calendar.getInstance().getTime())).setContentTitle("已保活以下无障碍服务：");
+                notification.setContentText(text + new SimpleDateFormat("时间：H:mm:ss", Locale.getDefault()).format(Calendar.getInstance().getTime())).setContentTitle("已保活以下无障碍服务：");
                 systemService.notify(1, notification.build());
             });
             LogUtil.log(daemonService.this, "[保活] 已重新开启被关闭的服务：" + add1.toString().replace("\n", " "));
@@ -437,7 +437,7 @@ public class daemonService extends Service {
 
         mHandler.post(() -> {
             notification.setContentText("已重启崩溃服务：" + packageLabel + "\n"
-                            + new SimpleDateFormat("时间：H:mm:ss秒", Locale.getDefault()).format(Calendar.getInstance().getTime()))
+                            + new SimpleDateFormat("时间：H:mm:ss", Locale.getDefault()).format(Calendar.getInstance().getTime()))
                     .setContentTitle("无障碍保活");
             systemService.notify(1, notification.build());
         });
@@ -471,17 +471,6 @@ public class daemonService extends Service {
         if (sp.getString("daemon", "").length() == 0) {
             stopSelf();
             return;
-        }
-        boolean crashFix = sp.getBoolean("crashfix", false);
-        boolean autoDisabled = sp.getBoolean("crashfix_auto_disabled", false);
-        ShellUtil.reset();
-        if (crashFix && !ShellUtil.hasAnyPermission()) {
-            sp.edit().putBoolean("crashfix", false).putBoolean("crashfix_auto_disabled", true).apply();
-            TimerReceiver.cancel(this);
-            LogUtil.log(this, "[崩溃修复] 无root/Shizuku权限，已自动关闭崩溃修复功能");
-        } else if (!crashFix && autoDisabled && ShellUtil.hasAnyPermission()) {
-            sp.edit().putBoolean("crashfix", true).putBoolean("crashfix_auto_disabled", false).apply();
-            LogUtil.log(this, "[崩溃修复] 检测到权限恢复，已自动重新开启崩溃修复功能");
         }
         packageManager = getPackageManager();
         Toast.makeText(daemonService.this, "启动保活", Toast.LENGTH_SHORT).show();
