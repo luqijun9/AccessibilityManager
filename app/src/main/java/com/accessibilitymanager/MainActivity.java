@@ -404,9 +404,8 @@ public class MainActivity extends AppCompatActivity {
                 ShellUtil.getPermissionState();
                 enableCrashFix();
             } else {
-                LogUtil.log(MainActivity.this, "[权限] 用户拒绝授权(grantResult=" + grantResult + ")，标记自动禁用");
-                sp.edit().putBoolean("crashfix", false).putBoolean("crashfix_auto_disabled", true).apply();
-                showNoPermissionDialog(false);
+                LogUtil.log(MainActivity.this, "[权限] 用户拒绝授权(grantResult=" + grantResult + ")");
+                Toast.makeText(MainActivity.this, "获取shizuku权限失败", Toast.LENGTH_SHORT).show();
             }
         }
         check();
@@ -449,8 +448,8 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
-    private void requestCrashFixPermission(boolean fromStartup) {
-        LogUtil.log(this, "[权限] 请求权限 fromStartup=" + fromStartup);
+    private void requestCrashFixPermission() {
+        LogUtil.log(this, "[权限] 请求权限（来自崩溃修复开关）");
         ShellUtil.reset();
         if (ShellUtil.hasAnyPermission()) {
             LogUtil.log(this, "[权限] 已拥有权限，直接启用崩溃修复");
@@ -459,18 +458,11 @@ public class MainActivity extends AppCompatActivity {
         }
 
         if (ShellUtil.isShizukuRunning()) {
-            LogUtil.log(this, "[权限] Shizuku运行中，发起授权请求");
-            mPendingCrashFixRequest = true;
-            try {
-                Shizuku.requestPermission(0);
-            } catch (Exception e) {
-                LogUtil.log(this, "[权限] Shizuku.requestPermission异常: " + e.getClass().getSimpleName());
-                mPendingCrashFixRequest = false;
-                showNoPermissionDialog(fromStartup);
-            }
+            LogUtil.log(this, "[权限] Shizuku运行中，显示权限不足对话框");
+            showNoPermissionDialog(true);
         } else {
             LogUtil.log(this, "[权限] Shizuku未运行，显示权限不足对话框");
-            showNoPermissionDialog(fromStartup);
+            showNoPermissionDialog(true);
         }
     }
 
@@ -488,15 +480,15 @@ public class MainActivity extends AppCompatActivity {
         int state = ShellUtil.getPermissionState();
         String permName = state == ShellUtil.PERM_ROOT ? "root" : (state == ShellUtil.PERM_SHIZUKU ? "shizuku" : "未知");
         LogUtil.log(this, "[权限] 当前权限=" + permName + "(" + state + ")");
-        Toast.makeText(this, "已获取" + permName + "权限，崩溃修复已开启", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "已获取" + permName + "权限，崩溃检测已开启", Toast.LENGTH_SHORT).show();
         if (!daemon.isEmpty()) {
             StartForeGroundDaemon();
         }
     }
 
-    private void showNoPermissionDialog(boolean fromStartup) {
+    private void showNoPermissionDialog(boolean closeCrashFixOnCancel) {
         boolean shizukuRunning = ShellUtil.isShizukuRunning();
-        LogUtil.log(this, "[权限] 显示权限不足对话框 shizukuRunning=" + shizukuRunning + " fromStartup=" + fromStartup);
+        LogUtil.log(this, "[权限] 显示权限不足对话框 shizukuRunning=" + shizukuRunning + " closeCrashFixOnCancel=" + closeCrashFixOnCancel);
         StringBuilder message = new StringBuilder();
         message.append("崩溃修复功能需要root或Shizuku权限。\n\n");
         if (shizukuRunning) {
@@ -522,14 +514,24 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
             builder.setNeutralButton("取消", (dialog, which) -> {
-                LogUtil.log(MainActivity.this, "[权限] 对话框取消，崩溃修复已关闭");
-                Toast.makeText(MainActivity.this, "崩溃修复已关闭", Toast.LENGTH_SHORT).show();
+                if (closeCrashFixOnCancel) {
+                    sp.edit().putBoolean("crashfix", false).putBoolean("crashfix_auto_disabled", false).apply();
+                    LogUtil.log(MainActivity.this, "[权限] 对话框取消，崩溃修复已关闭");
+                    Toast.makeText(MainActivity.this, "崩溃修复已关闭", Toast.LENGTH_SHORT).show();
+                    invalidateOptionsMenu();
+                } else {
+                    LogUtil.log(MainActivity.this, "[权限] 对话框取消");
+                }
             });
         } else {
             builder.setPositiveButton("确定", null);
         }
 
-        builder.create().show();
+        AlertDialog dialog = builder.create();
+        dialog.show();
+        if (shizukuRunning) {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTransformationMethod(null);
+        }
         invalidateOptionsMenu();
     }
 
@@ -631,7 +633,7 @@ public class MainActivity extends AppCompatActivity {
                     ShellUtil.reset();
                     ShellUtil.getPermissionState();
                     if (!ShellUtil.hasAnyPermission()) {
-                        requestCrashFixPermission(false);
+                        requestCrashFixPermission();
                         return true;
                     }
                 }
@@ -808,12 +810,13 @@ public class MainActivity extends AppCompatActivity {
                     crashFixRef.setOnCheckedChangeListener(null);
                     crashFixRef.setChecked(false);
                     crashFixRef.setOnCheckedChangeListener(crashFixListenerHolder[0]);
-                    requestCrashFixPermission(false);
+                    requestCrashFixPermission();
                     return;
                 }
             }
             sp.edit().putBoolean("crashfix", checked).putBoolean("crashfix_auto_disabled", false).apply();
             refreshCrashFixDependent(dialogView);
+            invalidateOptionsMenu();
         };
         switchCrashFix.setOnCheckedChangeListener(crashFixListenerHolder[0]);
 
