@@ -463,6 +463,7 @@ public class daemonService extends Service {
         ShellUtil.reset();
         if (crashFix && !ShellUtil.hasAnyPermission()) {
             sp.edit().putBoolean("crashfix", false).putBoolean("crashfix_auto_disabled", true).apply();
+            TimerReceiver.cancel(this);
             LogUtil.log(this, "[崩溃修复] 无root/Shizuku权限，已自动关闭崩溃修复功能");
         } else if (!crashFix && autoDisabled && ShellUtil.hasAnyPermission()) {
             sp.edit().putBoolean("crashfix", true).putBoolean("crashfix_auto_disabled", false).apply();

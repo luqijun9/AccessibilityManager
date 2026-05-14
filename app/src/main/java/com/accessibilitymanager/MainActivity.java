@@ -76,7 +76,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean listenerAdded = false;//是否添加了内容监视器
     private boolean mPendingCrashFixRequest = false;//是否有待处理的崩溃修复请求
     private boolean mUseDialogSettings = true;//是否使用对话框设置
-    private Handler mHandler;//用于在主线程中更新UI
+
     LinearLayout batteryWarning;//电池警告布局
     TextView batteryWarningText;//电池警告文本
     TextView batteryWarningGo;//电池警告“去设置”按钮
@@ -156,7 +156,7 @@ public class MainActivity extends AppCompatActivity {
             window.setNavigationBarColor(Color.TRANSPARENT);
         }
         setTitle("无障碍管理");
-        mHandler = new Handler();
+        
         //注册shizuku授权结果监听器，始终注册以支持崩溃修复权限回调
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             listenerAdded = true;

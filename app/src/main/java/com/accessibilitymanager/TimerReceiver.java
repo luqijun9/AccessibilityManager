@@ -15,6 +15,12 @@ public class TimerReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         if (ACTION_PERIODIC_CHECK.equals(intent.getAction())) {
+            SharedPreferences sp = context.getSharedPreferences("data", Context.MODE_PRIVATE);
+            if (!sp.getBoolean("crashfix", false)) {
+                LogUtil.log(context, "[定时唤醒] 崩溃修复已关闭，跳过本次检测");
+                cancel(context);
+                return;
+            }
             LogUtil.log(context, "[定时唤醒] AlarmManager 触发");
             Intent serviceIntent = new Intent(context, daemonService.class);
             serviceIntent.putExtra("source", "Alarm");
@@ -33,6 +39,7 @@ public class TimerReceiver extends BroadcastReceiver {
 
     public static void scheduleNext(Context context) {
         SharedPreferences sp = context.getSharedPreferences("data", Context.MODE_PRIVATE);
+        if (!sp.getBoolean("crashfix", false)) return;
         if (!sp.getBoolean("periodic_check", true)) return;
         int intervalMinutes = sp.getInt("periodic_check_interval", 10);
         if (intervalMinutes <= 0) return;
