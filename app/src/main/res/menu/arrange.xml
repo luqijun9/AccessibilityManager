@@ -3,59 +3,6 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <item
-        android:id="@+id/boot"
-        android:checkable="true"
-        app:showAsAction="never"
-        android:title="开机启动保活服务" />
-    <item
-        android:id="@+id/toast"
-        android:checkable="true"
-        app:showAsAction="never"
-        android:title="显示Toast保活提示" />
-    <item
-        android:id="@+id/useronly"
-        android:checkable="true"
-        app:showAsAction="never"
-        android:title="仅显示用户应用" />
-    <item
-        android:id="@+id/hide"
-        android:checkable="true"
-        app:showAsAction="never"
-        android:title="不显示后台" />
-    <item
-        android:id="@+id/delay_daemon"
-        android:checkable="true"
-        app:showAsAction="never"
-        android:title="延迟1秒保活" />
-    <item
-        android:id="@+id/crashfix"
-        android:checkable="true"
-        app:showAsAction="never"
-        android:title="启用崩溃检修" />
-    <item
-        android:id="@+id/unlock_crash_check"
-        android:checkable="true"
-        app:showAsAction="never"
-        android:title="手机解锁检测一次" />
-    <item
-    android:id="@+id/fixmode"
-        android:checkable="true"
-        app:showAsAction="never"
-        android:title="崩溃修复强杀进程" />
-    <item
-        android:id="@+id/periodic_check"
-        android:checkable="true"
-        app:showAsAction="never"
-        android:title="定时崩溃检测" />
-    <item
-        android:id="@+id/periodic_interval"
-        app:showAsAction="never"
-        android:title="设定检测间隔" />
-    <item
-        android:id="@+id/notify_custom"
-        app:showAsAction="never"
-        android:title="自定义通知栏文字" />
-    <item
         android:id="@+id/viewlog"
         app:showAsAction="always|withText"
         android:title="日志" />
@@ -63,4 +10,9 @@
         android:id="@+id/perm_status"
         app:showAsAction="always"
         android:title="" />
+    <item
+        android:id="@+id/settings"
+        android:icon="@drawable/ic_settings"
+        app:showAsAction="always"
+        android:title="设置" />
 </menu>

@@ -44,6 +44,7 @@ import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.CompoundButton;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -64,21 +65,22 @@ import androidx.appcompat.widget.Toolbar;
 
 public class MainActivity extends AppCompatActivity {
 
-    private SettingsValueChangeContentObserver mContentOb;
-    List<AccessibilityServiceInfo> l, tmp;
-    ListView listView;
-    SharedPreferences sp;
-    String settingValue, tmpSettingValue, daemon, top;
-    boolean night = true;
-    PackageManager pm;
-    boolean perm = false;
-    private boolean listenerAdded = false;
-    private boolean mPendingCrashFixRequest = false;
-    private Handler mHandler;
-    LinearLayout batteryWarning;
-    TextView batteryWarningText;
-    TextView batteryWarningGo;
-    TextView batteryWarningDismiss;
+    private SettingsValueChangeContentObserver mContentOb;  //自定义的内容监视器
+    List<AccessibilityServiceInfo> l, tmp;//所有AccessibilityServiceInfo列表，临时列表
+    ListView listView;//列表视图
+    SharedPreferences sp;//共享偏好设置
+    String settingValue, tmpSettingValue, daemon, top;  //当前设置项值，临时设置项值，守护进程名称，顶部进程名称
+    boolean night = true;//是否为夜间模式
+    PackageManager pm;//包管理器
+    boolean perm = false;//是否获取了权限
+    private boolean listenerAdded = false;//是否添加了内容监视器
+    private boolean mPendingCrashFixRequest = false;//是否有待处理的崩溃修复请求
+    private boolean mUseDialogSettings = true;//是否使用对话框设置
+    private Handler mHandler;//用于在主线程中更新UI
+    LinearLayout batteryWarning;//电池警告布局
+    TextView batteryWarningText;//电池警告文本
+    TextView batteryWarningGo;//电池警告“去设置”按钮
+    TextView batteryWarningDismiss;//电池警告“关闭”按钮
 
     //自定义一个内容监视器
     class SettingsValueChangeContentObserver extends ContentObserver {
@@ -538,21 +540,23 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-    @Override // android.app.Activity
+    @Override
     public boolean onPrepareOptionsMenu(Menu menu) {
-        menu.findItem(R.id.boot).setChecked(sp.getBoolean("boot", true));
-        menu.findItem(R.id.toast).setChecked(sp.getBoolean("toast", true));
-        menu.findItem(R.id.useronly).setChecked(sp.getBoolean("useronly", false));
-        boolean crashFixEnabled = sp.getBoolean("crashfix", false);
-        menu.findItem(R.id.crashfix).setChecked(crashFixEnabled);
-        menu.findItem(R.id.periodic_check).setChecked(sp.getBoolean("periodic_check", true));
-        menu.findItem(R.id.periodic_check).setEnabled(crashFixEnabled);
-        menu.findItem(R.id.unlock_crash_check).setChecked(sp.getBoolean("unlock_crash_check", false));
-        menu.findItem(R.id.unlock_crash_check).setEnabled(crashFixEnabled);
-        menu.findItem(R.id.fixmode).setChecked(sp.getBoolean("fixmode", true));
-        menu.findItem(R.id.fixmode).setEnabled(crashFixEnabled);
-        menu.findItem(R.id.hide).setChecked(sp.getBoolean("hide", true));
-        menu.findItem(R.id.delay_daemon).setChecked(sp.getBoolean("delay_daemon", false));
+        if (!mUseDialogSettings) {
+            menu.findItem(R.id.boot).setChecked(sp.getBoolean("boot", true));
+            menu.findItem(R.id.toast).setChecked(sp.getBoolean("toast", true));
+            menu.findItem(R.id.useronly).setChecked(sp.getBoolean("useronly", false));
+            boolean crashFixEnabled = sp.getBoolean("crashfix", false);
+            menu.findItem(R.id.crashfix).setChecked(crashFixEnabled);
+            menu.findItem(R.id.periodic_check).setChecked(sp.getBoolean("periodic_check", true));
+            menu.findItem(R.id.periodic_check).setEnabled(crashFixEnabled);
+            menu.findItem(R.id.unlock_crash_check).setChecked(sp.getBoolean("unlock_crash_check", false));
+            menu.findItem(R.id.unlock_crash_check).setEnabled(crashFixEnabled);
+            menu.findItem(R.id.fixmode).setChecked(sp.getBoolean("fixmode", true));
+            menu.findItem(R.id.fixmode).setEnabled(crashFixEnabled);
+            menu.findItem(R.id.hide).setChecked(sp.getBoolean("hide", true));
+            menu.findItem(R.id.delay_daemon).setChecked(sp.getBoolean("delay_daemon", false));
+        }
 
         MenuItem permItem = menu.findItem(R.id.perm_status);
         if (permItem != null) {
@@ -582,133 +586,279 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
-        getMenuInflater().inflate(R.menu.arrange, menu);
+        if (mUseDialogSettings) {
+            getMenuInflater().inflate(R.menu.arrange, menu);
+        } else {
+            getMenuInflater().inflate(R.menu.arrange_overflow, menu);
+        }
         return super.onCreateOptionsMenu(menu);
     }
 
     @Override
     public boolean onOptionsItemSelected(MenuItem menuItem) {
         int itemId = menuItem.getItemId();
-        if (itemId == R.id.boot) {
-            sp.edit().putBoolean("boot", !menuItem.isChecked()).apply();
-            menuItem.setChecked(!menuItem.isChecked());
-        } else if (itemId == R.id.toast) {
-            sp.edit().putBoolean("toast", !menuItem.isChecked()).apply();
-            menuItem.setChecked(!menuItem.isChecked());
-        } else if (itemId == R.id.useronly) {
-            sp.edit().putBoolean("useronly", !menuItem.isChecked()).apply();
-            menuItem.setChecked(!menuItem.isChecked());
-            Sort();
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    listView.setAdapter(new adapter(tmp));
+
+        if (!mUseDialogSettings) {
+            if (itemId == R.id.boot) {
+                sp.edit().putBoolean("boot", !menuItem.isChecked()).apply();
+                menuItem.setChecked(!menuItem.isChecked());
+            } else if (itemId == R.id.toast) {
+                sp.edit().putBoolean("toast", !menuItem.isChecked()).apply();
+                menuItem.setChecked(!menuItem.isChecked());
+            } else if (itemId == R.id.useronly) {
+                sp.edit().putBoolean("useronly", !menuItem.isChecked()).apply();
+                menuItem.setChecked(!menuItem.isChecked());
+                Sort();
+                runOnUiThread(() -> listView.setAdapter(new adapter(tmp)));
+            } else if (itemId == R.id.crashfix) {
+                boolean newState = !menuItem.isChecked();
+                if (newState) {
+                    ShellUtil.reset();
+                    ShellUtil.getPermissionState();
+                    if (!ShellUtil.hasAnyPermission()) {
+                        requestCrashFixPermission(false);
+                        return true;
+                    }
                 }
-            });
-        } else if (itemId == R.id.crashfix) {
-            boolean newState = !menuItem.isChecked();
-            if (newState) {
+                sp.edit().putBoolean("crashfix", newState).putBoolean("crashfix_auto_disabled", false).apply();
+                menuItem.setChecked(newState);
+                invalidateOptionsMenu();
+            } else if (itemId == R.id.periodic_check) {
+                boolean newState = !menuItem.isChecked();
+                sp.edit().putBoolean("periodic_check", newState).apply();
+                menuItem.setChecked(newState);
+                if (newState) {
+                    TimerReceiver.scheduleNext(this);
+                } else {
+                    TimerReceiver.cancel(this);
+                }
+            } else if (itemId == R.id.unlock_crash_check) {
+                boolean newState = !menuItem.isChecked();
+                if (newState && !sp.getBoolean("unlock_crash_dialog_dismissed", false)) {
+                    new AlertDialog.Builder(this)
+                            .setTitle("提示")
+                            .setMessage("经过测试，开启自启动权限才可稳定接收解锁广播信号，建议去系统设置开启无障碍管理器自启动。")
+                            .setNegativeButton("不再提示", (d, w) -> {
+                                sp.edit().putBoolean("unlock_crash_dialog_dismissed", true).apply();
+                                sp.edit().putBoolean("unlock_crash_check", true).apply();
+                                menuItem.setChecked(true);
+                                invalidateOptionsMenu();
+                            })
+                            .setPositiveButton("确定", (d, w) -> {
+                                sp.edit().putBoolean("unlock_crash_check", true).apply();
+                                menuItem.setChecked(true);
+                                invalidateOptionsMenu();
+                            })
+                            .create().show();
+                    return true;
+                }
+                sp.edit().putBoolean("unlock_crash_check", newState).apply();
+                menuItem.setChecked(newState);
+                invalidateOptionsMenu();
+            } else if (itemId == R.id.fixmode) {
+                sp.edit().putBoolean("fixmode", !menuItem.isChecked()).apply();
+                menuItem.setChecked(!menuItem.isChecked());
+            } else if (itemId == R.id.delay_daemon) {
+                sp.edit().putBoolean("delay_daemon", !menuItem.isChecked()).apply();
+                menuItem.setChecked(!menuItem.isChecked());
+            } else if (itemId == R.id.notify_custom) {
+                showNotifyCustomDialog();
+            } else if (itemId == R.id.periodic_interval) {
+                showIntervalDialog(null);
+            } else if (itemId == R.id.hide) {
+                sp.edit().putBoolean("hide", !menuItem.isChecked()).apply();
+                menuItem.setChecked(!menuItem.isChecked());
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    ((ActivityManager) getSystemService(Service.ACTIVITY_SERVICE)).getAppTasks().get(0).setExcludeFromRecents(sp.getBoolean("hide", true));
+                }
+            } else if (itemId == R.id.viewlog) {
+                showLogDialog();
+            }
+            return super.onOptionsItemSelected(menuItem);
+        }
+
+        if (itemId == R.id.settings) {
+            showSettingsDialog();
+        } else if (itemId == R.id.viewlog) {
+            showLogDialog();
+        }
+        return super.onOptionsItemSelected(menuItem);
+    }
+
+    private void showLogDialog() {
+        String logContent = LogUtil.readTodayLog(this);
+        if (logContent.length() == 0) logContent = "今日暂无日志记录";
+
+        int defaultColor = night ? Color.WHITE : Color.BLACK;
+        int crashDetectColor = Color.rgb(0xE0, 0x6D, 0x00);
+        int crashFixColor = Color.rgb(0x22, 0x88, 0xDD);
+        int daemonColor = Color.rgb(0x22, 0xAA, 0x22);
+
+        SpannableStringBuilder ssb = new SpannableStringBuilder();
+        for (String line : logContent.split("\n")) {
+            int start = ssb.length();
+            ssb.append(line);
+            ssb.append("\n");
+            int end = ssb.length();
+            int color;
+            if (line.contains("[崩溃检测]")) {
+                color = crashDetectColor;
+            } else if (line.contains("[崩溃修复]") || line.contains("[崩溃修复-重试]")) {
+                color = crashFixColor;
+            } else if (line.contains("[保活]")) {
+                color = daemonColor;
+            } else {
+                color = defaultColor;
+            }
+            ssb.setSpan(new ForegroundColorSpan(color), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+
+        final ScrollView scrollView = new ScrollView(this);
+        final TextView textView = new TextView(this);
+        textView.setTextIsSelectable(true);
+        textView.setPadding(40, 20, 40, 20);
+        textView.setTextSize(12f);
+        textView.setText(ssb);
+        scrollView.addView(textView);
+        scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
+        new AlertDialog.Builder(this)
+                .setTitle("今日运行日志")
+                .setView(scrollView)
+                .setPositiveButton("关闭", null)
+                .create().show();
+    }
+
+    private void showSettingsDialog() {
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_settings, null);
+
+        Switch switchBoot = dialogView.findViewById(R.id.boot);
+        Switch switchToast = dialogView.findViewById(R.id.toast);
+        Switch switchUserOnly = dialogView.findViewById(R.id.useronly);
+        Switch switchHide = dialogView.findViewById(R.id.hide);
+        Switch switchDelayDaemon = dialogView.findViewById(R.id.delay_daemon);
+        Switch switchCrashFix = dialogView.findViewById(R.id.crashfix);
+        Switch switchUnlockCrashCheck = dialogView.findViewById(R.id.unlock_crash_check);
+        Switch switchFixMode = dialogView.findViewById(R.id.fixmode);
+        Switch switchPeriodicCheck = dialogView.findViewById(R.id.periodic_check);
+        TextView intervalLabel = dialogView.findViewById(R.id.periodic_interval_label);
+        TextView notifyCustomBtn = dialogView.findViewById(R.id.notify_custom_btn);
+
+        switchBoot.setChecked(sp.getBoolean("boot", true));
+        switchToast.setChecked(sp.getBoolean("toast", true));
+        switchUserOnly.setChecked(sp.getBoolean("useronly", false));
+        switchHide.setChecked(sp.getBoolean("hide", true));
+        switchDelayDaemon.setChecked(sp.getBoolean("delay_daemon", false));
+        switchCrashFix.setChecked(sp.getBoolean("crashfix", false));
+        switchUnlockCrashCheck.setChecked(sp.getBoolean("unlock_crash_check", false));
+        switchFixMode.setChecked(sp.getBoolean("fixmode", true));
+        switchPeriodicCheck.setChecked(sp.getBoolean("periodic_check", true));
+        intervalLabel.setText(sp.getInt("periodic_check_interval", 10) + "分钟");
+
+        refreshCrashFixDependent(dialogView);
+
+        switchBoot.setOnCheckedChangeListener((btn, checked) -> {
+            sp.edit().putBoolean("boot", checked).apply();
+        });
+
+        switchToast.setOnCheckedChangeListener((btn, checked) -> {
+            sp.edit().putBoolean("toast", checked).apply();
+        });
+
+        switchUserOnly.setOnCheckedChangeListener((btn, checked) -> {
+            sp.edit().putBoolean("useronly", checked).apply();
+            Sort();
+            runOnUiThread(() -> listView.setAdapter(new adapter(tmp)));
+        });
+
+        switchHide.setOnCheckedChangeListener((btn, checked) -> {
+            sp.edit().putBoolean("hide", checked).apply();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                ((ActivityManager) getSystemService(Service.ACTIVITY_SERVICE)).getAppTasks().get(0).setExcludeFromRecents(checked);
+            }
+        });
+
+        switchDelayDaemon.setOnCheckedChangeListener((btn, checked) -> {
+            sp.edit().putBoolean("delay_daemon", checked).apply();
+        });
+
+        final Switch crashFixRef = switchCrashFix;
+        final CompoundButton.OnCheckedChangeListener[] crashFixListenerHolder = new CompoundButton.OnCheckedChangeListener[1];
+        crashFixListenerHolder[0] = (btn, checked) -> {
+            if (checked) {
                 ShellUtil.reset();
                 ShellUtil.getPermissionState();
                 if (!ShellUtil.hasAnyPermission()) {
+                    crashFixRef.setOnCheckedChangeListener(null);
+                    crashFixRef.setChecked(false);
+                    crashFixRef.setOnCheckedChangeListener(crashFixListenerHolder[0]);
                     requestCrashFixPermission(false);
-                    return true;
+                    return;
                 }
             }
-            sp.edit().putBoolean("crashfix", newState).putBoolean("crashfix_auto_disabled", false).apply();
-            menuItem.setChecked(newState);
-            invalidateOptionsMenu();
-        } else if (itemId == R.id.periodic_check) {
-            boolean newState = !menuItem.isChecked();
-            sp.edit().putBoolean("periodic_check", newState).apply();
-            menuItem.setChecked(newState);
-            if (newState) {
-                TimerReceiver.scheduleNext(this);
-            } else {
-                TimerReceiver.cancel(this);
-            }
-        } else if (itemId == R.id.unlock_crash_check) {
-            boolean newState = !menuItem.isChecked();
-            if (newState && !sp.getBoolean("unlock_crash_dialog_dismissed", false)) {
+            sp.edit().putBoolean("crashfix", checked).putBoolean("crashfix_auto_disabled", false).apply();
+            refreshCrashFixDependent(dialogView);
+        };
+        switchCrashFix.setOnCheckedChangeListener(crashFixListenerHolder[0]);
+
+        final Switch unlockCrashCheckRef = switchUnlockCrashCheck;
+        final CompoundButton.OnCheckedChangeListener[] unlockCrashCheckListenerHolder = new CompoundButton.OnCheckedChangeListener[1];
+        unlockCrashCheckListenerHolder[0] = (btn, checked) -> {
+            if (checked && !sp.getBoolean("unlock_crash_dialog_dismissed", false)) {
                 new AlertDialog.Builder(this)
                         .setTitle("提示")
                         .setMessage("经过测试，开启自启动权限才可稳定接收解锁广播信号，建议去系统设置开启无障碍管理器自启动。")
-                        .setNegativeButton("不再提示", (dialog, which) -> {
+                        .setNegativeButton("不再提示", (d, w) -> {
                             sp.edit().putBoolean("unlock_crash_dialog_dismissed", true).apply();
                             sp.edit().putBoolean("unlock_crash_check", true).apply();
-                            menuItem.setChecked(true);
-                            invalidateOptionsMenu();
+                            unlockCrashCheckRef.setOnCheckedChangeListener(null);
+                            unlockCrashCheckRef.setChecked(true);
+                            unlockCrashCheckRef.setOnCheckedChangeListener(unlockCrashCheckListenerHolder[0]);
                         })
-                        .setPositiveButton("确定", (dialog, which) -> {
+                        .setPositiveButton("确定", (d, w) -> {
                             sp.edit().putBoolean("unlock_crash_check", true).apply();
-                            menuItem.setChecked(true);
-                            invalidateOptionsMenu();
+                            unlockCrashCheckRef.setOnCheckedChangeListener(null);
+                            unlockCrashCheckRef.setChecked(true);
+                            unlockCrashCheckRef.setOnCheckedChangeListener(unlockCrashCheckListenerHolder[0]);
                         })
                         .create().show();
-                return true;
+                return;
             }
-            sp.edit().putBoolean("unlock_crash_check", newState).apply();
-            menuItem.setChecked(newState);
-            invalidateOptionsMenu();
-        } else if (itemId == R.id.fixmode) {
-            sp.edit().putBoolean("fixmode", !menuItem.isChecked()).apply();
-            menuItem.setChecked(!menuItem.isChecked());
-        } else if (itemId == R.id.delay_daemon) {
-            sp.edit().putBoolean("delay_daemon", !menuItem.isChecked()).apply();
-            menuItem.setChecked(!menuItem.isChecked());
-        } else if (itemId == R.id.notify_custom) {
-            showNotifyCustomDialog();
-        } else if (itemId == R.id.viewlog) {
-            String logContent = LogUtil.readTodayLog(this);
-            if (logContent.length() == 0) logContent = "今日暂无日志记录";
+            sp.edit().putBoolean("unlock_crash_check", checked).apply();
+        };
+        switchUnlockCrashCheck.setOnCheckedChangeListener(unlockCrashCheckListenerHolder[0]);
 
-            int defaultColor = night ? Color.WHITE : Color.BLACK;
-            int crashDetectColor = Color.rgb(0xE0, 0x6D, 0x00);
-            int crashFixColor = Color.rgb(0x22, 0x88, 0xDD);
-            int daemonColor = Color.rgb(0x22, 0xAA, 0x22);
+        switchFixMode.setOnCheckedChangeListener((btn, checked) -> {
+            sp.edit().putBoolean("fixmode", checked).apply();
+        });
 
-            SpannableStringBuilder ssb = new SpannableStringBuilder();
-            for (String line : logContent.split("\n")) {
-                int start = ssb.length();
-                ssb.append(line);
-                ssb.append("\n");
-                int end = ssb.length();
-                int color;
-                if (line.contains("[崩溃检测]")) {
-                    color = crashDetectColor;
-                } else if (line.contains("[崩溃修复]") || line.contains("[崩溃修复-重试]")) {
-                    color = crashFixColor;
-                } else if (line.contains("[保活]")) {
-                    color = daemonColor;
-                } else {
-                    color = defaultColor;
-                }
-                ssb.setSpan(new ForegroundColorSpan(color), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        switchPeriodicCheck.setOnCheckedChangeListener((btn, checked) -> {
+            sp.edit().putBoolean("periodic_check", checked).apply();
+            if (checked) {
+                TimerReceiver.scheduleNext(MainActivity.this);
+            } else {
+                TimerReceiver.cancel(MainActivity.this);
             }
+        });
 
-            final ScrollView scrollView = new ScrollView(this);
-            final TextView textView = new TextView(this);
-            textView.setTextIsSelectable(true);
-            textView.setPadding(40, 20, 40, 20);
-            textView.setTextSize(12f);
-            textView.setText(ssb);
-            scrollView.addView(textView);
-            scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
-            new AlertDialog.Builder(this)
-                    .setTitle("今日运行日志")
-                    .setView(scrollView)
-                    .setPositiveButton("关闭", null)
-                    .create().show();
-        } else if (itemId == R.id.hide) {
-            sp.edit().putBoolean("hide", !menuItem.isChecked()).apply();
-            menuItem.setChecked(!menuItem.isChecked());
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                ((ActivityManager) getSystemService(Service.ACTIVITY_SERVICE)).getAppTasks().get(0).setExcludeFromRecents(sp.getBoolean("hide", true));
-            }
-        } else if (itemId == R.id.periodic_interval) {
-            showIntervalDialog();
-        }
-        return super.onOptionsItemSelected(menuItem);
+        intervalLabel.setOnClickListener(v -> showIntervalDialog(() -> {
+            intervalLabel.setText(sp.getInt("periodic_check_interval", 10) + "分钟");
+        }));
+
+        notifyCustomBtn.setOnClickListener(v -> showNotifyCustomDialog());
+
+        new AlertDialog.Builder(this)
+                .setTitle("设置")
+                .setView(dialogView)
+                .setPositiveButton("关闭", null)
+                .create().show();
+    }
+
+    private void refreshCrashFixDependent(View dialogView) {
+        boolean crashFixEnabled = ((Switch) dialogView.findViewById(R.id.crashfix)).isChecked();
+        dialogView.findViewById(R.id.unlock_crash_check).setEnabled(crashFixEnabled);
+        dialogView.findViewById(R.id.fixmode).setEnabled(crashFixEnabled);
+        dialogView.findViewById(R.id.periodic_check).setEnabled(crashFixEnabled);
+        dialogView.findViewById(R.id.periodic_interval_label).setEnabled(crashFixEnabled);
     }
 
     //这个是用于适配列表中的每一项设置项的显示
@@ -1071,7 +1221,7 @@ public class MainActivity extends AppCompatActivity {
                 .create().show();
     }
 
-    private void showIntervalDialog() {
+    private void showIntervalDialog(Runnable onSaved) {
         int currentInterval = sp.getInt("periodic_check_interval", 10);
 
         LinearLayout layout = new LinearLayout(this);
@@ -1126,6 +1276,7 @@ public class MainActivity extends AppCompatActivity {
                 LogUtil.log(MainActivity.this, "[定时检测] 已设置新间隔 = " + minutes + " 分钟");
                 Toast.makeText(MainActivity.this, "定时检测间隔已设为 " + minutes + " 分钟", Toast.LENGTH_SHORT).show();
                 dialog.dismiss();
+                if (onSaved != null) onSaved.run();
             }
         });
     }
