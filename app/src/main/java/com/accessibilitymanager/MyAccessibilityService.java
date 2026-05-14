@@ -1,7 +1,6 @@
 package com.accessibilitymanager;
 
 import android.accessibilityservice.AccessibilityService;
-import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.KeyguardManager;
 import android.content.Context;
 import android.content.Intent;
@@ -65,18 +64,10 @@ public class MyAccessibilityService extends AccessibilityService {
     @Override
     public void onServiceConnected() {
         super.onServiceConnected();
-        AccessibilityServiceInfo info = new AccessibilityServiceInfo();
-        info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED;
-        info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
-        info.notificationTimeout = 100;
-        info.flags = AccessibilityServiceInfo.DEFAULT;
-        setServiceInfo(info);
-
         KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
         if (km != null) {
             mWasLocked = km.isKeyguardLocked();
         }
-        LogUtil.log(this, "[无障碍服务] 服务已连接");
     }
 
     @Override
