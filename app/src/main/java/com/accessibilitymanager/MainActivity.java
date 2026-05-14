@@ -290,6 +290,7 @@ public class MainActivity extends AppCompatActivity {
     private void Sort() {
         tmp = new ArrayList<>();
         boolean userOnly = sp.getBoolean("useronly", false);
+        final String ownServiceId = new ComponentName(MainActivity.this, MyAccessibilityService.class).flattenToString();
         for (AccessibilityServiceInfo info : l) {
             if (userOnly && !isUserApp(info)) continue;
             tmp.add(info);
@@ -311,6 +312,13 @@ public class MainActivity extends AppCompatActivity {
                 boolean enabled2 = isServiceEnabled(id2, currentSetting);
                 if (enabled1 && !enabled2) return -1;
                 if (!enabled1 && enabled2) return 1;
+                ComponentName ownCn = ComponentName.unflattenFromString(ownServiceId);
+                ComponentName cn1 = ComponentName.unflattenFromString(id1);
+                ComponentName cn2 = ComponentName.unflattenFromString(id2);
+                boolean own1 = ownCn != null && ownCn.equals(cn1);
+                boolean own2 = ownCn != null && ownCn.equals(cn2);
+                if (own1 && !own2) return -1;
+                if (!own1 && own2) return 1;
                 return 0;
             }
         });
@@ -742,6 +750,7 @@ public class MainActivity extends AppCompatActivity {
         Switch switchPeriodicCheck = dialogView.findViewById(R.id.periodic_check);
         TextView intervalLabel = dialogView.findViewById(R.id.periodic_interval_label);
         TextView notifyCustomBtn = dialogView.findViewById(R.id.notify_custom_btn);
+        TextView crashTutorialBtn = dialogView.findViewById(R.id.crash_tutorial_btn);
 
         switchBoot.setChecked(sp.getBoolean("boot", true));
         switchToast.setChecked(sp.getBoolean("toast", true));
@@ -838,13 +847,29 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 TimerReceiver.cancel(MainActivity.this);
             }
+            intervalLabel.setTextColor(checked ? 0xFF0096FF : 0xFF999999);
         });
 
-        intervalLabel.setOnClickListener(v -> showIntervalDialog(() -> {
-            intervalLabel.setText(sp.getInt("periodic_check_interval", 10) + "分钟");
-        }));
+        intervalLabel.setOnClickListener(v -> {
+            if (!switchPeriodicCheck.isChecked()) return;
+            showIntervalDialog(() -> {
+                intervalLabel.setText(sp.getInt("periodic_check_interval", 10) + "分钟");
+            });
+        });
 
         notifyCustomBtn.setOnClickListener(v -> showNotifyCustomDialog());
+
+        crashTutorialBtn.setOnClickListener(v -> {
+            new AlertDialog.Builder(this)
+                    .setTitle("崩溃服务检测说明")
+                    .setMessage("1. 崩溃检测：自动检测无障碍服务是否出现假死（崩溃）状态，即服务已开启但无障碍设置中显示\"无法运行\"的情况,也就是失效了。\n\n" +
+                            "2. 检测方式：如果开启解锁设备时检测，请开启 无障碍管理器 自身的无障碍服务并加锁；定时检测可作为辅助检测方式" +
+                            "3. 崩溃修复：检测到崩溃后自动修复。默认方式为关闭后重新开启无障碍服务；如果修复后仍然崩溃，可勾选\"崩溃修复强行停止对应app\" ，强制停止对应应用后自动重新保活打开。\n\n" +
+                            "4. 定时检测间隔：设置定时检测崩溃服务的时间间隔，建议不低于5分钟。\n\n" +
+                            "5. 延迟1秒保活：保活操作过快可能导致失败，开启后将延迟1秒再执行保活，提高成功率。")
+                    .setPositiveButton("知道了", null)
+                    .create().show();
+        });
 
         new AlertDialog.Builder(this)
                 .setTitle("设置")
@@ -855,10 +880,11 @@ public class MainActivity extends AppCompatActivity {
 
     private void refreshCrashFixDependent(View dialogView) {
         boolean crashFixEnabled = ((Switch) dialogView.findViewById(R.id.crashfix)).isChecked();
+        boolean periodicEnabled = crashFixEnabled && ((Switch) dialogView.findViewById(R.id.periodic_check)).isChecked();
         dialogView.findViewById(R.id.unlock_crash_check).setEnabled(crashFixEnabled);
         dialogView.findViewById(R.id.fixmode).setEnabled(crashFixEnabled);
         dialogView.findViewById(R.id.periodic_check).setEnabled(crashFixEnabled);
-        dialogView.findViewById(R.id.periodic_interval_label).setEnabled(crashFixEnabled);
+        ((TextView) dialogView.findViewById(R.id.periodic_interval_label)).setTextColor(periodicEnabled ? 0xFF0096FF : 0xFF999999);
     }
 
     //这个是用于适配列表中的每一项设置项的显示

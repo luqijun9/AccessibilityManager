@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_service_description">用于接收开屏和解锁事件，从而在设备解锁时触发崩溃检测。</string>
+</resources>

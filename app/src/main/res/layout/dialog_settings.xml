@@ -147,7 +147,7 @@
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="6dp"
             android:layout_marginBottom="12dp"
             android:background="#33000000" />
 
@@ -155,7 +155,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:paddingBottom="8dp"
-            android:text="崩溃修复设置(需shizuku或root权限)"
+            android:text="崩溃服务检测设置(需shizuku或root权限)"
             android:textColor="#888888"
             android:textSize="13sp" />
 
@@ -166,12 +166,32 @@
             android:paddingTop="10dp"
             android:paddingBottom="10dp">
 
-            <TextView
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="崩溃检测修复总开关"
-                android:textSize="16sp" />
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="崩溃服务检测总开关"
+                    android:textSize="16sp" />
+
+                <TextView
+                    android:id="@+id/crash_tutorial_btn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:padding="6dp"
+                    android:text="ⓘ"
+                    android:textColor="#0096ff"
+                    android:textSize="16sp" />
+
+            </LinearLayout>
 
             <Switch
                 android:id="@+id/crashfix"
@@ -190,7 +210,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="解锁设备触发检测"
+                android:text="-解锁设备时检测(开启无障碍)"
                 android:textSize="16sp" />
 
             <Switch
@@ -210,7 +230,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="崩溃修复使用强行停止app方式"
+                android:text="-崩溃修复时强杀对应app"
                 android:textSize="16sp" />
 
             <Switch
@@ -230,7 +250,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="启用定时崩溃检测"
+                android:text="-定时崩溃检测"
                 android:textSize="16sp" />
 
             <Switch
@@ -250,7 +270,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="设定定时崩溃检测间隔"
+                android:text="-设定定时崩溃检测间隔"
                 android:textSize="16sp" />
 
             <TextView

@@ -543,13 +543,9 @@ public class daemonService extends Service {
         String alarmSource = intent != null ? intent.getStringExtra("source") : null;
         if ("Alarm".equals(alarmSource)) {
             checkCrashedServices("Alarm");
-        }
-
-        // 服务首次创建时，onCreate 中已触发过"服务启动"的崩溃检测。
-        // 因此紧跟在 onCreate 之后的首次 onStartCommand 不需要再检测，避免重复。
-        // 只有当 App 在服务已运行时再次 startService（如打开界面刷新），
-        // 才触发一次"服务刷新"的崩溃检测。
-        if (!mFirstCommandAfterCreate) {
+        } else if ("AccessibilityService".equals(alarmSource)) {
+            checkCrashedServices("解锁(无障碍检测)");
+        } else if (!mFirstCommandAfterCreate) {
             checkCrashedServices("服务刷新");
         }
         mFirstCommandAfterCreate = false;
