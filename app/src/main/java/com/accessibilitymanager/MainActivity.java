@@ -613,6 +613,13 @@ public class MainActivity extends AppCompatActivity {
                 showNoPermissionDialog(false);
                 return true;
             }
+            int state = ShellUtil.getPermissionState();
+            if (state == ShellUtil.PERM_ROOT) {
+                Toast.makeText(this, "已获取root权限", Toast.LENGTH_SHORT).show();
+            } else if (state == ShellUtil.PERM_SHIZUKU) {
+                Toast.makeText(this, "已获取shizuku权限", Toast.LENGTH_SHORT).show();
+            }
+            return true;
         }
 
         if (!mUseDialogSettings) {
