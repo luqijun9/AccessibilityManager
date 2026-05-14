@@ -68,6 +68,7 @@ public class daemonService extends Service {
             if (settingChanged) {
                 doDaemon(set);
             }
+            if (!sp.getBoolean("unlock_crash_check", false)) return;
             if (!mIsFixing || System.currentTimeMillis() - mLastFixStartTime > 5000) {
                 if (mIsFixing) {
                     LogUtil.log(daemonService.this, "[崩溃检测] 修复操作超时，强制重置mIsFixing");

@@ -31,7 +31,12 @@
         android:id="@+id/crashfix"
         android:checkable="true"
         app:showAsAction="never"
-        android:title="启用崩溃修复" />
+        android:title="启用崩溃检修" />
+    <item
+        android:id="@+id/unlock_crash_check"
+        android:checkable="true"
+        app:showAsAction="never"
+        android:title="手机解锁检测一次" />
     <item
     android:id="@+id/fixmode"
         android:checkable="true"
@@ -41,7 +46,7 @@
         android:id="@+id/periodic_check"
         android:checkable="true"
         app:showAsAction="never"
-        android:title="启用定时崩溃检测" />
+        android:title="定时崩溃检测" />
     <item
         android:id="@+id/periodic_interval"
         app:showAsAction="never"

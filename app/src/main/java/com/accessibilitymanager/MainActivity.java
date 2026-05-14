@@ -547,6 +547,8 @@ public class MainActivity extends AppCompatActivity {
         menu.findItem(R.id.crashfix).setChecked(crashFixEnabled);
         menu.findItem(R.id.periodic_check).setChecked(sp.getBoolean("periodic_check", true));
         menu.findItem(R.id.periodic_check).setEnabled(crashFixEnabled);
+        menu.findItem(R.id.unlock_crash_check).setChecked(sp.getBoolean("unlock_crash_check", false));
+        menu.findItem(R.id.unlock_crash_check).setEnabled(crashFixEnabled);
         menu.findItem(R.id.fixmode).setChecked(sp.getBoolean("fixmode", true));
         menu.findItem(R.id.fixmode).setEnabled(crashFixEnabled);
         menu.findItem(R.id.hide).setChecked(sp.getBoolean("hide", true));
@@ -625,6 +627,29 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 TimerReceiver.cancel(this);
             }
+        } else if (itemId == R.id.unlock_crash_check) {
+            boolean newState = !menuItem.isChecked();
+            if (newState && !sp.getBoolean("unlock_crash_dialog_dismissed", false)) {
+                new AlertDialog.Builder(this)
+                        .setTitle("提示")
+                        .setMessage("经过测试，开启自启动权限才可稳定接收解锁广播信号，建议去系统设置开启无障碍管理器自启动。")
+                        .setNegativeButton("不再提示", (dialog, which) -> {
+                            sp.edit().putBoolean("unlock_crash_dialog_dismissed", true).apply();
+                            sp.edit().putBoolean("unlock_crash_check", true).apply();
+                            menuItem.setChecked(true);
+                            invalidateOptionsMenu();
+                        })
+                        .setPositiveButton("确定", (dialog, which) -> {
+                            sp.edit().putBoolean("unlock_crash_check", true).apply();
+                            menuItem.setChecked(true);
+                            invalidateOptionsMenu();
+                        })
+                        .create().show();
+                return true;
+            }
+            sp.edit().putBoolean("unlock_crash_check", newState).apply();
+            menuItem.setChecked(newState);
+            invalidateOptionsMenu();
         } else if (itemId == R.id.fixmode) {
             sp.edit().putBoolean("fixmode", !menuItem.isChecked()).apply();
             menuItem.setChecked(!menuItem.isChecked());
