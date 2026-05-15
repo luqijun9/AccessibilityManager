@@ -6,9 +6,6 @@
         <item name="colorAccent">@color/bg</item>
     </style>
 
-    <style name="PopupOverlay_Dark" parent="ThemeOverlay.AppCompat.Dark" />
-    <style name="PopupOverlay_Light" parent="ThemeOverlay.AppCompat.Light" />
-
     <style name="ToolbarOverlay" parent="ThemeOverlay.AppCompat">
         <item name="android:textAllCaps">false</item>
     </style>

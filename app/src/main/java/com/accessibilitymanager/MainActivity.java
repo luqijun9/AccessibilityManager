@@ -75,7 +75,6 @@ public class MainActivity extends AppCompatActivity {
     boolean perm = false;//是否获取了权限
     private boolean listenerAdded = false;//是否添加了内容监视器
     private boolean mPendingCrashFixRequest = false;//是否有待处理的崩溃修复请求
-    private boolean mUseDialogSettings = true;//是否使用对话框设置
     private View mSettingsDialogView = null;//设置对话框View引用，用于Shizuku授权后刷新开关状态
 
     LinearLayout batteryWarning;//电池警告布局
@@ -125,11 +124,6 @@ public class MainActivity extends AppCompatActivity {
         Toolbar toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
         toolbar.setTitleTextColor(night ? Color.WHITE : Color.BLACK);
-        toolbar.setPopupTheme(night ? R.style.PopupOverlay_Dark : R.style.PopupOverlay_Light);
-        Drawable overflowIcon = toolbar.getOverflowIcon();
-        if (overflowIcon != null) {
-            overflowIcon.setTint(night ? Color.WHITE : Color.BLACK);
-        }
 
         if (!night) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -547,22 +541,6 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public boolean onPrepareOptionsMenu(Menu menu) {
-        if (!mUseDialogSettings) {
-            menu.findItem(R.id.boot).setChecked(sp.getBoolean("boot", true));
-            menu.findItem(R.id.toast).setChecked(sp.getBoolean("toast", true));
-            menu.findItem(R.id.useronly).setChecked(sp.getBoolean("useronly", false));
-            boolean crashFixEnabled = sp.getBoolean("crashfix", false);
-            menu.findItem(R.id.crashfix).setChecked(crashFixEnabled);
-            menu.findItem(R.id.periodic_check).setChecked(sp.getBoolean("periodic_check", true));
-            menu.findItem(R.id.periodic_check).setEnabled(crashFixEnabled);
-            menu.findItem(R.id.unlock_crash_check).setChecked(sp.getBoolean("unlock_crash_check", false));
-            menu.findItem(R.id.unlock_crash_check).setEnabled(crashFixEnabled);
-            menu.findItem(R.id.fixmode).setChecked(sp.getBoolean("fixmode", true));
-            menu.findItem(R.id.fixmode).setEnabled(crashFixEnabled);
-            menu.findItem(R.id.hide).setChecked(sp.getBoolean("hide", true));
-            menu.findItem(R.id.delay_daemon).setChecked(sp.getBoolean("delay_daemon", false));
-        }
-
         MenuItem permItem = menu.findItem(R.id.perm_status);
         if (permItem != null) {
             int state = ShellUtil.getPermissionState();
@@ -596,11 +574,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
-        if (mUseDialogSettings) {
-            getMenuInflater().inflate(R.menu.arrange, menu);
-        } else {
-            getMenuInflater().inflate(R.menu.arrange_overflow, menu);
-        }
+        getMenuInflater().inflate(R.menu.arrange, menu);
         return super.onCreateOptionsMenu(menu);
     }
 
@@ -620,85 +594,6 @@ public class MainActivity extends AppCompatActivity {
                 Toast.makeText(this, "已获取shizuku权限", Toast.LENGTH_SHORT).show();
             }
             return true;
-        }
-
-        if (!mUseDialogSettings) {
-            if (itemId == R.id.boot) {
-                sp.edit().putBoolean("boot", !menuItem.isChecked()).apply();
-                menuItem.setChecked(!menuItem.isChecked());
-            } else if (itemId == R.id.toast) {
-                sp.edit().putBoolean("toast", !menuItem.isChecked()).apply();
-                menuItem.setChecked(!menuItem.isChecked());
-            } else if (itemId == R.id.useronly) {
-                sp.edit().putBoolean("useronly", !menuItem.isChecked()).apply();
-                menuItem.setChecked(!menuItem.isChecked());
-                Sort();
-                runOnUiThread(() -> listView.setAdapter(new adapter(tmp)));
-            } else if (itemId == R.id.crashfix) {
-                boolean newState = !menuItem.isChecked();
-                if (newState) {
-                    ShellUtil.reset();
-                    ShellUtil.getPermissionState();
-                    if (!ShellUtil.hasAnyPermission()) {
-                        requestCrashFixPermission();
-                        return true;
-                    }
-                }
-                sp.edit().putBoolean("crashfix", newState).putBoolean("crashfix_auto_disabled", false).apply();
-                menuItem.setChecked(newState);
-                invalidateOptionsMenu();
-            } else if (itemId == R.id.periodic_check) {
-                boolean newState = !menuItem.isChecked();
-                sp.edit().putBoolean("periodic_check", newState).apply();
-                menuItem.setChecked(newState);
-                if (newState) {
-                    TimerReceiver.scheduleNext(this);
-                } else {
-                    TimerReceiver.cancel(this);
-                }
-            } else if (itemId == R.id.unlock_crash_check) {
-                boolean newState = !menuItem.isChecked();
-                if (newState && !sp.getBoolean("unlock_crash_dialog_dismissed", false)) {
-                    new AlertDialog.Builder(this)
-                            .setTitle("提示")
-                            .setMessage("使用此功能需要满足以下条件：\n① 开启无障碍管理器的无障碍服务\n② 开启无障碍管理器的自启动权限\n否则可能无效!!!。")
-                            .setNegativeButton("不再提示", (d, w) -> {
-                                sp.edit().putBoolean("unlock_crash_dialog_dismissed", true).apply();
-                                sp.edit().putBoolean("unlock_crash_check", true).apply();
-                                menuItem.setChecked(true);
-                                invalidateOptionsMenu();
-                            })
-                            .setPositiveButton("确定", (d, w) -> {
-                                sp.edit().putBoolean("unlock_crash_check", true).apply();
-                                menuItem.setChecked(true);
-                                invalidateOptionsMenu();
-                            })
-                            .create().show();
-                    return true;
-                }
-                sp.edit().putBoolean("unlock_crash_check", newState).apply();
-                menuItem.setChecked(newState);
-                invalidateOptionsMenu();
-            } else if (itemId == R.id.fixmode) {
-                sp.edit().putBoolean("fixmode", !menuItem.isChecked()).apply();
-                menuItem.setChecked(!menuItem.isChecked());
-            } else if (itemId == R.id.delay_daemon) {
-                sp.edit().putBoolean("delay_daemon", !menuItem.isChecked()).apply();
-                menuItem.setChecked(!menuItem.isChecked());
-            } else if (itemId == R.id.notify_custom) {
-                showNotifyCustomDialog();
-            } else if (itemId == R.id.periodic_interval) {
-                showIntervalDialog(null);
-            } else if (itemId == R.id.hide) {
-                sp.edit().putBoolean("hide", !menuItem.isChecked()).apply();
-                menuItem.setChecked(!menuItem.isChecked());
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    ((ActivityManager) getSystemService(Service.ACTIVITY_SERVICE)).getAppTasks().get(0).setExcludeFromRecents(sp.getBoolean("hide", true));
-                }
-            } else if (itemId == R.id.viewlog) {
-                showLogDialog();
-            }
-            return super.onOptionsItemSelected(menuItem);
         }
 
         if (itemId == R.id.settings) {
@@ -833,7 +728,7 @@ public class MainActivity extends AppCompatActivity {
             if (checked && !sp.getBoolean("unlock_crash_dialog_dismissed", false)) {
                 new AlertDialog.Builder(this)
                         .setTitle("提示")
-                        .setMessage("使用此功能需要满足以下条件：\n① 开启无障碍管理器的无障碍服务\n② 开启无障碍管理器的自启动权限\n否则可能无效!!!。")
+                        .setMessage("使用此功能需要满足以下条件之一：\n① 开启无障碍管理器的无障碍服务\n② 开启无障碍管理器的自启动权限\n否则可能无效!!!")
                         .setNegativeButton("不再提示", (d, w) -> {
                             sp.edit().putBoolean("unlock_crash_dialog_dismissed", true).apply();
                             sp.edit().putBoolean("unlock_crash_check", true).apply();
@@ -881,7 +776,7 @@ public class MainActivity extends AppCompatActivity {
             new AlertDialog.Builder(this)
                     .setTitle("崩溃服务检测说明")
                     .setMessage("1. 崩溃检测：自动检测无障碍服务是否出现假死（崩溃）状态，即服务已开启但无障碍设置中显示\"无法运行\"的情况，服务开着但无效\n\n" +
-                            "2. 解锁设备时检测：使用前提\n①开启无障碍管理器自身的无障碍服务并加锁保活\n②开启无障碍管理器的自启动权限\n否则可能无效!!!\n\n" +
+                            "2. 解锁设备时检测：使用该功能需满足以下条件之一\n①开启无障碍管理器自身的无障碍服务并加锁保活\n②开启无障碍管理器的自启动权限\n否则可能无效!!!\n\n" +
                             "3. 崩溃修复强杀app：默认修复方式为直接关闭其无障碍服务再打开；如果修复后仍然崩溃，可勾选\"崩溃修复强杀app\" 功能，将强制停止对应app后自动重新保活打开服务\n\n" +
                             "4. 定时检测间隔: 设置定时检测崩溃服务的时间间隔，建议不低于5分钟\n\n" +
                             "5. 延迟1秒保活: 保活操作过快也许可能导致失败，开启后将延迟1秒再执行保活，也许能提高成功率")
