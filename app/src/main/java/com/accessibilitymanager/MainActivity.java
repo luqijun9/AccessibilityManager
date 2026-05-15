@@ -663,6 +663,7 @@ public class MainActivity extends AppCompatActivity {
         TextView intervalLabel = dialogView.findViewById(R.id.periodic_interval_label);
         TextView notifyCustomBtn = dialogView.findViewById(R.id.notify_custom_btn);
         TextView crashTutorialBtn = dialogView.findViewById(R.id.crash_tutorial_btn);
+        TextView aboutBtn = dialogView.findViewById(R.id.about_btn);
 
         switchBoot.setChecked(sp.getBoolean("boot", true));
         switchToast.setChecked(sp.getBoolean("toast", true));
@@ -781,6 +782,19 @@ public class MainActivity extends AppCompatActivity {
                             "4. 定时检测间隔: 设置定时检测崩溃服务的时间间隔，建议不低于5分钟\n\n" +
                             "5. 延迟1秒保活: 保活操作过快也许可能导致失败，开启后将延迟1秒再执行保活，也许能提高成功率")
                     .setPositiveButton("知道了", null)
+                    .create().show();
+        });
+
+        aboutBtn.setOnClickListener(v -> {
+            TextView aboutText = new TextView(this);
+            aboutText.setTextIsSelectable(true);
+            aboutText.setText("交流群\nQQ群：1103445629");
+            aboutText.setTextSize(16);
+            aboutText.setPadding(64, 32, 64, 32);
+            new AlertDialog.Builder(this)
+                    .setTitle("关于")
+                    .setView(aboutText)
+                    .setPositiveButton("关闭", null)
                     .create().show();
         });
 
