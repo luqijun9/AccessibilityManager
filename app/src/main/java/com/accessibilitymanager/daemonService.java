@@ -423,6 +423,10 @@ public class daemonService extends Service {
 
         boolean useForceStop = sp.getBoolean("fixmode", true);
 
+        if (pkgName.equals(getPackageName())) {
+            useForceStop = false;
+        }
+
         ApplicationInfo applicationInfo = new ApplicationInfo();
         try {
             applicationInfo = packageManager.getApplicationInfo(pkgName, PackageManager.GET_META_DATA);
