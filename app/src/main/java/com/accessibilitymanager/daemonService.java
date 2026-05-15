@@ -78,9 +78,10 @@ public class daemonService extends Service {
                     mIsFixing = false;
                 }
                 if (settingChanged) {
-                    boolean isSystemChange = isChangeFromSystemApp(oldValue, set);
+                    String systemAppLabel = getSystemAppChangeLabel(oldValue, set);
                     boolean ignoreSystemChange = sp.getBoolean("ignore_system_crash_trigger", true);
-                    if (isSystemChange && ignoreSystemChange) {
+                    if (systemAppLabel != null && ignoreSystemChange) {
+                        LogUtil.log(daemonService.this, "忽略" + systemAppLabel + "的设置变化");
                         return;
                     }
                     mHandler.postDelayed(() -> checkCrashedServices("解锁"), 1000);
@@ -91,7 +92,7 @@ public class daemonService extends Service {
         }
     };
 
-    private boolean isChangeFromSystemApp(String oldValue, String newValue) {
+    private String getSystemAppChangeLabel(String oldValue, String newValue) {
         if (oldValue == null) oldValue = "";
         if (newValue == null) newValue = "";
         String changedService = null;
@@ -112,15 +113,16 @@ public class daemonService extends Service {
                 }
             }
         }
-        if (changedService == null) return false;
+        if (changedService == null) return null;
         try {
             int slashIdx = changedService.indexOf("/");
-            if (slashIdx <= 0) return false;
+            if (slashIdx <= 0) return null;
             String pkgName = changedService.substring(0, slashIdx);
             ApplicationInfo appInfo = packageManager.getApplicationInfo(pkgName, 0);
-            return (appInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+            if ((appInfo.flags & ApplicationInfo.FLAG_SYSTEM) == 0) return null;
+            return appInfo.loadLabel(packageManager).toString();
         } catch (PackageManager.NameNotFoundException e) {
-            return false;
+            return null;
         }
     }
 
@@ -137,8 +139,6 @@ public class daemonService extends Service {
             if (s == null) s = "";
             String oldValue = tmpSettingValue;
             boolean settingChanged = !oldValue.equals(s);
-            boolean isSystemChange = settingChanged && isChangeFromSystemApp(oldValue, s);
-            boolean ignoreSystemChange = sp.getBoolean("ignore_system_crash_trigger", true);
             if (settingChanged) {
                 doDaemon(s);
             }
@@ -147,7 +147,10 @@ public class daemonService extends Service {
                     LogUtil.log(daemonService.this, "[崩溃检测] 修复操作超时，强制重置mIsFixing");
                     mIsFixing = false;
                 }
-                if (isSystemChange && ignoreSystemChange) {
+                String systemAppLabel = getSystemAppChangeLabel(oldValue, s);
+                boolean ignoreSystemChange = sp.getBoolean("ignore_system_crash_trigger", true);
+                if (systemAppLabel != null && ignoreSystemChange) {
+                    LogUtil.log(daemonService.this, "忽略" + systemAppLabel + "的设置变化");
                     return;
                 }
                 mHandler.postDelayed(() -> checkCrashedServices("设置变化"), 1000);
