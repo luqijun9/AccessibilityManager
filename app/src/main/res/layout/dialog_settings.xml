@@ -210,11 +210,11 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="-解锁设备时检测 (请开启无障碍)"
+                android:text="-崩溃修复时强杀对应app"
                 android:textSize="16sp" />
 
             <Switch
-                android:id="@+id/unlock_crash_check"
+                android:id="@+id/fixmode"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content" />
         </LinearLayout>
@@ -230,11 +230,11 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="-崩溃修复时强杀对应app"
+                android:text="-解锁设备时检测 (请开启无障碍)"
                 android:textSize="16sp" />
 
             <Switch
-                android:id="@+id/fixmode"
+                android:id="@+id/unlock_crash_check"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content" />
         </LinearLayout>
