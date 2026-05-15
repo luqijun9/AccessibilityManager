@@ -660,6 +660,7 @@ public class MainActivity extends AppCompatActivity {
         Switch switchUnlockCrashCheck = dialogView.findViewById(R.id.unlock_crash_check);
         Switch switchFixMode = dialogView.findViewById(R.id.fixmode);
         Switch switchPeriodicCheck = dialogView.findViewById(R.id.periodic_check);
+        Switch switchIgnoreSystemCrash = dialogView.findViewById(R.id.ignore_system_crash);
         TextView intervalLabel = dialogView.findViewById(R.id.periodic_interval_label);
         TextView notifyCustomBtn = dialogView.findViewById(R.id.notify_custom_btn);
         TextView crashTutorialBtn = dialogView.findViewById(R.id.crash_tutorial_btn);
@@ -674,6 +675,7 @@ public class MainActivity extends AppCompatActivity {
         switchUnlockCrashCheck.setChecked(sp.getBoolean("unlock_crash_check", false));
         switchFixMode.setChecked(sp.getBoolean("fixmode", true));
         switchPeriodicCheck.setChecked(sp.getBoolean("periodic_check", true));
+        switchIgnoreSystemCrash.setChecked(sp.getBoolean("ignore_system_crash_trigger", true));
         intervalLabel.setText(sp.getInt("periodic_check_interval", 10) + "分钟");
 
         refreshCrashFixDependent(dialogView);
@@ -764,6 +766,10 @@ public class MainActivity extends AppCompatActivity {
             intervalLabel.setTextColor(checked ? 0xFF0096FF : 0xFF999999);
         });
 
+        switchIgnoreSystemCrash.setOnCheckedChangeListener((btn, checked) -> {
+            sp.edit().putBoolean("ignore_system_crash_trigger", checked).apply();
+        });
+
         intervalLabel.setOnClickListener(v -> {
             if (!switchPeriodicCheck.isChecked()) return;
             showIntervalDialog(() -> {
@@ -811,6 +817,7 @@ public class MainActivity extends AppCompatActivity {
         dialogView.findViewById(R.id.unlock_crash_check).setEnabled(crashFixEnabled);
         dialogView.findViewById(R.id.fixmode).setEnabled(crashFixEnabled);
         dialogView.findViewById(R.id.periodic_check).setEnabled(crashFixEnabled);
+        dialogView.findViewById(R.id.ignore_system_crash).setEnabled(crashFixEnabled);
         ((TextView) dialogView.findViewById(R.id.periodic_interval_label)).setTextColor(periodicEnabled ? 0xFF0096FF : 0xFF999999);
     }
 

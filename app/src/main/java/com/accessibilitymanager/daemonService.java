@@ -66,7 +66,8 @@ public class daemonService extends Service {
         public void onReceive(Context context, Intent intent) {
             String set = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             if (set == null) set = "";
-            boolean settingChanged = !tmpSettingValue.equals(set);
+            String oldValue = tmpSettingValue;
+            boolean settingChanged = !oldValue.equals(set);
             if (settingChanged) {
                 doDaemon(set);
             }
@@ -77,6 +78,11 @@ public class daemonService extends Service {
                     mIsFixing = false;
                 }
                 if (settingChanged) {
+                    boolean isSystemChange = isChangeFromSystemApp(oldValue, set);
+                    boolean ignoreSystemChange = sp.getBoolean("ignore_system_crash_trigger", true);
+                    if (isSystemChange && ignoreSystemChange) {
+                        return;
+                    }
                     mHandler.postDelayed(() -> checkCrashedServices("解锁"), 1000);
                 } else {
                     checkCrashedServices("解锁");
@@ -84,6 +90,39 @@ public class daemonService extends Service {
             }
         }
     };
+
+    private boolean isChangeFromSystemApp(String oldValue, String newValue) {
+        if (oldValue == null) oldValue = "";
+        if (newValue == null) newValue = "";
+        String changedService = null;
+        if (oldValue.length() < newValue.length()) {
+            for (String s : newValue.split(":")) {
+                if (s.isEmpty()) continue;
+                if (!(":" + oldValue + ":").contains(":" + s + ":")) {
+                    changedService = s;
+                    break;
+                }
+            }
+        } else {
+            for (String s : oldValue.split(":")) {
+                if (s.isEmpty()) continue;
+                if (!(":" + newValue + ":").contains(":" + s + ":")) {
+                    changedService = s;
+                    break;
+                }
+            }
+        }
+        if (changedService == null) return false;
+        try {
+            int slashIdx = changedService.indexOf("/");
+            if (slashIdx <= 0) return false;
+            String pkgName = changedService.substring(0, slashIdx);
+            ApplicationInfo appInfo = packageManager.getApplicationInfo(pkgName, 0);
+            return (appInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+        } catch (PackageManager.NameNotFoundException e) {
+            return false;
+        }
+    }
 
     //自定义一个内容监视器
     class SettingsValueChangeContentObserver extends ContentObserver {
@@ -96,7 +135,10 @@ public class daemonService extends Service {
             super.onChange(selfChange);
             String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             if (s == null) s = "";
-            boolean settingChanged = !tmpSettingValue.equals(s);
+            String oldValue = tmpSettingValue;
+            boolean settingChanged = !oldValue.equals(s);
+            boolean isSystemChange = settingChanged && isChangeFromSystemApp(oldValue, s);
+            boolean ignoreSystemChange = sp.getBoolean("ignore_system_crash_trigger", true);
             if (settingChanged) {
                 doDaemon(s);
             }
@@ -104,6 +146,9 @@ public class daemonService extends Service {
                 if (mIsFixing) {
                     LogUtil.log(daemonService.this, "[崩溃检测] 修复操作超时，强制重置mIsFixing");
                     mIsFixing = false;
+                }
+                if (isSystemChange && ignoreSystemChange) {
+                    return;
                 }
                 mHandler.postDelayed(() -> checkCrashedServices("设置变化"), 1000);
             }
