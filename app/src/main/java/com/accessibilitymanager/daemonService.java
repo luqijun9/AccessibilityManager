@@ -319,22 +319,12 @@ public class daemonService extends Service {
                     return;
                 }
 
-                StringBuilder crashedLog = new StringBuilder();
-                for (String cs : crashedServicesList) {
-                    if (crashedLog.length() > 0) crashedLog.append(", ");
-                    crashedLog.append(cs);
-                }
-
-                LogUtil.log(daemonService.this, "[崩溃检测] 检测到" + crashedServicesList.size() + "个崩溃服务：" + crashedLog.toString());
-
                 String[] trackedServices = daemonList.split(":");
                 final int retryRemaining = mFixRetryRemaining;
-                boolean anyMatched = false;
 
                 for (String cs : crashedServicesList) {
                     for (String tracked : trackedServices) {
                         if (serviceNameMatches(cs, tracked)) {
-                            anyMatched = true;
                             if ("修复后复查".equals(source)) {
                                 if (retryRemaining <= 0) {
                                     LogUtil.log(daemonService.this, "[崩溃修复] 修复后复查仍崩溃，已达最大重试次数，放弃：" + cs);
