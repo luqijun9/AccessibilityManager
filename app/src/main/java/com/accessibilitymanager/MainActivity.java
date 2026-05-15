@@ -847,14 +847,18 @@ public class MainActivity extends AppCompatActivity {
 
         public View getView(int position, View convertView, ViewGroup parent) {
             ViewHolder holder;
-            convertView = LayoutInflater.from(MainActivity.this).inflate(R.layout.item, null);
-            holder = new ViewHolder();
-            holder.texta = convertView.findViewById(R.id.a);
-            holder.textb = convertView.findViewById(R.id.b);
-            holder.imageView = convertView.findViewById(R.id.c);
-            holder.sw = convertView.findViewById(R.id.s);
-            holder.ib = convertView.findViewById(R.id.ib);
-            convertView.setTag(holder);
+            if (convertView == null) {
+                convertView = LayoutInflater.from(MainActivity.this).inflate(R.layout.item, null);
+                holder = new ViewHolder();
+                holder.texta = convertView.findViewById(R.id.a);
+                holder.textb = convertView.findViewById(R.id.b);
+                holder.imageView = convertView.findViewById(R.id.c);
+                holder.sw = convertView.findViewById(R.id.s);
+                holder.ib = convertView.findViewById(R.id.ib);
+                convertView.setTag(holder);
+            } else {
+                holder = (ViewHolder) convertView.getTag();
+            }
             AccessibilityServiceInfo info = list.get(position);
             String rawServiceName = info.getId();
             String serviceName = normalizeServiceId(rawServiceName);
