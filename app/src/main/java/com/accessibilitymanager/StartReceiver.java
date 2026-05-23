@@ -39,15 +39,17 @@ public class StartReceiver extends BroadcastReceiver {
     }
 
     private void startIfBootEnabled(Context context) {
-        SharedPreferences sp = context.getSharedPreferences("data", 0);
-        if (!sp.getBoolean("boot", true)) return;
+        new Thread(() -> {
+            SharedPreferences sp = context.getSharedPreferences("data", 0);
+            if (!sp.getBoolean("boot", true)) return;
 
-        TimerReceiver.scheduleNext(context);
+            TimerReceiver.scheduleNext(context);
 
-        Intent i = new Intent(context, daemonService.class);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-            context.startForegroundService(i);
-        else
-            context.startService(i);
+            Intent i = new Intent(context, daemonService.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                context.startForegroundService(i);
+            else
+                context.startService(i);
+        }).start();
     }
 }

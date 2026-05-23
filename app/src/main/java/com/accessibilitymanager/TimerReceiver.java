@@ -15,25 +15,30 @@ public class TimerReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         if (ACTION_PERIODIC_CHECK.equals(intent.getAction())) {
-            SharedPreferences sp = context.getSharedPreferences("data", Context.MODE_PRIVATE);
-            if (!sp.getBoolean("crashfix", false)) {
-                LogUtil.log(context, "[定时唤醒] 崩溃修复已关闭，跳过本次检测");
-                cancel(context);
-                return;
-            }
-            LogUtil.log(context, "[定时唤醒] AlarmManager 触发");
-            Intent serviceIntent = new Intent(context, daemonService.class);
-            serviceIntent.putExtra("source", "Alarm");
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(serviceIntent);
-                } else {
-                    context.startService(serviceIntent);
+            final PendingResult pendingResult = goAsync();
+            new Thread(() -> {
+                SharedPreferences sp = context.getSharedPreferences("data", Context.MODE_PRIVATE);
+                if (!sp.getBoolean("crashfix", false)) {
+                    LogUtil.log(context, "[定时唤醒] 崩溃修复已关闭，跳过本次检测");
+                    cancel(context);
+                    pendingResult.finish();
+                    return;
                 }
-            } catch (Exception e) {
-                LogUtil.log(context, "[定时唤醒] 启动服务失败: " + e.getMessage());
-            }
-            scheduleNext(context);
+                LogUtil.log(context, "[定时唤醒] AlarmManager 触发");
+                Intent serviceIntent = new Intent(context, daemonService.class);
+                serviceIntent.putExtra("source", "Alarm");
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(serviceIntent);
+                    } else {
+                        context.startService(serviceIntent);
+                    }
+                } catch (Exception e) {
+                    LogUtil.log(context, "[定时唤醒] 启动服务失败: " + e.getMessage());
+                }
+                scheduleNext(context);
+                pendingResult.finish();
+            }).start();
         }
     }
 
