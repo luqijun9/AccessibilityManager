@@ -42,19 +42,19 @@ public class MyAccessibilityService extends AccessibilityService {
         if (now - mLastUnlockTriggerTime < MIN_UNLOCK_TRIGGER_INTERVAL) return;
         mLastUnlockTriggerTime = now;
 
-        //LogUtil.log(this, "[无障碍服务] 检测到设备解锁，触发崩溃检测");
-
-        Intent intent = new Intent(this, daemonService.class);
-        intent.putExtra("source", "AccessibilityService");
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent);
-            } else {
-                startService(intent);
+        new Thread(() -> {
+            Intent intent = new Intent(this, daemonService.class);
+            intent.putExtra("source", "AccessibilityService");
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(intent);
+                } else {
+                    startService(intent);
+                }
+            } catch (Exception e) {
+                LogUtil.log(this, "[无障碍服务] 启动保活服务失败: " + e.getMessage());
             }
-        } catch (Exception e) {
-            LogUtil.log(this, "[无障碍服务] 启动保活服务失败: " + e.getMessage());
-        }
+        }).start();
     }
 
     @Override
