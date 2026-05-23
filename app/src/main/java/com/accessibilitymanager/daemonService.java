@@ -562,7 +562,7 @@ public class daemonService extends Service {
         doDaemon(tmpSettingValue);
         //启动时也检查一次崩溃
         checkCrashedServices("服务启动");
-        TimerReceiver.scheduleNext(this);
+        new Thread(() -> TimerReceiver.scheduleNext(daemonService.this)).start();
     }
 
 
