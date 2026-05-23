@@ -160,19 +160,17 @@ public class daemonService extends Service {
 
 
     private void doDaemon(String s) {
-        String list = sp.getString("daemon", "");
-        if (sp.getBoolean("delay_daemon", false)) {
-            final String setting = s;
-            new Thread(() -> {
+        final String setting = s;
+        final boolean delay = sp.getBoolean("delay_daemon", false);
+        new Thread(() -> {
+            if (delay) {
                 try {
                     Thread.sleep(1000);
                 } catch (InterruptedException ignored) {
                 }
-                doDaemonImpl(setting);
-            }).start();
-            return;
-        }
-        doDaemonImpl(s);
+            }
+            doDaemonImpl(setting);
+        }).start();
     }
 
     private void doDaemonImpl(String s) {
