@@ -794,7 +794,7 @@ public class MainActivity extends AppCompatActivity {
         aboutBtn.setOnClickListener(v -> {
             TextView aboutText = new TextView(this);
             aboutText.setTextIsSelectable(true);
-            aboutText.setText("交流群\nQQ群：1103445629");
+            aboutText.setText("交流群\nQQ群：1079270847");
             aboutText.setTextSize(16);
             aboutText.setPadding(64, 32, 64, 32);
             new AlertDialog.Builder(this)
