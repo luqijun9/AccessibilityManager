@@ -599,52 +599,9 @@ public class MainActivity extends AppCompatActivity {
         if (itemId == R.id.settings) {
             showSettingsDialog();
         } else if (itemId == R.id.viewlog) {
-            showLogDialog();
+            startActivity(new Intent(this, LogActivity.class));
         }
         return super.onOptionsItemSelected(menuItem);
-    }
-
-    private void showLogDialog() {
-        String logContent = LogUtil.readTodayLog(this);
-        if (logContent.length() == 0) logContent = "今日暂无日志记录";
-
-        int defaultColor = night ? Color.WHITE : Color.BLACK;
-        int crashDetectColor = Color.rgb(0xE0, 0x6D, 0x00);
-        int crashFixColor = Color.rgb(0x22, 0x88, 0xDD);
-        int daemonColor = Color.rgb(0x22, 0xAA, 0x22);
-
-        SpannableStringBuilder ssb = new SpannableStringBuilder();
-        for (String line : logContent.split("\n")) {
-            int start = ssb.length();
-            ssb.append(line);
-            ssb.append("\n");
-            int end = ssb.length();
-            int color;
-            if (line.contains("[崩溃检测]")) {
-                color = crashDetectColor;
-            } else if (line.contains("[崩溃修复]") || line.contains("[崩溃修复-重试]")) {
-                color = crashFixColor;
-            } else if (line.contains("[保活]")) {
-                color = daemonColor;
-            } else {
-                color = defaultColor;
-            }
-            ssb.setSpan(new ForegroundColorSpan(color), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        }
-
-        final ScrollView scrollView = new ScrollView(this);
-        final TextView textView = new TextView(this);
-        textView.setTextIsSelectable(true);
-        textView.setPadding(40, 20, 40, 20);
-        textView.setTextSize(12f);
-        textView.setText(ssb);
-        scrollView.addView(textView);
-        scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
-        new AlertDialog.Builder(this)
-                .setTitle("今日运行日志")
-                .setView(scrollView)
-                .setPositiveButton("关闭", null)
-                .create().show();
     }
 
     private void showSettingsDialog() {

@@ -29,6 +29,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".LogActivity"
+            android:configChanges="keyboardHidden|smallestScreenSize|fontScale|screenSize"
+            android:exported="false" />
         <service
             android:name=".daemonService"
             android:exported="true"
