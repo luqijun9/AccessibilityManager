@@ -210,7 +210,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="-崩溃修复时强杀对应app"
+                android:text="-重启服务时强杀对应app"
                 android:textSize="16sp" />
 
             <Switch
@@ -270,7 +270,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="-设定定时崩溃检测间隔"
+                android:text="--设定定时崩溃检测间隔"
                 android:textSize="16sp" />
 
             <TextView

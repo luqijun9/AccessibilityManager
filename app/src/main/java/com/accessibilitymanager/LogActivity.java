@@ -4,6 +4,7 @@ import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.SpannableStringBuilder;
@@ -16,12 +17,20 @@ import android.view.Window;
 import android.view.WindowInsetsController;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.FileProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.OutputStreamWriter;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 public class LogActivity extends AppCompatActivity {
 
@@ -79,10 +88,55 @@ public class LogActivity extends AppCompatActivity {
         if (logText.isEmpty()) {
             logText = "暂无日志记录";
         }
-        Intent intent = new Intent(Intent.ACTION_SEND);
-        intent.setType("text/plain");
-        intent.putExtra(Intent.EXTRA_TEXT, logText);
-        startActivity(Intent.createChooser(intent, "分享日志"));
+
+        File tempDir = getExternalFilesDir(null);
+        if (tempDir == null) {
+            tempDir = getFilesDir();
+        }
+
+        String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+        File tempFile = new File(tempDir, "accessibility_log_" + timestamp + ".txt");
+
+        try {
+            FileOutputStream fos = new FileOutputStream(tempFile);
+            OutputStreamWriter writer = new OutputStreamWriter(fos, "UTF-8");
+            writer.write(logText);
+            writer.flush();
+            writer.close();
+
+            Uri fileUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", tempFile);
+
+            Intent intent = new Intent(Intent.ACTION_SEND);
+            intent.setType("text/plain");
+            intent.putExtra(Intent.EXTRA_STREAM, fileUri);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+            startActivityForResult(Intent.createChooser(intent, "分享日志文件"), 100);
+
+            tempFile.deleteOnExit();
+        } catch (Exception e) {
+            Toast.makeText(this, "分享失败", Toast.LENGTH_SHORT).show();
+            if (tempFile.exists()) {
+                tempFile.delete();
+            }
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == 100) {
+            File tempDir = getExternalFilesDir(null);
+            if (tempDir == null) {
+                tempDir = getFilesDir();
+            }
+            File[] files = tempDir.listFiles((dir, name) -> name.startsWith("accessibility_log_") && name.endsWith(".txt"));
+            if (files != null) {
+                for (File f : files) {
+                    f.delete();
+                }
+            }
+        }
     }
 
     private class LogAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
