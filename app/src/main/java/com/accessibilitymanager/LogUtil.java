@@ -20,7 +20,7 @@ public class LogUtil {
     private static final SimpleDateFormat DATE_FMT = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
     private static final SimpleDateFormat TIME_FMT = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
     private static final long SEPARATOR_INTERVAL = 5 * 60 * 1000L;
-    private static final String SEPARATOR = "------------------------------------------------------------------------\n";
+    private static final String SEPARATOR = "----------------------------------------------------------------------\n";
     private static String sCurrentDate;
     private static long sLastLogTime = 0;
 

@@ -301,6 +301,44 @@ public class daemonService extends Service {
         return false;
     }
 
+    private void checkServiceInconsistency() {
+        if (!sp.getBoolean("check_service_inconsistency", true)) return;
+        String daemonList = sp.getString("daemon", "");
+        if (daemonList.length() == 0) return;
+        String currentSetting = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        if (currentSetting == null) currentSetting = "";
+        StringBuilder missing = new StringBuilder();
+        StringBuilder missingLabels = new StringBuilder();
+        for (String serviceName : daemonList.split(":")) {
+            if (serviceName == null || serviceName.equals("null") || serviceName.length() == 0) continue;
+            String normalized = normalizeServiceId(serviceName);
+            if (isServiceInSettings(normalized, currentSetting)) continue;
+            if (!isServiceInList(normalized)) continue;
+            if (missing.length() > 0) missing.append(":");
+            missing.append(normalized);
+            try {
+                String pkg = normalized.substring(0, normalized.indexOf("/"));
+                String label = packageManager.getApplicationInfo(pkg, PackageManager.GET_META_DATA).loadLabel(packageManager).toString();
+                if (missingLabels.length() > 0) missingLabels.append("\n");
+                missingLabels.append(label);
+            } catch (Exception e) {
+                if (missingLabels.length() > 0) missingLabels.append("\n");
+                missingLabels.append(normalized);
+            }
+        }
+        if (missing.length() > 0) {
+            LogUtil.log(daemonService.this, "[状态修复] 检测到以下保活服务实际未开启，正在修复：" + missingLabels.toString().replace("\n", " "));
+            doDaemon(currentSetting);
+            String labels = missingLabels.toString();
+            mHandler.post(() -> {
+                notification.setContentText(labels + "\n" + new SimpleDateFormat("时间：H:mm:ss", Locale.getDefault()).format(Calendar.getInstance().getTime()))
+                        .setContentTitle("已自动修复以下无障碍服务：");
+                systemService.notify(1, notification.build());
+                Toast.makeText(daemonService.this, "已自动修复状态不一致的服务", Toast.LENGTH_SHORT).show();
+            });
+        }
+    }
+
     private void checkCrashedServices(String source) {
         if (!sp.getBoolean("crashfix", false)) return;
         if (mIsCheckingCrashed) {
@@ -361,6 +399,7 @@ public class daemonService extends Service {
                 }
 
                 if (crashedServicesList.isEmpty()) {
+                    checkServiceInconsistency();
                     mIsCheckingCrashed = false;
                     return;
                 }
@@ -397,6 +436,7 @@ public class daemonService extends Service {
                         }
                     }
                 }
+                checkServiceInconsistency();
                 mIsCheckingCrashed = false;
             } catch (Exception e) {
                 mIsCheckingCrashed = false;

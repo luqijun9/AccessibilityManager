@@ -661,6 +661,7 @@ public class MainActivity extends AppCompatActivity {
         Switch switchFixMode = dialogView.findViewById(R.id.fixmode);
         Switch switchPeriodicCheck = dialogView.findViewById(R.id.periodic_check);
         Switch switchIgnoreSystemCrash = dialogView.findViewById(R.id.ignore_system_crash);
+        Switch switchCheckServiceInconsistency = dialogView.findViewById(R.id.check_service_inconsistency);
         TextView intervalLabel = dialogView.findViewById(R.id.periodic_interval_label);
         TextView notifyCustomBtn = dialogView.findViewById(R.id.notify_custom_btn);
         TextView crashTutorialBtn = dialogView.findViewById(R.id.crash_tutorial_btn);
@@ -676,6 +677,7 @@ public class MainActivity extends AppCompatActivity {
         switchFixMode.setChecked(sp.getBoolean("fixmode", true));
         switchPeriodicCheck.setChecked(sp.getBoolean("periodic_check", true));
         switchIgnoreSystemCrash.setChecked(sp.getBoolean("ignore_system_crash_trigger", true));
+        switchCheckServiceInconsistency.setChecked(sp.getBoolean("check_service_inconsistency", true));
         intervalLabel.setText(sp.getInt("periodic_check_interval", 10) + "分钟");
 
         refreshCrashFixDependent(dialogView);
@@ -770,6 +772,10 @@ public class MainActivity extends AppCompatActivity {
             sp.edit().putBoolean("ignore_system_crash_trigger", checked).apply();
         });
 
+        switchCheckServiceInconsistency.setOnCheckedChangeListener((btn, checked) -> {
+            sp.edit().putBoolean("check_service_inconsistency", checked).apply();
+        });
+
         intervalLabel.setOnClickListener(v -> {
             if (!switchPeriodicCheck.isChecked()) return;
             showIntervalDialog(() -> {
@@ -786,7 +792,8 @@ public class MainActivity extends AppCompatActivity {
                             "2. 解锁设备时检测：使用该功能需满足以下条件之一\n①开启无障碍管理器自身的无障碍服务并加锁保活\n②开启无障碍管理器的自启动权限\n否则可能无效!!!\n\n" +
                             "3. 崩溃修复强杀app：默认修复方式为直接关闭其无障碍服务再打开；如果修复后仍然崩溃，可勾选\"崩溃修复强杀app\" 功能，将强制停止对应app后自动重新保活打开服务\n\n" +
                             "4. 定时检测间隔: 设置定时检测崩溃服务的时间间隔，建议不低于5分钟\n\n" +
-                            "5. 延迟1秒保活: 保活操作过快也许可能导致失败，开启后将延迟1秒再执行保活，也许能提高成功率")
+                            "5. 延迟1秒保活: 保活操作过快也许可能导致失败，开启后将延迟1秒再执行保活，也许能提高成功率\n\n" +
+                            "6. 状态不一致自动修复: 检测到保活列表中的服务在系统设置中实际未开启时（如后台久了被系统关闭），自动重新打开该服务")
                     .setPositiveButton("知道了", null)
                     .create().show();
         });
@@ -818,6 +825,7 @@ public class MainActivity extends AppCompatActivity {
         dialogView.findViewById(R.id.fixmode).setEnabled(crashFixEnabled);
         dialogView.findViewById(R.id.periodic_check).setEnabled(crashFixEnabled);
         dialogView.findViewById(R.id.ignore_system_crash).setEnabled(crashFixEnabled);
+        dialogView.findViewById(R.id.check_service_inconsistency).setEnabled(crashFixEnabled);
         ((TextView) dialogView.findViewById(R.id.periodic_interval_label)).setTextColor(periodicEnabled ? 0xFF0096FF : 0xFF999999);
     }
 
