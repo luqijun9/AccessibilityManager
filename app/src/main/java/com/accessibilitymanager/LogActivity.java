@@ -24,8 +24,13 @@ import androidx.core.content.FileProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import rikka.shizuku.Shizuku;
+
+import java.io.BufferedReader;
+import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -89,6 +94,16 @@ public class LogActivity extends AppCompatActivity {
             logText = "暂无日志记录";
         }
 
+        // 获取 dumpsys accessibility 信息
+        String accessibilityInfo = getAccessibilityServiceInfo();
+
+        // 组合完整日志内容
+        StringBuilder fullLog = new StringBuilder();
+        fullLog.append("=============== Accessibility Service Info ===============\n\n");
+        fullLog.append(accessibilityInfo);
+        fullLog.append("\n\n=============== Application Logs ===============\n\n");
+        fullLog.append(logText);
+
         File tempDir = getExternalFilesDir(null);
         if (tempDir == null) {
             tempDir = getFilesDir();
@@ -100,7 +115,7 @@ public class LogActivity extends AppCompatActivity {
         try {
             FileOutputStream fos = new FileOutputStream(tempFile);
             OutputStreamWriter writer = new OutputStreamWriter(fos, "UTF-8");
-            writer.write(logText);
+            writer.write(fullLog.toString());
             writer.flush();
             writer.close();
 
@@ -120,6 +135,38 @@ public class LogActivity extends AppCompatActivity {
                 tempFile.delete();
             }
         }
+    }
+
+    private String getAccessibilityServiceInfo() {
+        StringBuilder sb = new StringBuilder();
+        try {
+            Process process;
+            int permState = ShellUtil.getPermissionState();
+
+            if (permState == ShellUtil.PERM_ROOT) {
+                Process su = Runtime.getRuntime().exec("su");
+                DataOutputStream os = new DataOutputStream(su.getOutputStream());
+                os.writeBytes("dumpsys accessibility\nexit\n");
+                os.flush();
+                process = su;
+            } else if (permState == ShellUtil.PERM_SHIZUKU) {
+                process = Shizuku.newProcess(new String[]{"dumpsys", "accessibility"}, null, null);
+            } else {
+                sb.append("无 Root 或 Shizuku 权限，无法获取 Accessibility 服务信息");
+                return sb.toString();
+            }
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), "UTF-8"));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append("\n");
+            }
+            reader.close();
+            process.waitFor();
+        } catch (Exception e) {
+            sb.append("无法获取 Accessibility 服务信息: ").append(e.getMessage());
+        }
+        return sb.toString();
     }
 
     @Override
