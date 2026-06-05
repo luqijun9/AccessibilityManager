@@ -2,6 +2,7 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/screen_bg"
     android:fitsSystemWindows="true"
     android:orientation="vertical">
 
@@ -22,7 +23,7 @@
             android:focusable="true"
             android:padding="8dp"
             android:text="←"
-            android:textColor="#0096ff"
+            android:textColor="@color/bg"
             android:textSize="20sp" />
 
         <TextView
@@ -30,6 +31,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="运行日志"
+            android:textColor="@color/text_primary"
             android:textSize="18sp"
             android:textStyle="bold" />
     </LinearLayout>
@@ -37,7 +39,7 @@
     <View
         android:layout_width="match_parent"
         android:layout_height="1px"
-        android:background="#1a000000" />
+        android:background="@color/divider" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recycler_log"
@@ -54,13 +56,14 @@
         android:layout_weight="1"
         android:gravity="center"
         android:text="暂无日志记录"
+        android:textColor="@color/text_hint"
         android:textSize="14sp"
         android:visibility="gone" />
 
     <View
         android:layout_width="match_parent"
         android:layout_height="1px"
-        android:background="#1a000000" />
+        android:background="@color/divider" />
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -78,7 +81,7 @@
             android:focusable="true"
             android:padding="8dp"
             android:text="分享"
-            android:textColor="#0096ff"
+            android:textColor="@color/bg"
             android:textSize="15sp" />
 
         <TextView
@@ -90,7 +93,7 @@
             android:focusable="true"
             android:padding="8dp"
             android:text="关闭"
-            android:textColor="#0096ff"
+            android:textColor="@color/bg"
             android:textSize="15sp" />
     </LinearLayout>
 </LinearLayout>

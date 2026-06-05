@@ -4,6 +4,7 @@
         <item name="colorPrimary">@color/bg</item>
         <item name="colorPrimaryDark">#354190</item>
         <item name="colorAccent">@color/bg</item>
+        <item name="android:windowBackground">@color/screen_bg</item>
     </style>
 
     <style name="ToolbarOverlay" parent="ThemeOverlay.AppCompat">

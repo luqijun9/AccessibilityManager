@@ -14,7 +14,7 @@
             android:layout_height="wrap_content"
             android:paddingBottom="8dp"
             android:text="常规设置"
-            android:textColor="#888888"
+            android:textColor="@color/text_hint"
             android:textSize="13sp" />
 
         <LinearLayout
@@ -29,6 +29,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="开机启动保活服务"
+                android:textColor="@color/text_primary"
                 android:textSize="16sp" />
 
             <Switch
@@ -49,6 +50,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="显示Toast保活提示"
+                android:textColor="@color/text_primary"
                 android:textSize="16sp" />
 
             <Switch
@@ -69,6 +71,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="仅显示用户应用"
+                android:textColor="@color/text_primary"
                 android:textSize="16sp" />
 
             <Switch
@@ -89,6 +92,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="不显示后台"
+                android:textColor="@color/text_primary"
                 android:textSize="16sp" />
 
             <Switch
@@ -109,6 +113,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="延迟1秒保活"
+                android:textColor="@color/text_primary"
                 android:textSize="16sp" />
 
             <Switch
@@ -129,6 +134,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="自定义通知栏文字"
+                android:textColor="@color/text_primary"
                 android:textSize="16sp" />
 
             <TextView
@@ -140,7 +146,7 @@
                 android:focusable="true"
                 android:padding="8dp"
                 android:text="设置"
-                android:textColor="#0096ff"
+                android:textColor="@color/bg"
                 android:textSize="16sp" />
         </LinearLayout>
 
@@ -149,14 +155,14 @@
             android:layout_height="1dp"
             android:layout_marginTop="6dp"
             android:layout_marginBottom="12dp"
-            android:background="#33000000" />
+            android:background="@color/divider" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:paddingBottom="8dp"
             android:text="崩溃服务检测设置(需shizuku或root权限)"
-            android:textColor="#888888"
+            android:textColor="@color/text_hint"
             android:textSize="13sp" />
 
         <LinearLayout
@@ -177,6 +183,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="崩溃服务检测总开关"
+                    android:textColor="@color/text_primary"
                     android:textSize="16sp" />
 
                 <TextView
@@ -188,7 +195,7 @@
                     android:focusable="true"
                     android:padding="6dp"
                     android:text="ⓘ"
-                    android:textColor="#0096ff"
+                    android:textColor="@color/bg"
                     android:textSize="16sp" />
 
             </LinearLayout>
@@ -211,6 +218,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="-重启服务时强杀对应app"
+                android:textColor="@color/text_primary"
                 android:textSize="16sp" />
 
             <Switch
@@ -231,6 +239,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="-解锁设备时检测 (请开启无障碍)"
+                android:textColor="@color/text_primary"
                 android:textSize="16sp" />
 
             <Switch
@@ -251,6 +260,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="-定时崩溃检测"
+                android:textColor="@color/text_primary"
                 android:textSize="16sp" />
 
             <Switch
@@ -271,6 +281,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="--设定定时崩溃检测间隔"
+                android:textColor="@color/text_primary"
                 android:textSize="16sp" />
 
             <TextView
@@ -282,7 +293,7 @@
                 android:focusable="true"
                 android:padding="8dp"
                 android:text="10分钟"
-                android:textColor="#0096ff"
+                android:textColor="@color/bg"
                 android:textSize="16sp" />
         </LinearLayout>
 
@@ -298,6 +309,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="-忽略系统应用无障碍变化触发"
+                android:textColor="@color/text_primary"
                 android:textSize="16sp" />
 
             <Switch
@@ -318,6 +330,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="-保活开关与实际状态不一致时自动修复"
+                android:textColor="@color/text_primary"
                 android:textSize="16sp" />
 
             <Switch
@@ -331,14 +344,14 @@
             android:layout_height="1dp"
             android:layout_marginTop="6dp"
             android:layout_marginBottom="12dp"
-            android:background="#33000000" />
+            android:background="@color/divider" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:paddingBottom="8dp"
             android:text="其他"
-            android:textColor="#888888"
+            android:textColor="@color/text_hint"
             android:textSize="13sp" />
 
         <LinearLayout
@@ -353,6 +366,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="关于"
+                android:textColor="@color/text_primary"
                 android:textSize="16sp" />
 
             <TextView
@@ -364,7 +378,7 @@
                 android:focusable="true"
                 android:padding="8dp"
                 android:text="查看"
-                android:textColor="#0096ff"
+                android:textColor="@color/bg"
                 android:textSize="16sp" />
         </LinearLayout>
 

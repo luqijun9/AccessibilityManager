@@ -722,7 +722,7 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 TimerReceiver.cancel(MainActivity.this);
             }
-            intervalLabel.setTextColor(checked ? 0xFF0096FF : 0xFF999999);
+            intervalLabel.setTextColor(checked ? getColor(R.color.bg) : getColor(R.color.text_hint));
         });
 
         switchIgnoreSystemCrash.setOnCheckedChangeListener((btn, checked) -> {
@@ -783,7 +783,7 @@ public class MainActivity extends AppCompatActivity {
         dialogView.findViewById(R.id.periodic_check).setEnabled(crashFixEnabled);
         dialogView.findViewById(R.id.ignore_system_crash).setEnabled(crashFixEnabled);
         dialogView.findViewById(R.id.check_service_inconsistency).setEnabled(crashFixEnabled);
-        ((TextView) dialogView.findViewById(R.id.periodic_interval_label)).setTextColor(periodicEnabled ? 0xFF0096FF : 0xFF999999);
+        ((TextView) dialogView.findViewById(R.id.periodic_interval_label)).setTextColor(periodicEnabled ? getColor(R.color.bg) : getColor(R.color.text_hint));
     }
 
     //这个是用于适配列表中的每一项设置项的显示

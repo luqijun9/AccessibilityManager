@@ -3,6 +3,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/screen_bg"
     android:fitsSystemWindows="true"
     android:gravity="center_horizontal"
     android:orientation="vertical">
@@ -13,7 +14,7 @@
         android:layout_height="?attr/actionBarSize"
         android:background="@android:color/transparent"
         android:theme="@style/ToolbarOverlay"
-        app:contentInsetStart="0dp"
+        app:contentInsetStart="16dp"
         app:contentInsetEnd="0dp" />
 
     <LinearLayout
@@ -23,7 +24,8 @@
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:padding="10dp"
-        android:visibility="gone">
+        android:visibility="gone"
+        android:background="@color/screen_bg">
 
         <TextView
             android:id="@+id/battery_warning_text"
@@ -31,7 +33,8 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="未忽略电池优化，后台可能被系统清理\n请加锁并在耗电管理中允许后台运行"
-            android:textSize="14sp" />
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp" />
 
         <TextView
             android:id="@+id/battery_warning_go"
@@ -42,8 +45,8 @@
             android:focusable="true"
             android:padding="6dp"
             android:text="去设置"
-            android:textColor="#ff0096ff"
-            android:textSize="14sp" />
+            android:textColor="@color/bg"
+            android:textSize="13sp" />
 
         <TextView
             android:id="@+id/battery_warning_dismiss"
@@ -54,16 +57,15 @@
             android:focusable="true"
             android:padding="6dp"
             android:text="不再提示"
-            android:textColor="#ff888888"
-            android:textSize="14sp" />
+            android:textColor="@color/text_hint"
+            android:textSize="13sp" />
     </LinearLayout>
 
     <ListView
         android:id="@+id/list"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:dividerHeight="5dp" />
+        android:divider="@null"
+        android:dividerHeight="0dp"
+        android:scrollbarStyle="outsideOverlay" />
 </LinearLayout>
-
-
-
