@@ -309,7 +309,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="-忽略系统应用无障碍变化触发"
-                android:textColor="@color/text_primary"
+                android:textColor="?android:attr/textColorPrimary"
                 android:textSize="16sp" />
 
             <Switch

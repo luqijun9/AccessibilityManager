@@ -41,6 +41,41 @@ public class LogActivity extends AppCompatActivity {
 
     private RecyclerView recyclerView;
     private TextView tvEmpty;
+    private LogAdapter adapter;
+    private List<LogUtil.LogEntry> entries;
+    private boolean night;
+
+    private void executeCommand() {
+        String result = getAccessibilityServiceInfo();
+
+        // 添加分隔标题
+        entries.add(new LogUtil.LogEntry(
+                LogUtil.LogEntry.TYPE_DATE_SEPARATOR,
+                "────────  dumpsys accessibility  ────────"
+        ));
+
+        // 添加结果行
+        for (String line : result.split("\n")) {
+            entries.add(new LogUtil.LogEntry(LogUtil.LogEntry.TYPE_LOG_LINE, line));
+        }
+
+        // 添加结尾分隔
+        entries.add(new LogUtil.LogEntry(
+                LogUtil.LogEntry.TYPE_DATE_SEPARATOR,
+                "────────  执行完毕  ────────"
+        ));
+
+        if (adapter == null) {
+            recyclerView.setVisibility(View.VISIBLE);
+            tvEmpty.setVisibility(View.GONE);
+            adapter = new LogAdapter(entries, night);
+            recyclerView.setLayoutManager(new LinearLayoutManager(this));
+            recyclerView.setAdapter(adapter);
+        } else {
+            adapter.notifyDataSetChanged();
+        }
+        recyclerView.scrollToPosition(entries.size() - 1);
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -48,7 +83,7 @@ public class LogActivity extends AppCompatActivity {
         setContentView(R.layout.activity_log);
 
         int nightMode = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
-        boolean night = nightMode == Configuration.UI_MODE_NIGHT_YES;
+        night = nightMode == Configuration.UI_MODE_NIGHT_YES;
 
         Window window = getWindow();
         window.setStatusBarColor(Color.TRANSPARENT);
@@ -72,16 +107,17 @@ public class LogActivity extends AppCompatActivity {
         tvEmpty = findViewById(R.id.tv_empty);
         findViewById(R.id.btn_close).setOnClickListener(v -> finish());
         findViewById(R.id.btn_share).setOnClickListener(v -> shareLog());
+        findViewById(R.id.btn_exec).setOnClickListener(v -> executeCommand());
         findViewById(R.id.btn_back).setOnClickListener(v -> finish());
 
-        List<LogUtil.LogEntry> entries = LogUtil.readRecentLogs(this);
+        entries = LogUtil.readRecentLogs(this);
         if (entries.isEmpty()) {
             recyclerView.setVisibility(View.GONE);
             tvEmpty.setVisibility(View.VISIBLE);
         } else {
             recyclerView.setVisibility(View.VISIBLE);
             tvEmpty.setVisibility(View.GONE);
-            LogAdapter adapter = new LogAdapter(entries);
+            adapter = new LogAdapter(entries, night);
             recyclerView.setLayoutManager(new LinearLayoutManager(this));
             recyclerView.setAdapter(adapter);
             recyclerView.scrollToPosition(entries.size() - 1);
@@ -193,9 +229,11 @@ public class LogActivity extends AppCompatActivity {
         private static final int VIEW_TYPE_GAP = 2;
 
         private final List<LogUtil.LogEntry> entries;
+        private boolean night;
 
-        LogAdapter(List<LogUtil.LogEntry> entries) {
+        LogAdapter(List<LogUtil.LogEntry> entries, boolean night) {
             this.entries = entries;
+            this.night = night;
         }
 
         @Override
@@ -249,7 +287,7 @@ public class LogActivity extends AppCompatActivity {
             if (line.contains("[崩溃检测]")) return 0xFFE06D00;
             if (line.contains("[崩溃修复]") || line.contains("[崩溃修复-重试]")) return 0xFF2288DD;
             if (line.contains("[保活]")) return 0xFF22AA22;
-            return 0xFFCCCCCC;
+            return night ? 0xFFCCCCCC : 0xFF333333;
         }
 
         private DateSeparatorHolder createDateSeparatorHolder() {
