@@ -552,7 +552,7 @@ public class MainActivity extends AppCompatActivity {
             } else if (state == ShellUtil.PERM_SHIZUKU) {
                 text = "shizuku";
             } else if (crashFixEnabled) {
-                text = "崩溃检测不可用";
+                text = "崩溃检测不可用ⓘ";
                 color = Color.rgb(0xFF, 0x00, 0x00);
             } else {
                 text = null;
