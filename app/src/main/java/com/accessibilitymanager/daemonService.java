@@ -81,7 +81,7 @@ public class daemonService extends Service {
                     String systemAppLabel = getSystemAppChangeLabel(oldValue, set);
                     boolean ignoreSystemChange = sp.getBoolean("ignore_system_crash_trigger", true);
                     if (systemAppLabel != null && ignoreSystemChange) {
-                        LogUtil.log(daemonService.this, "忽略" + systemAppLabel + "的设置变化");
+                        LogUtil.log(daemonService.this, "忽略" + systemAppLabel + "的服务变化，不触发检测");
                         return;
                     }
                     mHandler.postDelayed(() -> checkCrashedServices("解锁"), 1000);
@@ -150,10 +150,10 @@ public class daemonService extends Service {
                 String systemAppLabel = getSystemAppChangeLabel(oldValue, s);
                 boolean ignoreSystemChange = sp.getBoolean("ignore_system_crash_trigger", true);
                 if (systemAppLabel != null && ignoreSystemChange) {
-                    LogUtil.log(daemonService.this, "忽略" + systemAppLabel + "的设置变化");
+                    LogUtil.log(daemonService.this, "忽略" + systemAppLabel + "的服务变化，触发检测");
                     return;
                 }
-                mHandler.postDelayed(() -> checkCrashedServices("设置变化"), 1000);
+                mHandler.postDelayed(() -> checkCrashedServices("服务变化"), 1000);
             }
         }
     }
