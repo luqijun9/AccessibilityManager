@@ -688,21 +688,52 @@ public class MainActivity extends AppCompatActivity {
         final CompoundButton.OnCheckedChangeListener[] unlockCrashCheckListenerHolder = new CompoundButton.OnCheckedChangeListener[1];
         unlockCrashCheckListenerHolder[0] = (btn, checked) -> {
             if (checked && !sp.getBoolean("unlock_crash_dialog_dismissed", false)) {
+                // 如果自身无障碍服务已开启且已保活，无需弹窗提示
+                String ownServiceId = new ComponentName(MainActivity.this, MyAccessibilityService.class).flattenToString();
+                if (isServiceEnabled(ownServiceId, settingValue) && containsService(daemon, ownServiceId)) {
+                    sp.edit().putBoolean("unlock_crash_check", true).apply();
+                    return;
+                }
                 new AlertDialog.Builder(this)
                         .setTitle("提示")
-                        .setMessage("使用此功能需要满足以下条件之一：\n① 开启无障碍管理器的无障碍服务\n② 开启无障碍管理器的自启动权限\n否则可能无效!!!")
-                        .setNegativeButton("不再提示", (d, w) -> {
+                        .setMessage("使用此功能需要满足以下条件之一：\n① 开启无障碍管理器的无障碍服务\n② 开启无障碍管理器的自启动权限\n否则可能无效!!!\n\n是否要开启并保活管理器的无障碍服务？")
+                        .setNegativeButton("不开启", (d, w) -> {
+                            sp.edit().putBoolean("unlock_crash_check", true).apply();
+                            unlockCrashCheckRef.setOnCheckedChangeListener(null);
+                            unlockCrashCheckRef.setChecked(true);
+                            unlockCrashCheckRef.setOnCheckedChangeListener(unlockCrashCheckListenerHolder[0]);
+                        })
+                        .setNeutralButton("不再提示", (d, w) -> {
                             sp.edit().putBoolean("unlock_crash_dialog_dismissed", true).apply();
                             sp.edit().putBoolean("unlock_crash_check", true).apply();
                             unlockCrashCheckRef.setOnCheckedChangeListener(null);
                             unlockCrashCheckRef.setChecked(true);
                             unlockCrashCheckRef.setOnCheckedChangeListener(unlockCrashCheckListenerHolder[0]);
                         })
-                        .setPositiveButton("确定", (d, w) -> {
+                        .setPositiveButton("开启", (d, w) -> {
                             sp.edit().putBoolean("unlock_crash_check", true).apply();
                             unlockCrashCheckRef.setOnCheckedChangeListener(null);
                             unlockCrashCheckRef.setChecked(true);
                             unlockCrashCheckRef.setOnCheckedChangeListener(unlockCrashCheckListenerHolder[0]);
+                            if (checkPermission()) {
+                                Toast.makeText(MainActivity.this, "需要授予安全设置写入权限才能开启无障碍服务", Toast.LENGTH_SHORT).show();
+                                return;
+                            }
+                            String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+                            if (s == null) s = "";
+                            if (!isServiceEnabled(ownServiceId, s)) {
+                                tmpSettingValue = ownServiceId + ":" + s;
+                                Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
+                                settingValue = tmpSettingValue;
+                            }
+                            if (!containsService(daemon, ownServiceId)) {
+                                daemon = ownServiceId + ":" + daemon;
+                                sp.edit().putString("daemon", daemon).apply();
+                                StartForeGroundDaemon();
+                            }
+                            // 刷新主界面列表
+                            Sort();
+                            runOnUiThread(() -> listView.setAdapter(new adapter(tmp)));
                         })
                         .create().show();
                 return;
