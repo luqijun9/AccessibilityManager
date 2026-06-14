@@ -329,7 +329,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="-忽略系统应用无障碍变化触发"
+                android:text="-系统应用无障碍变化不触发检测"
                 android:textColor="?android:attr/textColorPrimary"
                 android:textSize="16sp" />
 
