@@ -619,6 +619,7 @@ public class MainActivity extends AppCompatActivity {
         Switch switchPeriodicCheck = dialogView.findViewById(R.id.periodic_check);
         Switch switchIgnoreSystemCrash = dialogView.findViewById(R.id.ignore_system_crash);
         Switch switchCheckServiceInconsistency = dialogView.findViewById(R.id.check_service_inconsistency);
+        Switch switchKeepCustomNotify = dialogView.findViewById(R.id.keep_custom_notify);
         TextView intervalLabel = dialogView.findViewById(R.id.periodic_interval_label);
         TextView notifyCustomBtn = dialogView.findViewById(R.id.notify_custom_btn);
         TextView crashTutorialBtn = dialogView.findViewById(R.id.crash_tutorial_btn);
@@ -635,6 +636,7 @@ public class MainActivity extends AppCompatActivity {
         switchPeriodicCheck.setChecked(sp.getBoolean("periodic_check", true));
         switchIgnoreSystemCrash.setChecked(sp.getBoolean("ignore_system_crash_trigger", true));
         switchCheckServiceInconsistency.setChecked(sp.getBoolean("check_service_inconsistency", true));
+        switchKeepCustomNotify.setChecked(sp.getBoolean("keep_custom_notify", false));
         intervalLabel.setText(sp.getInt("periodic_check_interval", 10) + "分钟");
 
         refreshCrashFixDependent(dialogView);
@@ -762,6 +764,13 @@ public class MainActivity extends AppCompatActivity {
 
         switchCheckServiceInconsistency.setOnCheckedChangeListener((btn, checked) -> {
             sp.edit().putBoolean("check_service_inconsistency", checked).apply();
+        });
+
+        switchKeepCustomNotify.setOnCheckedChangeListener((btn, checked) -> {
+            sp.edit().putBoolean("keep_custom_notify", checked).apply();
+            if (checked) {
+                Toast.makeText(MainActivity.this, "重启服务生效", Toast.LENGTH_SHORT).show();
+            }
         });
 
         intervalLabel.setOnClickListener(v -> {

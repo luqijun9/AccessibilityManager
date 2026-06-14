@@ -244,8 +244,10 @@ public class daemonService extends Service {
             Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
             final String text = add1.toString();
             mHandler.post(() -> {
-                notification.setContentText(text + new SimpleDateFormat("时间：H:mm:ss", Locale.getDefault()).format(Calendar.getInstance().getTime())).setContentTitle("已保活以下无障碍服务：");
-                systemService.notify(1, notification.build());
+                if (!sp.getBoolean("keep_custom_notify", false)) {
+                    notification.setContentText(text + new SimpleDateFormat("时间：H:mm:ss", Locale.getDefault()).format(Calendar.getInstance().getTime())).setContentTitle("已保活以下无障碍服务：");
+                    systemService.notify(1, notification.build());
+                }
             });
             LogUtil.log(daemonService.this, "[保活] 已重新开启被关闭的服务：" + add1.toString().replace("\n", " "));
         } else {
@@ -331,9 +333,11 @@ public class daemonService extends Service {
             doDaemon(currentSetting);
             String labels = missingLabels.toString();
             mHandler.post(() -> {
-                notification.setContentText(labels + "\n" + new SimpleDateFormat("时间：H:mm:ss", Locale.getDefault()).format(Calendar.getInstance().getTime()))
-                        .setContentTitle("已自动修复以下无障碍服务：");
-                systemService.notify(1, notification.build());
+                if (!sp.getBoolean("keep_custom_notify", false)) {
+                    notification.setContentText(labels + "\n" + new SimpleDateFormat("时间：H:mm:ss", Locale.getDefault()).format(Calendar.getInstance().getTime()))
+                            .setContentTitle("已自动修复以下无障碍服务：");
+                    systemService.notify(1, notification.build());
+                }
                 Toast.makeText(daemonService.this, "已自动修复状态不一致的服务", Toast.LENGTH_SHORT).show();
             });
         }
@@ -516,10 +520,12 @@ public class daemonService extends Service {
         }
 
         mHandler.post(() -> {
-            notification.setContentText("已重启崩溃服务：" + packageLabel + "\n"
-                            + new SimpleDateFormat("时间：H:mm:ss", Locale.getDefault()).format(Calendar.getInstance().getTime()))
-                    .setContentTitle("无障碍保活");
-            systemService.notify(1, notification.build());
+            if (!sp.getBoolean("keep_custom_notify", false)) {
+                notification.setContentText("已重启崩溃服务：" + packageLabel + "\n"
+                                + new SimpleDateFormat("时间：H:mm:ss", Locale.getDefault()).format(Calendar.getInstance().getTime()))
+                        .setContentTitle("无障碍保活");
+                systemService.notify(1, notification.build());
+            }
         });
 
         mIsFixing = false;
