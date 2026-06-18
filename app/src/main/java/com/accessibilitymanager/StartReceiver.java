@@ -13,15 +13,16 @@ public class StartReceiver extends BroadcastReceiver {
         String action = intent.getAction();
 
         if (Intent.ACTION_LOCKED_BOOT_COMPLETED.equals(action)) {
-            final PendingResult pendingResult = goAsync();
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                // 不能使用 goAsync() 延迟 finish()——USER_UNLOCKED 可能在几分钟后才到达，
+                // 而 goAsync() 的超时只有约10秒，会导致 ANR。
+                // 改用动态注册 receiver，在 USER_UNLOCKED 到达后启动服务。
                 IntentFilter filter = new IntentFilter(Intent.ACTION_USER_UNLOCKED);
                 BroadcastReceiver unlockReceiver = new BroadcastReceiver() {
                     @Override
                     public void onReceive(Context ctx, Intent i) {
                         ctx.unregisterReceiver(this);
                         startIfBootEnabled(ctx);
-                        pendingResult.finish();
                     }
                 };
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -31,7 +32,6 @@ public class StartReceiver extends BroadcastReceiver {
                 }
             } else {
                 startIfBootEnabled(context);
-                pendingResult.finish();
             }
         } else {
             startIfBootEnabled(context);

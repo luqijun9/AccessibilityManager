@@ -42,8 +42,8 @@ public class daemonService extends Service {
     SharedPreferences sp;
     Notification.Builder notification;
     NotificationManager systemService;
-    String tmpSettingValue;
-    List<String> l;
+    volatile String tmpSettingValue;
+    volatile List<String> l;
     PackageManager packageManager;
     private Handler mHandler;
     private Runnable mPostFixCheckRunnable;
@@ -64,6 +64,7 @@ public class daemonService extends Service {
     final private BroadcastReceiver myReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
+            LogUtil.log(daemonService.this, "[解锁广播] 收到 USER_PRESENT 广播");
             String set = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             if (set == null) set = "";
             String oldValue = tmpSettingValue;
@@ -71,23 +72,30 @@ public class daemonService extends Service {
             if (settingChanged) {
                 doDaemon(set);
             }
-            if (!sp.getBoolean("unlock_crash_check", false)) return;
-            if (!mIsFixing || System.currentTimeMillis() - mLastFixStartTime > 5000) {
-                if (mIsFixing) {
-                    LogUtil.log(daemonService.this, "[崩溃检测] 修复操作超时，强制重置mIsFixing");
-                    mIsFixing = false;
+            if (!sp.getBoolean("unlock_crash_check", false)) {
+                LogUtil.log(daemonService.this, "[解锁广播] unlock_crash_check 未开启，跳过崩溃检测");
+                return;
+            }
+            if (mIsFixing && System.currentTimeMillis() - mLastFixStartTime <= 5000) {
+                LogUtil.log(daemonService.this, "[解锁广播] 修复操作进行中(5秒内)，跳过本次检测");
+                return;
+            }
+            // mIsFixing 为 true 但已超时 5s，说明 fixCrashedService 可能异常结束未复位。
+            // 不在锁外强制复位 mIsFixing，避免与 fixCrashedService 的 synchronized 块竞态，
+            // 交由后续的 postFixCheck 或 fixCrashedService 自身清理。
+            if (mIsFixing) {
+                LogUtil.log(daemonService.this, "[崩溃检测] 修复操作超时(>5s)，跳过本次广播检测");
+            }
+            if (settingChanged) {
+                String systemAppLabel = getSystemAppChangeLabel(oldValue, set);
+                boolean ignoreSystemChange = sp.getBoolean("ignore_system_crash_trigger", true);
+                if (systemAppLabel != null && ignoreSystemChange) {
+                    LogUtil.log(daemonService.this, "忽略" + systemAppLabel + "的服务变化，不触发检测");
+                    return;
                 }
-                if (settingChanged) {
-                    String systemAppLabel = getSystemAppChangeLabel(oldValue, set);
-                    boolean ignoreSystemChange = sp.getBoolean("ignore_system_crash_trigger", true);
-                    if (systemAppLabel != null && ignoreSystemChange) {
-                        LogUtil.log(daemonService.this, "忽略" + systemAppLabel + "的服务变化，不触发检测");
-                        return;
-                    }
-                    mHandler.postDelayed(() -> checkCrashedServices("解锁"), 1000);
-                } else {
-                    checkCrashedServices("解锁");
-                }
+                mHandler.postDelayed(() -> checkCrashedServices("解锁"), 1000);
+            } else {
+                checkCrashedServices("解锁");
             }
         }
     };
@@ -143,9 +151,9 @@ public class daemonService extends Service {
                 doDaemon(s);
             }
             if ((!mIsFixing || System.currentTimeMillis() - mLastFixStartTime > 5000) && settingChanged) {
+                // mIsFixing 在锁外只读不写，避免与 fixCrashedService 的 synchronized 块竞态
                 if (mIsFixing) {
-                    LogUtil.log(daemonService.this, "[崩溃检测] 修复操作超时，强制重置mIsFixing");
-                    mIsFixing = false;
+                    LogUtil.log(daemonService.this, "[崩溃检测] 修复操作超时(>5s)，跳过本次变化检测");
                 }
                 String systemAppLabel = getSystemAppChangeLabel(oldValue, s);
                 boolean ignoreSystemChange = sp.getBoolean("ignore_system_crash_trigger", true);
@@ -519,12 +527,21 @@ public class daemonService extends Service {
         }
         packageManager = getPackageManager();
         Toast.makeText(daemonService.this, "启动保活", Toast.LENGTH_SHORT).show();
-        refreshInstalledServiceList();
         //注册监视器，读取当前设置项并存到tmpsettingValue
         mContentOb = new SettingsValueChangeContentObserver();
         getContentResolver().registerContentObserver(Settings.Secure.getUriFor(Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES), true, mContentOb);
         tmpSettingValue = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         if (tmpSettingValue == null) tmpSettingValue = "";
+
+        // 在后台线程刷新服务列表并执行保活，避免 IPC 调用阻塞主线程。
+        // 注意：refreshInstalledServiceList 必须在 doDaemon 之前完成，
+        // 否则 doDaemonImpl 读取到空 l 会把保活列表全部清空！
+        final String onCreateSetting = tmpSettingValue;
+        new Thread(() -> {
+            refreshInstalledServiceList();
+            // l 已完全填充，安全执行保活
+            doDaemon(onCreateSetting);
+        }).start();
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(myReceiver, new IntentFilter("android.intent.action.USER_PRESENT"), Context.RECEIVER_EXPORTED);
@@ -563,9 +580,7 @@ public class daemonService extends Service {
             startForeground(1, notification.build());
         }
 
-        //先做一次保活
-        doDaemon(tmpSettingValue);
-        //启动时也检查一次崩溃
+        //启动时也检查一次崩溃（checkCrashedServices 不依赖 l，可独立执行）
         checkCrashedServices("服务启动");
         new Thread(() -> TimerReceiver.scheduleNext(daemonService.this)).start();
     }
@@ -583,10 +598,15 @@ public class daemonService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        refreshInstalledServiceList();
         String currentSetting = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         if (currentSetting == null) currentSetting = "";
-        doDaemon(currentSetting);
+        // 在后台线程刷新服务列表并执行保活，避免 IPC 调用阻塞主线程。
+        // refreshInstalledServiceList 必须在 doDaemon 之前完成，防止清空保活列表。
+        final String startCmdSetting = currentSetting;
+        new Thread(() -> {
+            refreshInstalledServiceList();
+            doDaemon(startCmdSetting);
+        }).start();
 
         String alarmSource = intent != null ? intent.getStringExtra("source") : null;
         if ("Alarm".equals(alarmSource)) {
