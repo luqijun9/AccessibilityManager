@@ -43,7 +43,7 @@ public class daemonService extends Service {
     Notification.Builder notification;
     NotificationManager systemService;
     volatile String tmpSettingValue;
-    List<String> l;
+    volatile List<String> l;
     PackageManager packageManager;
     private Handler mHandler;
     private Runnable mPostFixCheckRunnable;
@@ -186,12 +186,18 @@ public class daemonService extends Service {
         String[] serviceNames = Pattern.compile(":").split(list);
         StringBuilder add = new StringBuilder();
         StringBuilder add1 = new StringBuilder();
+        StringBuilder cleanedDaemon = null;
         for (String serviceName : serviceNames) {
             if (serviceName == null || serviceName.equals("null") || serviceName.length() == 0)
                 continue;
             String normalized = normalizeServiceId(serviceName);
-            // 与原始项目一致的判断：已在设置中 或 未安装则跳过
-            if (s.contains(serviceName) || !l.contains(serviceName))
+            if (!isServiceInList(normalized)) {
+                if (cleanedDaemon == null) cleanedDaemon = new StringBuilder();
+                else cleanedDaemon.append(":");
+                cleanedDaemon.append(serviceName);
+                continue;
+            }
+            if (isServiceInSettings(normalized, s))
                 continue;
 
             ApplicationInfo applicationInfo = new ApplicationInfo();
@@ -215,6 +221,31 @@ public class daemonService extends Service {
                 final String toastText = isCrashed ? "保活崩溃服务 " + crashedLabel : "保活" + packageLabel;
                 mHandler.post(() -> Toast.makeText(daemonService.this, toastText, Toast.LENGTH_SHORT).show());
             }
+        }
+        if (cleanedDaemon != null) {
+            java.util.Set<String> staleSet = new java.util.HashSet<>();
+            for (String stale : cleanedDaemon.toString().split(":")) {
+                if (!stale.isEmpty()) staleSet.add(stale);
+            }
+            String[] entries = list.split(":");
+            StringBuilder newList = new StringBuilder();
+            for (String entry : entries) {
+                if (entry.isEmpty()) continue;
+                boolean isStale = false;
+                ComponentName entryCn = ComponentName.unflattenFromString(entry);
+                for (String stale : staleSet) {
+                    ComponentName staleCn = ComponentName.unflattenFromString(stale);
+                    if (staleCn != null && staleCn.equals(entryCn)) {
+                        isStale = true;
+                        break;
+                    }
+                }
+                if (!isStale) {
+                    if (newList.length() > 0) newList.append(":");
+                    newList.append(entry);
+                }
+            }
+            sp.edit().putString("daemon", newList.toString()).apply();
         }
         if (add.length() > 0) {
             tmpSettingValue = add + s;
@@ -257,6 +288,29 @@ public class daemonService extends Service {
         ComponentName cn = ComponentName.unflattenFromString(serviceId);
         return cn != null ? cn.flattenToString() : serviceId;
     }
+
+    private boolean isServiceInSettings(String serviceId, String settingValue) {
+        if (settingValue == null) return false;
+        ComponentName target = ComponentName.unflattenFromString(serviceId);
+        if (target == null) return false;
+        for (String entry : settingValue.split(":")) {
+            if (entry.isEmpty()) continue;
+            ComponentName entryCn = ComponentName.unflattenFromString(entry);
+            if (target.equals(entryCn)) return true;
+        }
+        return false;
+    }
+
+    private boolean isServiceInList(String serviceId) {
+        ComponentName target = ComponentName.unflattenFromString(serviceId);
+        if (target == null) return false;
+        for (String entry : l) {
+            ComponentName entryCn = ComponentName.unflattenFromString(entry);
+            if (target.equals(entryCn)) return true;
+        }
+        return false;
+    }
+
 
     private void checkCrashedServices(String source) {
         if (!sp.getBoolean("crashfix", false)) return;
@@ -479,19 +533,15 @@ public class daemonService extends Service {
         tmpSettingValue = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         if (tmpSettingValue == null) tmpSettingValue = "";
 
-        // 获取已安装的无障碍服务列表，用于后续保活判断
-        {
-            List<AccessibilityServiceInfo> list =
-                    ((AccessibilityManager) getApplicationContext()
-                            .getSystemService(Context.ACCESSIBILITY_SERVICE))
-                            .getInstalledAccessibilityServiceList();
-            l = new ArrayList<>();
-            for (int i = 0; i < list.size(); i++) {
-                l.add(list.get(i).getId());
-            }
-        }
-
-        doDaemon(tmpSettingValue);
+        // 在后台线程刷新服务列表并执行保活，避免 IPC 调用阻塞主线程。
+        // 注意：refreshInstalledServiceList 必须在 doDaemon 之前完成，
+        // 否则 doDaemonImpl 读取到空 l 会把保活列表全部清空！
+        final String onCreateSetting = tmpSettingValue;
+        new Thread(() -> {
+            refreshInstalledServiceList();
+            // l 已完全填充，安全执行保活
+            doDaemon(onCreateSetting);
+        }).start();
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(myReceiver, new IntentFilter("android.intent.action.USER_PRESENT"), Context.RECEIVER_EXPORTED);
@@ -530,7 +580,7 @@ public class daemonService extends Service {
             startForeground(1, notification.build());
         }
 
-        //启动时也检查一次崩溃
+        //启动时也检查一次崩溃（checkCrashedServices 不依赖 l，可独立执行）
         checkCrashedServices("服务启动");
         new Thread(() -> TimerReceiver.scheduleNext(daemonService.this)).start();
     }
@@ -550,7 +600,13 @@ public class daemonService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         String currentSetting = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         if (currentSetting == null) currentSetting = "";
-        doDaemon(currentSetting);
+        // 在后台线程刷新服务列表并执行保活，避免 IPC 调用阻塞主线程。
+        // refreshInstalledServiceList 必须在 doDaemon 之前完成，防止清空保活列表。
+        final String startCmdSetting = currentSetting;
+        new Thread(() -> {
+            refreshInstalledServiceList();
+            doDaemon(startCmdSetting);
+        }).start();
 
         String alarmSource = intent != null ? intent.getStringExtra("source") : null;
         if ("Alarm".equals(alarmSource)) {
@@ -562,6 +618,18 @@ public class daemonService extends Service {
         }
         mFirstCommandAfterCreate = false;
         return START_STICKY;
+    }
+
+    private void refreshInstalledServiceList() {
+        l = new ArrayList<>();
+        try {
+            List<AccessibilityServiceInfo> list = ((AccessibilityManager) getApplicationContext()
+                    .getSystemService(Context.ACCESSIBILITY_SERVICE)).getInstalledAccessibilityServiceList();
+            for (AccessibilityServiceInfo info : list) {
+                l.add(info.getId());
+            }
+        } catch (Exception ignored) {
+        }
     }
 
 }
