@@ -43,7 +43,7 @@ public class daemonService extends Service {
     Notification.Builder notification;
     NotificationManager systemService;
     volatile String tmpSettingValue;
-    volatile List<String> l;
+    volatile List<String> l = new ArrayList<>();
     PackageManager packageManager;
     private Handler mHandler;
     private Runnable mPostFixCheckRunnable;
@@ -182,6 +182,7 @@ public class daemonService extends Service {
     }
 
     private void doDaemonImpl(String s) {
+        final List<String> localL = l;  // 拍快照，本次执行使用同一份完整列表
         String list = sp.getString("daemon", "");
         String[] serviceNames = Pattern.compile(":").split(list);
         StringBuilder add = new StringBuilder();
@@ -191,17 +192,16 @@ public class daemonService extends Service {
             if (serviceName == null || serviceName.equals("null") || serviceName.length() == 0)
                 continue;
             String normalized = normalizeServiceId(serviceName);
-            if (!isServiceInList(normalized)) {
-                if (l != null && !l.isEmpty()) {
-                    // l 已就绪，确认服务已卸载，从保活列表清理并跳过保活
+            if (!isServiceInList(normalized, localL)) {
+                if (!localL.isEmpty()) {
+                    // 已安装列表已就绪且不含该服务，确认已卸载，清理并跳过保活
                     if (cleanedDaemon == null) cleanedDaemon = new StringBuilder();
                     else cleanedDaemon.append(":");
                     cleanedDaemon.append(serviceName);
                     continue;
                 }
-                // l 为空/未就绪（竞态/异常），跳过清理但尝试保活，宁多勿少
-                LogUtil.log(daemonService.this, "[保活] l 未就绪，尝试保活: " + normalized);
-                // 不 continue，继续执行保活逻辑
+                // localL 为空（无已安装服务/异常），跳过清理但尝试保活，宁多勿少
+                LogUtil.log(daemonService.this, "[保活] l 为空，跳过清理并尝试保活: " + normalized);
             }
             if (isServiceInSettings(normalized, s))
                 continue;
@@ -308,9 +308,13 @@ public class daemonService extends Service {
     }
 
     private boolean isServiceInList(String serviceId) {
+        return isServiceInList(serviceId, l);
+    }
+
+    private boolean isServiceInList(String serviceId, List<String> serviceList) {
         ComponentName target = ComponentName.unflattenFromString(serviceId);
         if (target == null) return false;
-        for (String entry : l) {
+        for (String entry : serviceList) {
             ComponentName entryCn = ComponentName.unflattenFromString(entry);
             if (target.equals(entryCn)) return true;
         }
@@ -627,15 +631,16 @@ public class daemonService extends Service {
     }
 
     private void refreshInstalledServiceList() {
-        l = new ArrayList<>();
+        List<String> newList = new ArrayList<>();
         try {
             List<AccessibilityServiceInfo> list = ((AccessibilityManager) getApplicationContext()
                     .getSystemService(Context.ACCESSIBILITY_SERVICE)).getInstalledAccessibilityServiceList();
             for (AccessibilityServiceInfo info : list) {
-                l.add(info.getId());
+                newList.add(info.getId());
             }
         } catch (Exception ignored) {
         }
+        l = newList;  // 原子赋值，读者看到的永远是完整列表
     }
 
 }
