@@ -193,15 +193,15 @@ public class daemonService extends Service {
             String normalized = normalizeServiceId(serviceName);
             if (!isServiceInList(normalized)) {
                 if (l != null && !l.isEmpty()) {
-                    // l 已就绪，确认服务已卸载，从保活列表清理
+                    // l 已就绪，确认服务已卸载，从保活列表清理并跳过保活
                     if (cleanedDaemon == null) cleanedDaemon = new StringBuilder();
                     else cleanedDaemon.append(":");
                     cleanedDaemon.append(serviceName);
-                } else {
-                    // l 为空/未就绪（竞态/异常），跳过清理避免误删保活列表
-                    LogUtil.log(daemonService.this, "[保活] 跳过清理（l 未就绪）: " + normalized);
+                    continue;
                 }
-                continue;
+                // l 为空/未就绪（竞态/异常），跳过清理但尝试保活，宁多勿少
+                LogUtil.log(daemonService.this, "[保活] l 未就绪，尝试保活: " + normalized);
+                // 不 continue，继续执行保活逻辑
             }
             if (isServiceInSettings(normalized, s))
                 continue;
