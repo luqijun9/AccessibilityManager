@@ -68,4 +68,14 @@
         android:divider="@null"
         android:dividerHeight="0dp"
         android:scrollbarStyle="outsideOverlay" />
+
+    <TextView
+        android:id="@+id/empty_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:text="未找到结果"
+        android:textColor="@color/text_hint"
+        android:textSize="16sp"
+        android:visibility="gone" />
 </LinearLayout>

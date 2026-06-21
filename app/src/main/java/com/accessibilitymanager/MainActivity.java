@@ -51,6 +51,9 @@ import android.widget.CompoundButton;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
+import android.text.Editable;
+import android.text.TextWatcher;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Toast;
 
 import java.io.DataOutputStream;
@@ -84,6 +87,14 @@ public class MainActivity extends AppCompatActivity {
     TextView batteryWarningText;//电池警告文本
     TextView batteryWarningGo;//电池警告“去设置”按钮
     TextView batteryWarningDismiss;//电池警告“关闭”按钮
+    private Toolbar toolbar;
+
+    //搜索相关
+    private View mSearchView;
+    private EditText mSearchInput;
+    private boolean mIsSearching = false;
+    private Menu mMenu;
+    private List<AccessibilityServiceInfo> mFilteredList;
 
     //自定义一个内容监视器
     class SettingsValueChangeContentObserver extends ContentObserver {
@@ -124,7 +135,7 @@ public class MainActivity extends AppCompatActivity {
 
         setContentView(R.layout.activity_main);
 
-        Toolbar toolbar = findViewById(R.id.toolbar);
+        toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
         toolbar.setTitleTextColor(night ? Color.WHITE : Color.BLACK);
         toolbar.setPaddingRelative(
@@ -187,6 +198,7 @@ public class MainActivity extends AppCompatActivity {
 
 
         listView = findViewById(R.id.list);
+        listView.setEmptyView(findViewById(R.id.empty_view));
 
         batteryWarning = findViewById(R.id.battery_warning);
         batteryWarningText = findViewById(R.id.battery_warning_text);
@@ -364,6 +376,10 @@ public class MainActivity extends AppCompatActivity {
     //返回键退出APP，用于适配安卓12和高于12的系统上返回键默认仅把APP放后台的问题。
     @Override
     public void onBackPressed() {
+        if (mIsSearching) {
+            exitSearchMode();
+            return;
+        }
         finish();
         super.onBackPressed();
     }
@@ -584,12 +600,18 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         getMenuInflater().inflate(R.menu.arrange, menu);
+        mMenu = menu;
         return super.onCreateOptionsMenu(menu);
     }
 
     @Override
     public boolean onOptionsItemSelected(MenuItem menuItem) {
         int itemId = menuItem.getItemId();
+
+        if (itemId == R.id.search) {
+            enterSearchMode();
+            return true;
+        }
 
         if (itemId == R.id.perm_status) {
             if (sp.getBoolean("crashfix", false) && !ShellUtil.hasAnyPermission()) {
@@ -611,6 +633,133 @@ public class MainActivity extends AppCompatActivity {
             startActivity(new Intent(this, LogActivity.class));
         }
         return super.onOptionsItemSelected(menuItem);
+    }
+
+    //==================== 搜索功能 ====================
+    private void enterSearchMode() {
+        if (mIsSearching) return;
+        mIsSearching = true;
+
+        //隐藏标题和菜单项
+        getSupportActionBar().setTitle("");
+        if (mMenu != null) {
+            mMenu.findItem(R.id.search).setVisible(false);
+            mMenu.findItem(R.id.viewlog).setVisible(false);
+            mMenu.findItem(R.id.perm_status).setVisible(false);
+            mMenu.findItem(R.id.settings).setVisible(false);
+        }
+
+        //添加搜索视图到Toolbar
+        mSearchView = getLayoutInflater().inflate(R.layout.toolbar_search, null);
+        Toolbar.LayoutParams params = new Toolbar.LayoutParams(
+                Toolbar.LayoutParams.MATCH_PARENT,
+                Toolbar.LayoutParams.MATCH_PARENT);
+        toolbar.addView(mSearchView, params);
+
+        mSearchInput = mSearchView.findViewById(R.id.search_input);
+        ImageButton closeBtn = mSearchView.findViewById(R.id.search_close);
+
+        mSearchInput.addTextChangedListener(searchWatcher);
+        closeBtn.setOnClickListener(v -> exitSearchMode());
+
+        mSearchInput.requestFocus();
+        InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) imm.showSoftInput(mSearchInput, 0);
+    }
+
+    private void exitSearchMode() {
+        if (!mIsSearching) return;
+        mIsSearching = false;
+
+        //移除搜索视图
+        toolbar.removeView(mSearchView);
+        mSearchView = null;
+        mSearchInput = null;
+
+        //恢复标题
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setTitle(getTitle());
+        }
+
+        //恢复菜单项
+        if (mMenu != null) {
+            mMenu.findItem(R.id.search).setVisible(true);
+            mMenu.findItem(R.id.viewlog).setVisible(true);
+            mMenu.findItem(R.id.perm_status).setVisible(true);
+            mMenu.findItem(R.id.settings).setVisible(true);
+        }
+
+        //刷新排序并恢复完整列表
+        Sort();
+        listView.setAdapter(new adapter(tmp));
+        mFilteredList = null;
+
+        //隐藏键盘
+        InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) imm.hideSoftInputFromWindow(toolbar.getWindowToken(), 0);
+    }
+
+    private final TextWatcher searchWatcher = new TextWatcher() {
+        @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+        @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+        @Override
+        public void afterTextChanged(Editable s) {
+            String query = s.toString().trim();
+            filterServices(query);
+        }
+    };
+
+    private void filterServices(String query) {
+        if (query.isEmpty()) {
+            listView.setAdapter(new adapter(tmp));
+            mFilteredList = null;
+            return;
+        }
+
+        mFilteredList = new ArrayList<>();
+        String lowerQuery = query.toLowerCase();
+
+        for (AccessibilityServiceInfo info : tmp) {
+            String rawName = info.getId();
+            String[] parts = rawName.split("/");
+            if (parts.length < 1) continue;
+
+            String packageName = parts[0];
+            String serviceName = parts.length > 1 ? parts[1] : "";
+
+            //匹配包名
+            if (packageName != null && packageName.toLowerCase().contains(lowerQuery)) {
+                mFilteredList.add(info);
+                continue;
+            }
+            //匹配服务名
+            if (serviceName.toLowerCase().contains(lowerQuery)) {
+                mFilteredList.add(info);
+                continue;
+            }
+            //匹配应用名
+            try {
+                ApplicationInfo appInfo = pm.getApplicationInfo(packageName, 0);
+                String appLabel = pm.getApplicationLabel(appInfo).toString();
+                if (appLabel.toLowerCase().contains(lowerQuery)) {
+                    mFilteredList.add(info);
+                    continue;
+                }
+            } catch (Exception ignored) {}
+
+            //匹配服务显示名称
+            try {
+                android.content.pm.ServiceInfo si = pm.getServiceInfo(
+                        new ComponentName(packageName, serviceName),
+                        PackageManager.MATCH_DEFAULT_ONLY);
+                String svcLabel = si.loadLabel(pm).toString();
+                if (svcLabel.toLowerCase().contains(lowerQuery)) {
+                    mFilteredList.add(info);
+                }
+            } catch (Exception ignored) {}
+        }
+
+        listView.setAdapter(new adapter(mFilteredList));
     }
 
     private void showSettingsDialog() {
