@@ -31,10 +31,12 @@ import java.io.InputStreamReader;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -44,64 +46,130 @@ public class daemonService extends Service {
     SharedPreferences sp;
     Notification.Builder notification;
     NotificationManager systemService;
-    volatile String tmpSettingValue;
-    volatile List<String> l = new ArrayList<>();
     PackageManager packageManager;
     private Handler mHandler;
     private Runnable mPostFixCheckRunnable;
-    private volatile boolean mIsCheckingCrashed = false;
-    private volatile boolean mIsFixing = false;
+
+    // ── 共享状态：仅在 daemonExecutor 线程中读写 ──
+    private String tmpSettingValue;
+    private List<String> l = new ArrayList<>();
+    private boolean mIsFixing = false;
     private int mFixRetryRemaining = 1;
-    private volatile long mLastCrashedCheckStartTime = 0;
-    private volatile long mLastFixStartTime = 0;
-    private final Object mFixLock = new Object();
-    private final Map<String, Long> mLastFixTime = new ConcurrentHashMap<>();
-    private volatile String mCrashedFixServiceName;
-    private volatile String mCrashedFixLabel;
-    // 标记 onStartCommand 是否是紧跟在 onCreate 之后的首次调用。
-    // 首次启动时 onCreate 已触发崩溃检测，onStartCommand 不应重复触发；
-    // 仅当 App 在服务已运行时再次调用 startService 才触发"服务刷新"检测。
+    private long mLastFixStartTime = 0;
+    private final Map<String, Long> mLastFixTime = new HashMap<>();
+    private String mCrashedFixServiceName;
+    private String mCrashedFixLabel;
     private boolean mFirstCommandAfterCreate = true;
 
+    // ── 执行器 ──
+    // daemonExecutor: 串行处理所有共享状态（保活、修复、设置读写）
+    private final ExecutorService daemonExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "daemon-worker");
+        t.setDaemon(true);
+        return t;
+    });
+    // crashCheckExecutor: 独立执行 dumpsys，不阻塞保活队列
+    private final ExecutorService crashCheckExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "crash-check-worker");
+        t.setDaemon(true);
+        return t;
+    });
+
+    // ════════════════════════════════════════════════════════════════
+    //  BroadcastReceiver
+    // ════════════════════════════════════════════════════════════════
     final private BroadcastReceiver myReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             LogUtil.log(daemonService.this, "[解锁广播] 收到 USER_PRESENT 广播");
-            String set = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-            if (set == null) set = "";
-            String oldValue = tmpSettingValue;
-            boolean settingChanged = !oldValue.equals(set);
-            if (settingChanged) {
-                doDaemon(set);
-            }
-            if (!sp.getBoolean("unlock_crash_check", false)) {
-                LogUtil.log(daemonService.this, "[解锁广播] unlock_crash_check 未开启，跳过崩溃检测");
-                return;
-            }
-            if (mIsFixing && System.currentTimeMillis() - mLastFixStartTime <= 5000) {
-                LogUtil.log(daemonService.this, "[解锁广播] 修复操作进行中(5秒内)，跳过本次检测");
-                return;
-            }
-            // mIsFixing 为 true 但已超时 5s，说明 fixCrashedService 可能异常结束未复位。
-            // 不在锁外强制复位 mIsFixing，避免与 fixCrashedService 的 synchronized 块竞态，
-            // 交由后续的 postFixCheck 或 fixCrashedService 自身清理。
-            if (mIsFixing) {
-                LogUtil.log(daemonService.this, "[崩溃检测] 修复操作超时(>5s)，跳过本次广播检测");
-            }
-            if (settingChanged) {
-                String systemAppLabel = getSystemAppChangeLabel(oldValue, set);
-                boolean ignoreSystemChange = sp.getBoolean("ignore_system_crash_trigger", true);
-                if (systemAppLabel != null && ignoreSystemChange) {
-                    LogUtil.log(daemonService.this, "忽略" + systemAppLabel + "的服务变化，不触发检测");
-                    return;
-                }
-                mHandler.postDelayed(() -> checkCrashedServices("解锁"), 1000);
-            } else {
-                checkCrashedServices("解锁");
-            }
+            // 主线程读设置（ContentProvider IPC 快），结果提交到 daemonExecutor
+            final String currentSetting = Settings.Secure.getString(getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            daemonExecutor.submit(() -> handleUnlockBroadcast(currentSetting));
         }
     };
 
+    /** 在 daemonExecutor 线程中执行 */
+    private void handleUnlockBroadcast(String currentSetting) {
+        if (currentSetting == null) currentSetting = "";
+        String oldValue = tmpSettingValue;
+        boolean settingChanged = !oldValue.equals(currentSetting);
+
+        // 保活逻辑：如果设置变化，刷新已安装列表并执行保活
+        if (settingChanged) {
+            refreshInstalledServiceList();
+            doDaemonImpl(currentSetting);
+        }
+
+        // 崩溃检测逻辑
+        if (!sp.getBoolean("unlock_crash_check", false)) {
+            LogUtil.log(daemonService.this, "[解锁广播] unlock_crash_check 未开启，跳过崩溃检测");
+            return;
+        }
+        if (mIsFixing && System.currentTimeMillis() - mLastFixStartTime <= 5000) {
+            LogUtil.log(daemonService.this, "[解锁广播] 修复操作进行中(5秒内)，跳过本次检测");
+            return;
+        }
+        if (mIsFixing) {
+            LogUtil.log(daemonService.this, "[崩溃检测] 修复操作超时(>5s)，跳过本次广播检测");
+        }
+        if (settingChanged) {
+            String systemAppLabel = getSystemAppChangeLabel(oldValue, currentSetting);
+            boolean ignoreSystemChange = sp.getBoolean("ignore_system_crash_trigger", true);
+            if (systemAppLabel != null && ignoreSystemChange) {
+                LogUtil.log(daemonService.this, "忽略" + systemAppLabel + "的服务变化，不触发检测");
+                return;
+            }
+        }
+        // 提交到 crashCheckExecutor 执行 dumpsys
+        crashCheckExecutor.submit(() -> checkCrashedServicesInternal("解锁"));
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //  ContentObserver
+    // ════════════════════════════════════════════════════════════════
+    class SettingsValueChangeContentObserver extends ContentObserver {
+        public SettingsValueChangeContentObserver() {
+            super(new Handler());
+        }
+
+        @Override
+        public void onChange(boolean selfChange) {
+            super.onChange(selfChange);
+            final String currentSetting = Settings.Secure.getString(getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            daemonExecutor.submit(() -> handleSettingChange(currentSetting));
+        }
+    }
+
+    /** 在 daemonExecutor 线程中执行 */
+    private void handleSettingChange(String currentSetting) {
+        if (currentSetting == null) currentSetting = "";
+        String oldValue = tmpSettingValue;
+        boolean settingChanged = !oldValue.equals(currentSetting);
+
+        if (settingChanged) {
+            refreshInstalledServiceList();
+            doDaemonImpl(currentSetting);
+        }
+
+        if (mIsFixing && System.currentTimeMillis() - mLastFixStartTime <= 5000) {
+            return; // 修复中，不触发新的崩溃检测
+        }
+        if (!settingChanged) return;
+
+        String systemAppLabel = getSystemAppChangeLabel(oldValue, currentSetting);
+        boolean ignoreSystemChange = sp.getBoolean("ignore_system_crash_trigger", true);
+        if (systemAppLabel != null && ignoreSystemChange) {
+            LogUtil.log(daemonService.this, "忽略" + systemAppLabel + "的服务变化，不触发检测");
+            return;
+        }
+        crashCheckExecutor.submit(() -> checkCrashedServicesInternal("服务变化"));
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //  getSystemAppChangeLabel（只读 sp/packageManager，任意线程安全）
+    // ════════════════════════════════════════════════════════════════
     private String getSystemAppChangeLabel(String oldValue, String newValue) {
         if (oldValue == null) oldValue = "";
         if (newValue == null) newValue = "";
@@ -137,53 +205,19 @@ public class daemonService extends Service {
         }
     }
 
-    //自定义一个内容监视器
-    class SettingsValueChangeContentObserver extends ContentObserver {
-        public SettingsValueChangeContentObserver() {
-            super(new Handler());
-        }
-
-        @Override
-        public void onChange(boolean selfChange) {
-            super.onChange(selfChange);
-            String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-            if (s == null) s = "";
-            String oldValue = tmpSettingValue;
-            boolean settingChanged = !oldValue.equals(s);
-            if (settingChanged) {
-                doDaemon(s);
-            }
-            if ((!mIsFixing || System.currentTimeMillis() - mLastFixStartTime > 5000) && settingChanged) {
-                // mIsFixing 在锁外只读不写，避免与 fixCrashedService 的 synchronized 块竞态
-                if (mIsFixing) {
-                    LogUtil.log(daemonService.this, "[崩溃检测] 修复操作超时(>5s)，跳过本次变化检测");
-                }
-                String systemAppLabel = getSystemAppChangeLabel(oldValue, s);
-                boolean ignoreSystemChange = sp.getBoolean("ignore_system_crash_trigger", true);
-                if (systemAppLabel != null && ignoreSystemChange) {
-                    LogUtil.log(daemonService.this, "忽略" + systemAppLabel + "的服务变化，不触发检测");
-                    return;
-                }
-                mHandler.postDelayed(() -> checkCrashedServices("服务变化"), 1000);
-            }
-        }
-    }
-
-
+    // ════════════════════════════════════════════════════════════════
+    //  doDaemon / doDaemonImpl（仅在 daemonExecutor 线程调用）
+    // ════════════════════════════════════════════════════════════════
+    /** 调用者必须在 daemonExecutor 线程中 */
     private void doDaemon(String s) {
-        final String setting = s;
-        final boolean delay = sp.getBoolean("delay_daemon", false);
-        new Thread(() -> {
-            if (delay) {
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException ignored) {
-                }
-            }
-            doDaemonImpl(setting);
-        }).start();
+        boolean delay = sp.getBoolean("delay_daemon", false);
+        if (delay) {
+            try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+        }
+        doDaemonImpl(s);
     }
 
+    /** 调用者必须在 daemonExecutor 线程中 */
     private void doDaemonImpl(String s) {
         final List<String> localL = l;  // 拍快照，本次执行使用同一份完整列表
         String list = sp.getString("daemon", "");
@@ -279,6 +313,9 @@ public class daemonService extends Service {
         mCrashedFixLabel = null;
     }
 
+    // ════════════════════════════════════════════════════════════════
+    //  onBind / 工具方法
+    // ════════════════════════════════════════════════════════════════
     @Override
     public IBinder onBind(Intent intent) {
         return null;
@@ -329,112 +366,119 @@ public class daemonService extends Service {
         return false;
     }
 
+    // ════════════════════════════════════════════════════════════════
+    //  崩溃检测（在 crashCheckExecutor 中执行 dumpsys）
+    // ════════════════════════════════════════════════════════════════
 
+    /** 从任意线程调用，提交到 crashCheckExecutor */
     private void checkCrashedServices(String source) {
         if (!sp.getBoolean("crashfix", false)) return;
-        if (mIsCheckingCrashed) {
-            if (System.currentTimeMillis() - mLastCrashedCheckStartTime > 5000) {
-                LogUtil.log(daemonService.this, "[崩溃检测] 上次检测超时，强制重置");
-                mIsCheckingCrashed = false;
-            } else {
-                return;
-            }
-        }
+        crashCheckExecutor.submit(() -> checkCrashedServicesInternal(source));
+    }
+
+    /** 在 crashCheckExecutor 线程中执行：运行 dumpsys，若发现崩溃则回调 daemonExecutor 修复 */
+    private void checkCrashedServicesInternal(String source) {
         String daemonList = sp.getString("daemon", "");
         if (daemonList.length() == 0) return;
         LogUtil.log(daemonService.this, "[崩溃检测] 触发来源：" + source);
-        mIsCheckingCrashed = true;
-        mLastCrashedCheckStartTime = System.currentTimeMillis();
-        new Thread(() -> {
+        try {
+            Process p;
             try {
-                Process p;
-                try {
-                    p = ShellUtil.exec();
-                } catch (Exception e) {
-                    mIsCheckingCrashed = false;
-                    return;
-                }
-                DataOutputStream os = new DataOutputStream(p.getOutputStream());
-                os.writeBytes("dumpsys accessibility 2>/dev/null\n");
-                os.writeBytes("exit\n");
-                os.flush();
-                os.close();
-
-                BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
-                StringBuilder allOutput = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    allOutput.append(line).append("\n");
-                }
-                reader.close();
-                p.waitFor();
-
-                String fullOutput = allOutput.toString();
-
-                Matcher rawLineMatcher = Pattern.compile("Crashed services:.*").matcher(fullOutput);
-                String rawCrashedLine;
-                if (rawLineMatcher.find()) {
-                    rawCrashedLine = rawLineMatcher.group().trim();
-                } else {
-                    rawCrashedLine = "Crashed services: (未找到此行)";
-                }
-                LogUtil.log(daemonService.this, "[崩溃检测] 返回 " + rawCrashedLine);
-
-                List<String> crashedServicesList = new ArrayList<>();
-                Matcher serviceMatcher = Pattern.compile("\\{([^{}]+)\\}").matcher(rawCrashedLine);
-                while (serviceMatcher.find()) {
-                    String svc = serviceMatcher.group(1).trim();
-                    if (!svc.isEmpty()) {
-                        crashedServicesList.add(svc);
-                    }
-                }
-
-                if (crashedServicesList.isEmpty()) {
-                    mIsCheckingCrashed = false;
-                    return;
-                }
-
-                String[] trackedServices = daemonList.split(":");
-                final int retryRemaining = mFixRetryRemaining;
-
-                for (String cs : crashedServicesList) {
-                    for (String tracked : trackedServices) {
-                        if (serviceNameMatches(cs, tracked)) {
-                            if ("修复后复查".equals(source)) {
-                                if (retryRemaining <= 0) {
-                                    LogUtil.log(daemonService.this, "[崩溃修复] 修复后复查仍崩溃，已达最大重试次数，放弃：" + cs);
-                                    mHandler.post(() -> Toast.makeText(daemonService.this, "保活崩溃服务失败", Toast.LENGTH_SHORT).show());
-                                    continue;
-                                }
-                                LogUtil.log(daemonService.this, "[崩溃修复] 修复后复查仍崩溃，进行重试(" + retryRemaining + ")：" + cs);
-                                mFixRetryRemaining--;
-                                mLastFixTime.put(cs, System.currentTimeMillis());
-                                String serviceToFix = cs;
-                                new Thread(() -> fixCrashedService(serviceToFix, true)).start();
-                            } else {
-                                Long lastFix = mLastFixTime.get(cs);
-                                if (lastFix != null && System.currentTimeMillis() - lastFix < 8000) {
-                                    continue;
-                                }
-                                LogUtil.log(daemonService.this, "[崩溃检测] 检测到保活服务崩溃：" + cs);
-                                mFixRetryRemaining = 1;
-                                mLastFixTime.put(cs, System.currentTimeMillis());
-                                String serviceToFix = cs;
-                                new Thread(() -> fixCrashedService(serviceToFix, false)).start();
-                            }
-                            break;
-                        }
-                    }
-                }
-                mIsCheckingCrashed = false;
+                p = ShellUtil.exec();
             } catch (Exception e) {
-                mIsCheckingCrashed = false;
+                return;
             }
-        }).start();
+            DataOutputStream os = new DataOutputStream(p.getOutputStream());
+            os.writeBytes("dumpsys accessibility 2>/dev/null\n");
+            os.writeBytes("exit\n");
+            os.flush();
+            os.close();
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            StringBuilder allOutput = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                allOutput.append(line).append("\n");
+            }
+            reader.close();
+            if (!p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                LogUtil.log(daemonService.this, "[崩溃检测] dumpsys 超时(10s)，强制终止");
+                return;
+            }
+
+            String fullOutput = allOutput.toString();
+
+            Matcher rawLineMatcher = Pattern.compile("Crashed services:.*").matcher(fullOutput);
+            String rawCrashedLine;
+            if (rawLineMatcher.find()) {
+                rawCrashedLine = rawLineMatcher.group().trim();
+            } else {
+                rawCrashedLine = "Crashed services: (未找到此行)";
+            }
+            LogUtil.log(daemonService.this, "[崩溃检测] 返回 " + rawCrashedLine);
+
+            List<String> crashedServicesList = new ArrayList<>();
+            Matcher serviceMatcher = Pattern.compile("\\{([^{}]+)\\}").matcher(rawCrashedLine);
+            while (serviceMatcher.find()) {
+                String svc = serviceMatcher.group(1).trim();
+                if (!svc.isEmpty()) {
+                    crashedServicesList.add(svc);
+                }
+            }
+
+            if (crashedServicesList.isEmpty()) {
+                return;
+            }
+
+            String[] trackedServices = daemonList.split(":");
+
+            for (String cs : crashedServicesList) {
+                for (String tracked : trackedServices) {
+                    if (serviceNameMatches(cs, tracked)) {
+                        // 把修复操作提交回 daemonExecutor 串行执行
+                        if ("修复后复查".equals(source)) {
+                            daemonExecutor.submit(() -> handleFixRetry(cs));
+                        } else {
+                            daemonExecutor.submit(() -> handleFixDetected(cs));
+                        }
+                        break;
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
     }
 
+    /** 在 daemonExecutor 线程中执行：处理首次检测到的崩溃 */
+    private void handleFixDetected(String cs) {
+        Long lastFix = mLastFixTime.get(cs);
+        if (lastFix != null && System.currentTimeMillis() - lastFix < 8000) {
+            return;
+        }
+        LogUtil.log(daemonService.this, "[崩溃检测] 检测到保活服务崩溃：" + cs);
+        mFixRetryRemaining = 1;
+        mLastFixTime.put(cs, System.currentTimeMillis());
+        fixCrashedService(cs, false);
+    }
+
+    /** 在 daemonExecutor 线程中执行：处理修复后复查的崩溃（重试） */
+    private void handleFixRetry(String cs) {
+        if (mFixRetryRemaining <= 0) {
+            LogUtil.log(daemonService.this, "[崩溃修复] 修复后复查仍崩溃，已达最大重试次数，放弃：" + cs);
+            mHandler.post(() -> Toast.makeText(daemonService.this, "保活崩溃服务失败", Toast.LENGTH_SHORT).show());
+            return;
+        }
+        LogUtil.log(daemonService.this, "[崩溃修复] 修复后复查仍崩溃，进行重试(" + mFixRetryRemaining + ")：" + cs);
+        mFixRetryRemaining--;
+        mLastFixTime.put(cs, System.currentTimeMillis());
+        fixCrashedService(cs, true);
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //  崩溃修复（仅在 daemonExecutor 线程中执行）
+    // ════════════════════════════════════════════════════════════════
     private void fixCrashedService(String serviceName, boolean isRetry) {
-        synchronized (mFixLock) {
         mIsFixing = true;
         mLastFixStartTime = System.currentTimeMillis();
         cancelPostFixCheck();
@@ -443,13 +487,11 @@ public class daemonService extends Service {
         try {
             pkgName = serviceName.substring(0, serviceName.indexOf("/"));
         } catch (Exception e) {
-            mIsCheckingCrashed = false;
             mIsFixing = false;
             return;
         }
 
         boolean useForceStop = sp.getBoolean("fixmode", true);
-
         if (pkgName.equals(getPackageName())) {
             useForceStop = false;
         }
@@ -468,8 +510,6 @@ public class daemonService extends Service {
         String logPrefix = isRetry ? "[崩溃修复-重试]" : "[崩溃修复]";
 
         if (useForceStop) {
-            // 强行停止会导致对应app的无障碍服务也被关闭，触发 ContentObserver，
-            // 由 doDaemon → doDaemonImpl 保活路径统一弹 Toast
             LogUtil.log(daemonService.this, logPrefix + " 强杀进程：" + serviceName + " ← force-stop " + pkgName);
             try {
                 Process forceStop = ShellUtil.exec();
@@ -481,10 +521,7 @@ public class daemonService extends Service {
                 forceStop.waitFor();
             } catch (Exception ignored) {
             }
-            try {
-                Thread.sleep(500);
-            } catch (InterruptedException ignored) {
-            }
+            try { Thread.sleep(500); } catch (InterruptedException ignored) { }
         } else {
             LogUtil.log(daemonService.this, logPrefix + " 仅关闭服务：" + serviceName);
             String enabled = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
@@ -499,10 +536,7 @@ public class daemonService extends Service {
                 sb.append(entry);
             }
             Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, sb.toString());
-            try {
-                Thread.sleep(300);
-            } catch (InterruptedException ignored) {
-            }
+            try { Thread.sleep(300); } catch (InterruptedException ignored) { }
         }
 
         mHandler.post(() -> {
@@ -515,15 +549,15 @@ public class daemonService extends Service {
         });
 
         mIsFixing = false;
+        // force-stop/putString 会触发 ContentObserver → doDaemonImpl 保活，
+        // 5 秒后复查崩溃状态确认修复是否生效
         schedulePostFixCheck();
-        }
     }
 
     private void schedulePostFixCheck() {
         cancelPostFixCheck();
         mPostFixCheckRunnable = () -> {
-            mIsCheckingCrashed = false;
-            checkCrashedServices("修复后复查");
+            crashCheckExecutor.submit(() -> checkCrashedServicesInternal("修复后复查"));
         };
         mHandler.postDelayed(mPostFixCheckRunnable, 5000);
     }
@@ -535,6 +569,25 @@ public class daemonService extends Service {
         }
     }
 
+    // ════════════════════════════════════════════════════════════════
+    //  refreshInstalledServiceList（仅在 daemonExecutor 线程调用）
+    // ════════════════════════════════════════════════════════════════
+    private void refreshInstalledServiceList() {
+        List<String> newList = new ArrayList<>();
+        try {
+            List<AccessibilityServiceInfo> list = ((AccessibilityManager) getApplicationContext()
+                    .getSystemService(Context.ACCESSIBILITY_SERVICE)).getInstalledAccessibilityServiceList();
+            for (AccessibilityServiceInfo info : list) {
+                newList.add(info.getId());
+            }
+        } catch (Exception ignored) {
+        }
+        l = newList;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //  onCreate / onDestroy / onStartCommand
+    // ════════════════════════════════════════════════════════════════
     @Override
     public void onCreate() {
         super.onCreate();
@@ -584,33 +637,30 @@ public class daemonService extends Service {
         }
 
         Toast.makeText(daemonService.this, "启动保活", Toast.LENGTH_SHORT).show();
-        //注册监视器，读取当前设置项并存到tmpsettingValue
+
+        // 注册 ContentObserver 和 BroadcastReceiver
         mContentOb = new SettingsValueChangeContentObserver();
-        getContentResolver().registerContentObserver(Settings.Secure.getUriFor(Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES), true, mContentOb);
-        tmpSettingValue = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-        if (tmpSettingValue == null) tmpSettingValue = "";
-
-        // 在后台线程刷新服务列表并执行保活，避免 IPC 调用阻塞主线程。
-        // 注意：refreshInstalledServiceList 必须在 doDaemon 之前完成，
-        // 否则 doDaemonImpl 读取到空 l 会把保活列表全部清空！
-        final String onCreateSetting = tmpSettingValue;
-        new Thread(() -> {
-            refreshInstalledServiceList();
-            // l 已完全填充，安全执行保活
-            doDaemon(onCreateSetting);
-        }).start();
-
+        getContentResolver().registerContentObserver(
+                Settings.Secure.getUriFor(Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES), true, mContentOb);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(myReceiver, new IntentFilter("android.intent.action.USER_PRESENT"), Context.RECEIVER_EXPORTED);
         } else {
             registerReceiver(myReceiver, new IntentFilter("android.intent.action.USER_PRESENT"));
         }
 
-        //启动时也检查一次崩溃（checkCrashedServices 不依赖 l，可独立执行）
-        checkCrashedServices("服务启动");
+        // 通过 daemonExecutor 串行执行初始化
+        daemonExecutor.submit(() -> {
+            tmpSettingValue = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (tmpSettingValue == null) tmpSettingValue = "";
+            refreshInstalledServiceList();
+            doDaemon(tmpSettingValue);
+        });
+
+        // crashCheckExecutor 执行首次崩溃检测
+        crashCheckExecutor.submit(() -> checkCrashedServicesInternal("服务启动"));
+        // TimerReceiver 无需进入执行器
         new Thread(() -> TimerReceiver.scheduleNext(daemonService.this)).start();
     }
-
 
     @Override
     public void onDestroy() {
@@ -618,24 +668,28 @@ public class daemonService extends Service {
         super.onDestroy();
         cancelPostFixCheck();
         TimerReceiver.cancel(this);
-        unregisterReceiver(myReceiver);
-        getContentResolver().unregisterContentObserver(mContentOb);
+        try { unregisterReceiver(myReceiver); } catch (Exception ignored) { }
+        if (mContentOb != null) {
+            try { getContentResolver().unregisterContentObserver(mContentOb); } catch (Exception ignored) { }
+        }
         Toast.makeText(daemonService.this, "停止保活", Toast.LENGTH_SHORT).show();
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        String currentSetting = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-        if (currentSetting == null) currentSetting = "";
-        // 在后台线程刷新服务列表并执行保活，避免 IPC 调用阻塞主线程。
-        // refreshInstalledServiceList 必须在 doDaemon 之前完成，防止清空保活列表。
-        final String startCmdSetting = currentSetting;
-        new Thread(() -> {
-            refreshInstalledServiceList();
-            doDaemon(startCmdSetting);
-        }).start();
+        final String currentSetting = Settings.Secure.getString(getContentResolver(),
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        final String alarmSource = intent != null ? intent.getStringExtra("source") : null;
 
-        String alarmSource = intent != null ? intent.getStringExtra("source") : null;
+        // 保活部分提交到 daemonExecutor 串行执行
+        daemonExecutor.submit(() -> {
+            String setting = currentSetting;
+            if (setting == null) setting = "";
+            refreshInstalledServiceList();
+            doDaemon(setting);
+        });
+
+        // 崩溃检测部分
         if ("Alarm".equals(alarmSource)) {
             checkCrashedServices("Alarm");
         } else if ("AccessibilityService".equals(alarmSource)) {
@@ -646,18 +700,4 @@ public class daemonService extends Service {
         mFirstCommandAfterCreate = false;
         return START_STICKY;
     }
-
-    private void refreshInstalledServiceList() {
-        List<String> newList = new ArrayList<>();
-        try {
-            List<AccessibilityServiceInfo> list = ((AccessibilityManager) getApplicationContext()
-                    .getSystemService(Context.ACCESSIBILITY_SERVICE)).getInstalledAccessibilityServiceList();
-            for (AccessibilityServiceInfo info : list) {
-                newList.add(info.getId());
-            }
-        } catch (Exception ignored) {
-        }
-        l = newList;  // 原子赋值，读者看到的永远是完整列表
-    }
-
 }
