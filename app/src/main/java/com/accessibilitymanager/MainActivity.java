@@ -1464,6 +1464,10 @@ public class MainActivity extends AppCompatActivity {
     //启动前台服务，进行保活!
     void StartForeGroundDaemon() {
         Log.d("AM_DIAG", "[MainActivity] StartForeGroundDaemon() 被调用");
+        if (daemon.isEmpty()) {
+            Log.d("AM_DIAG", "[MainActivity] daemon为空，跳过启动保活服务");
+            return;
+        }
         if (checkPermission()) return;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !((NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE)).areNotificationsEnabled()) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 0);

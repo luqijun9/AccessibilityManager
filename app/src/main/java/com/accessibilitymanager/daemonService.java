@@ -130,7 +130,8 @@ public class daemonService extends Service {
             String pkgName = changedService.substring(0, slashIdx);
             ApplicationInfo appInfo = packageManager.getApplicationInfo(pkgName, 0);
             if ((appInfo.flags & ApplicationInfo.FLAG_SYSTEM) == 0) return null;
-            return appInfo.loadLabel(packageManager).toString();
+            CharSequence label = appInfo.loadLabel(packageManager);
+            return label != null ? label.toString() : pkgName;
         } catch (PackageManager.NameNotFoundException e) {
             return null;
         }
@@ -209,12 +210,17 @@ public class daemonService extends Service {
                 continue;
 
             ApplicationInfo applicationInfo = new ApplicationInfo();
+            int slashIdx = serviceName.indexOf("/");
+            if (slashIdx <= 0) {
+                LogUtil.log(daemonService.this, "[保活] 跳过非法服务名(无'/'): " + serviceName);
+                continue;
+            }
             try {
-
-                applicationInfo = packageManager.getApplicationInfo(serviceName.substring(0, serviceName.indexOf("/")), PackageManager.GET_META_DATA);
+                applicationInfo = packageManager.getApplicationInfo(serviceName.substring(0, slashIdx), PackageManager.GET_META_DATA);
             } catch (PackageManager.NameNotFoundException ignored) {
             }
-            String packageLabel = applicationInfo.loadLabel(packageManager).toString();
+            CharSequence label = applicationInfo.loadLabel(packageManager);
+            String packageLabel = label != null ? label.toString() : serviceName;
             LogUtil.log(daemonService.this, "[保活] 检测到服务缺失：" + normalized + " (" + packageLabel + ")");
             add.append(normalized).append(":");
             add1.append(packageLabel).append("\n");
@@ -453,7 +459,8 @@ public class daemonService extends Service {
             applicationInfo = packageManager.getApplicationInfo(pkgName, PackageManager.GET_META_DATA);
         } catch (PackageManager.NameNotFoundException ignored) {
         }
-        String packageLabel = applicationInfo.loadLabel(packageManager).toString();
+        CharSequence label = applicationInfo.loadLabel(packageManager);
+        String packageLabel = label != null ? label.toString() : pkgName;
 
         mCrashedFixServiceName = serviceName;
         mCrashedFixLabel = packageLabel;
@@ -534,14 +541,48 @@ public class daemonService extends Service {
         Log.d("AM_DIAG", "[daemonService] onCreate 开始, pid=" + android.os.Process.myPid());
         mHandler = new Handler();
         sp = getSharedPreferences("data", 0);
+        packageManager = getPackageManager();
         String daemonVal = sp.getString("daemon", "");
         Log.d("AM_DIAG", "[daemonService] daemon='" + daemonVal + "', 长度=" + daemonVal.length());
+
+        // 必须先 startForeground() 再 stopSelf()，否则 5 秒内未调用 startForeground 会 ANR
+        String notifyTitle = sp.getString("notify_title", "海绵宝宝，猜猜我有几颗糖");
+        String notifyText = sp.getString("notify_text", "猜对了两颗都给你！");
+        notification = new Notification.Builder(this)
+                .setAutoCancel(true)
+                .setContentText(notifyText)
+                .setContentTitle(notifyTitle);
+        systemService = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            notification
+                    .setColor(getColor(R.color.bg))
+                    .setSmallIcon(Icon.createWithResource(this, R.drawable.tile))
+                    .setContentIntent(PendingIntent.getActivity(this, 0,
+                            new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE));
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel notificationChannel = new NotificationChannel("daemon", "保活无障碍", NotificationManager.IMPORTANCE_DEFAULT);
+            notificationChannel.enableLights(false);
+            notificationChannel.setShowBadge(false);
+            notificationChannel.setLockscreenVisibility(Notification.VISIBILITY_SECRET);
+            systemService.createNotificationChannel(notificationChannel);
+            notification.setChannelId("daemon");
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            notification.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(1, notification.build(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+        } else {
+            startForeground(1, notification.build());
+        }
+
         if (daemonVal.length() == 0) {
-            Log.d("AM_DIAG", "[daemonService] daemon为空, 调用stopSelf()后 return");
+            Log.d("AM_DIAG", "[daemonService] daemon为空, 停止保活服务");
             stopSelf();
             return;
         }
-        packageManager = getPackageManager();
+
         Toast.makeText(daemonService.this, "启动保活", Toast.LENGTH_SHORT).show();
         //注册监视器，读取当前设置项并存到tmpsettingValue
         mContentOb = new SettingsValueChangeContentObserver();
@@ -563,37 +604,6 @@ public class daemonService extends Service {
             registerReceiver(myReceiver, new IntentFilter("android.intent.action.USER_PRESENT"), Context.RECEIVER_EXPORTED);
         } else {
             registerReceiver(myReceiver, new IntentFilter("android.intent.action.USER_PRESENT"));
-        }
-        //发送前台通知
-        String notifyTitle = sp.getString("notify_title", "海绵宝宝，猜猜我有几颗糖");
-        String notifyText = sp.getString("notify_text", "猜对了两颗都给你！");
-        notification = new Notification.Builder(this)
-                .setAutoCancel(true)
-                .setContentText(notifyText)
-                .setContentTitle(notifyTitle);
-        systemService = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            notification
-                    .setColor(getColor(R.color.bg))
-                    .setSmallIcon(Icon.createWithResource(this, R.drawable.tile))
-                    .setContentIntent(PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE));
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel notificationChannel = new NotificationChannel("daemon", "保活无障碍", NotificationManager.IMPORTANCE_DEFAULT);
-            notificationChannel.enableLights(false);
-            notificationChannel.setShowBadge(false);
-            notificationChannel.setLockscreenVisibility(Notification.VISIBILITY_SECRET);
-            systemService.createNotificationChannel(notificationChannel);
-            notification.setChannelId("daemon");
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            notification.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(1, notification.build(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
-        } else {
-            startForeground(1, notification.build());
         }
 
         //启动时也检查一次崩溃（checkCrashedServices 不依赖 l，可独立执行）
