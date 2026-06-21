@@ -36,6 +36,7 @@ import android.graphics.Typeface;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -199,6 +200,15 @@ public class MainActivity extends AppCompatActivity {
 
         listView = findViewById(R.id.list);
         listView.setEmptyView(findViewById(R.id.empty_view));
+
+        // 列表底部提示：长按置顶
+        TextView pinHint = new TextView(this);
+        pinHint.setText("长按服务项可将其置顶");
+        pinHint.setTextColor(getColor(R.color.text_hint));
+        pinHint.setTextSize(12f);
+        pinHint.setGravity(Gravity.CENTER);
+        pinHint.setPadding(0, 6, 0, 6);
+        listView.addFooterView(pinHint, null, false);
 
         batteryWarning = findViewById(R.id.battery_warning);
         batteryWarningText = findViewById(R.id.battery_warning_text);
