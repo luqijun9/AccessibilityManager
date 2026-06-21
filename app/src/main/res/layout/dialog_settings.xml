@@ -70,12 +70,12 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="仅显示用户应用"
+                android:text="不显示后台卡片"
                 android:textColor="@color/text_primary"
                 android:textSize="16sp" />
 
             <Switch
-                android:id="@+id/useronly"
+                android:id="@+id/hide"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content" />
         </LinearLayout>
@@ -91,12 +91,12 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="不显示后台"
+                android:text="仅显示用户应用"
                 android:textColor="@color/text_primary"
                 android:textSize="16sp" />
 
             <Switch
-                android:id="@+id/hide"
+                android:id="@+id/useronly"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content" />
         </LinearLayout>
@@ -259,7 +259,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="-解锁设备时检测(开启无障碍)"
+                android:text="-解锁设备时检测"
                 android:textColor="@color/text_primary"
                 android:textSize="16sp" />
 

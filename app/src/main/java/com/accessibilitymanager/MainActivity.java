@@ -27,9 +27,12 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.PowerManager;
 import android.provider.Settings;
+import android.text.SpannableString;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.style.ForegroundColorSpan;
+import android.text.style.StyleSpan;
+import android.graphics.Typeface;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -124,6 +127,12 @@ public class MainActivity extends AppCompatActivity {
         Toolbar toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
         toolbar.setTitleTextColor(night ? Color.WHITE : Color.BLACK);
+        toolbar.setPaddingRelative(
+                toolbar.getPaddingStart(),
+                toolbar.getPaddingTop(),
+                (int) (8 * getResources().getDisplayMetrics().density + 0.5f),
+                toolbar.getPaddingBottom()
+        );
 
         if (!night) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -694,9 +703,17 @@ public class MainActivity extends AppCompatActivity {
                     sp.edit().putBoolean("unlock_crash_check", true).apply();
                     return;
                 }
+                SpannableString msg = new SpannableString("由于部分系统限制可能导致无法进行解锁检测，请进行以下操作查看是否能正常接收解锁广播:\n\n回到主界面后进行锁屏和解锁操作，打开管理器并点击日志，查看是否有\"收到USER_PRESENT广播\"的日志\n\n如果有则不需要额外操作，否则请使用以下方案其中之一：\n① 开启无障碍管理器的无障碍服务\n② 开启无障碍管理器的自启动权限\n\n现在是否要开启并保活管理器的无障碍服务？");
+                msg.setSpan(new StyleSpan(Typeface.BOLD), msg.toString().indexOf("回到主界面"), msg.toString().indexOf("回到主界面") + 5, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                msg.setSpan(new StyleSpan(Typeface.BOLD), msg.toString().indexOf("锁屏和解锁"), msg.toString().indexOf("锁屏和解锁") + 5, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                msg.setSpan(new StyleSpan(Typeface.BOLD), msg.toString().indexOf("收到USER_PRESENT广播"), msg.toString().indexOf("收到USER_PRESENT广播") + 17, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                msg.setSpan(new StyleSpan(Typeface.BOLD), msg.toString().indexOf("管理器"), msg.toString().indexOf("管理器") + 3, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                msg.setSpan(new StyleSpan(Typeface.BOLD), msg.toString().indexOf("日志"), msg.toString().indexOf("日志") + 2, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                msg.setSpan(new StyleSpan(Typeface.BOLD), msg.toString().indexOf("无障碍服务"), msg.toString().indexOf("无障碍服务") + 5, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                msg.setSpan(new StyleSpan(Typeface.BOLD), msg.toString().indexOf("自启动权限"), msg.toString().indexOf("自启动权限") + 5, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 new AlertDialog.Builder(this)
                         .setTitle("提示")
-                        .setMessage("由于部分系统限制可能导致无法进行解锁检测，回到主界面后，进行锁屏和解锁后，打开管理器并点击日志，查看是否有 收到USER_PRESENT广播 的日志：\n① 开启无障碍管理器的无障碍服务\n② 开启无障碍管理器的自启动权限\n\n是否要开启并保活管理器的无障碍服务？")
+                        .setMessage(msg)
                         .setNegativeButton("不开启", (d, w) -> {
                             sp.edit().putBoolean("unlock_crash_check", true).apply();
                             unlockCrashCheckRef.setOnCheckedChangeListener(null);
