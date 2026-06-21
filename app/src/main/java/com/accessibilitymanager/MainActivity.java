@@ -853,6 +853,7 @@ public class MainActivity extends AppCompatActivity {
                 holder.imageView = convertView.findViewById(R.id.c);
                 holder.sw = convertView.findViewById(R.id.s);
                 holder.ib = convertView.findViewById(R.id.ib);
+                holder.pinIndicator = convertView.findViewById(R.id.pin_indicator);
                 convertView.setTag(holder);
             } else {
                 holder = (ViewHolder) convertView.getTag();
@@ -1077,7 +1078,9 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
             if (top.contains(serviceName))
-                convertView.setBackgroundColor(night ? Color.DKGRAY : Color.LTGRAY);
+                holder.pinIndicator.setVisibility(View.VISIBLE);
+            else
+                holder.pinIndicator.setVisibility(View.GONE);
             return convertView;
         }
 
@@ -1128,6 +1131,7 @@ public class MainActivity extends AppCompatActivity {
             ImageView imageView;
             Switch sw;
             ImageButton ib;
+            View pinIndicator;
         }
 
 
