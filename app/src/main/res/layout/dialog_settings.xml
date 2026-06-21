@@ -259,7 +259,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="-解锁设备时检测"
+                android:text="-解锁设备时检测(开启无障碍)"
                 android:textColor="@color/text_primary"
                 android:textSize="16sp" />
 

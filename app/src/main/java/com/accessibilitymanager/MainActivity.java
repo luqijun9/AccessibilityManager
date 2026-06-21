@@ -631,8 +631,8 @@ public class MainActivity extends AppCompatActivity {
         switchDelayDaemon.setChecked(sp.getBoolean("delay_daemon", false));
         switchCrashFix.setChecked(sp.getBoolean("crashfix", false));
         switchUnlockCrashCheck.setChecked(sp.getBoolean("unlock_crash_check", false));
-        switchFixMode.setChecked(sp.getBoolean("fixmode", true));
-        switchPeriodicCheck.setChecked(sp.getBoolean("periodic_check", true));
+        switchFixMode.setChecked(sp.getBoolean("fixmode", false));
+        switchPeriodicCheck.setChecked(sp.getBoolean("periodic_check", false));
         switchIgnoreSystemCrash.setChecked(sp.getBoolean("ignore_system_crash_trigger", true));
         switchKeepCustomNotify.setChecked(sp.getBoolean("keep_custom_notify", false));
         intervalLabel.setText(sp.getInt("periodic_check_interval", 10) + "分钟");
@@ -696,7 +696,7 @@ public class MainActivity extends AppCompatActivity {
                 }
                 new AlertDialog.Builder(this)
                         .setTitle("提示")
-                        .setMessage("使用此功能需要满足以下条件之一：\n① 开启无障碍管理器的无障碍服务\n② 开启无障碍管理器的自启动权限\n否则可能无效!!!\n\n是否要开启并保活管理器的无障碍服务？")
+                        .setMessage("由于部分系统限制可能导致无法进行解锁检测，回到主界面后，进行锁屏和解锁后，打开管理器并点击日志，查看是否有 收到USER_PRESENT广播 的日志：\n① 开启无障碍管理器的无障碍服务\n② 开启无障碍管理器的自启动权限\n\n是否要开启并保活管理器的无障碍服务？")
                         .setNegativeButton("不开启", (d, w) -> {
                             sp.edit().putBoolean("unlock_crash_check", true).apply();
                             unlockCrashCheckRef.setOnCheckedChangeListener(null);
