@@ -232,11 +232,15 @@ public class MainActivity extends AppCompatActivity {
 
 
         if (sp.getBoolean("first", true)) {
-            new AlertDialog.Builder(this)
+            AlertDialog privacyDialog = new AlertDialog.Builder(this)
                     .setTitle("隐私政策")
                     .setMessage("本应用不会收集或记录您的任何信息，也不包含任何联网功能。继续使用则代表您同意上述隐私政策。")
-                    .setPositiveButton("OK", null).create().show();
+                    .setPositiveButton("OK", null).create();
+            privacyDialog.setOnDismissListener(d -> showPinHintOnce());
+            privacyDialog.show();
             sp.edit().putBoolean("first", false).apply();
+        } else if (!sp.getBoolean("pin_hint_shown", false)) {
+            showPinHintOnce();
         }
 
 
@@ -993,6 +997,15 @@ public class MainActivity extends AppCompatActivity {
         dialogView.findViewById(R.id.periodic_check).setEnabled(crashFixEnabled);
         dialogView.findViewById(R.id.ignore_system_crash).setEnabled(crashFixEnabled);
         ((TextView) dialogView.findViewById(R.id.periodic_interval_label)).setTextColor(periodicEnabled ? getColor(R.color.bg) : getColor(R.color.text_hint));
+    }
+
+    // 首次置顶提示（仅触发一次）
+    private void showPinHintOnce() {
+        if (sp.getBoolean("pin_hint_shown", false)) return;
+        sp.edit().putBoolean("pin_hint_shown", true).apply();
+        new Handler().postDelayed(() ->
+                Toast.makeText(MainActivity.this, "长按服务项可将其置顶", Toast.LENGTH_LONG).show()
+        , 500);
     }
 
     //这个是用于适配列表中的每一项设置项的显示
