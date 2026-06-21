@@ -23,6 +23,8 @@ import android.provider.Settings;
 import android.view.accessibility.AccessibilityManager;
 import android.widget.Toast;
 
+import android.util.Log;
+
 import java.io.BufferedReader;
 import java.io.DataOutputStream;
 import java.io.InputStreamReader;
@@ -529,9 +531,13 @@ public class daemonService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        Log.d("AM_DIAG", "[daemonService] onCreate 开始, pid=" + android.os.Process.myPid());
         mHandler = new Handler();
         sp = getSharedPreferences("data", 0);
-        if (sp.getString("daemon", "").length() == 0) {
+        String daemonVal = sp.getString("daemon", "");
+        Log.d("AM_DIAG", "[daemonService] daemon='" + daemonVal + "', 长度=" + daemonVal.length());
+        if (daemonVal.length() == 0) {
+            Log.d("AM_DIAG", "[daemonService] daemon为空, 调用stopSelf()后 return");
             stopSelf();
             return;
         }
@@ -598,6 +604,7 @@ public class daemonService extends Service {
 
     @Override
     public void onDestroy() {
+        Log.d("AM_DIAG", "[daemonService] onDestroy 开始, pid=" + android.os.Process.myPid());
         super.onDestroy();
         cancelPostFixCheck();
         TimerReceiver.cancel(this);

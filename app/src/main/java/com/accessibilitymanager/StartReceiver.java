@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.os.Build;
+import android.util.Log;
 
 public class StartReceiver extends BroadcastReceiver {
     @Override
@@ -39,9 +40,13 @@ public class StartReceiver extends BroadcastReceiver {
     }
 
     private void startIfBootEnabled(Context context) {
+        Log.d("AM_DIAG", "[StartReceiver] startIfBootEnabled 被调用");
         new Thread(() -> {
             SharedPreferences sp = context.getSharedPreferences("data", 0);
             if (!sp.getBoolean("boot", true)) return;
+            // daemon 为空时无需启动保活服务，避免 startForegroundService 后 onCreate
+            // 中因 daemon 为空而 stopSelf() 导致 ForegroundServiceDidNotStartInTimeException
+            if (sp.getString("daemon", "").length() == 0) return;
 
             TimerReceiver.scheduleNext(context);
 

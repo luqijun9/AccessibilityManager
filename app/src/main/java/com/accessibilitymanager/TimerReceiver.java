@@ -8,12 +8,14 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.SystemClock;
+import android.util.Log;
 
 public class TimerReceiver extends BroadcastReceiver {
     public static final String ACTION_PERIODIC_CHECK = "com.accessibilitymanager.PERIODIC_CRASH_CHECK";
 
     @Override
     public void onReceive(Context context, Intent intent) {
+        Log.d("AM_DIAG", "[TimerReceiver] onReceive, action=" + intent.getAction());
         if (ACTION_PERIODIC_CHECK.equals(intent.getAction())) {
             final PendingResult pendingResult = goAsync();
             new Thread(() -> {

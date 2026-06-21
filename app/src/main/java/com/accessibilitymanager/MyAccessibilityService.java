@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
+import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 
 public class MyAccessibilityService extends AccessibilityService {
@@ -34,6 +35,7 @@ public class MyAccessibilityService extends AccessibilityService {
     }
 
     private void onDeviceUnlocked() {
+        Log.d("AM_DIAG", "[MyAccessibilityService] onDeviceUnlocked 被调用");
         SharedPreferences sp = getSharedPreferences("data", Context.MODE_PRIVATE);
         if (!sp.getBoolean("unlock_crash_check", false)) return;
         if (!sp.getBoolean("crashfix", false)) return;

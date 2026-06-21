@@ -67,6 +67,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.regex.Pattern;
 
+import android.util.Log;
 import rikka.shizuku.Shizuku;
 import androidx.appcompat.widget.Toolbar;
 
@@ -1462,7 +1463,7 @@ public class MainActivity extends AppCompatActivity {
 
     //启动前台服务，进行保活!
     void StartForeGroundDaemon() {
-
+        Log.d("AM_DIAG", "[MainActivity] StartForeGroundDaemon() 被调用");
         if (checkPermission()) return;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !((NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE)).areNotificationsEnabled()) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 0);
