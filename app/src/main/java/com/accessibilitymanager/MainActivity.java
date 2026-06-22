@@ -116,11 +116,17 @@ public class MainActivity extends AppCompatActivity {
                     public void run() {
                         int firstPosition = listView.getFirstVisiblePosition();
                         int lastPosition = listView.getLastVisiblePosition();
+                        if (tmp == null || tmp.isEmpty() || firstPosition < 0) return;
+                        lastPosition = Math.min(lastPosition, tmp.size() - 1);
+                        if (firstPosition > lastPosition) return;
                         for (int i = firstPosition; i <= lastPosition; i++) {
                             View view = listView.getChildAt(i - firstPosition);
+                            if (view == null) continue;
                             boolean isChecked = isServiceEnabled(tmp.get(i).getId(), settingValue);
-                            (view.findViewById(R.id.ib)).setVisibility(isChecked ? View.VISIBLE : View.INVISIBLE);
-                            ((Switch) view.findViewById(R.id.s)).setChecked(isChecked);
+                            View ib = view.findViewById(R.id.ib);
+                            if (ib != null) ib.setVisibility(isChecked ? View.VISIBLE : View.INVISIBLE);
+                            Switch sw = view.findViewById(R.id.s);
+                            if (sw != null) sw.setChecked(isChecked);
                         }
                     }
                 });
@@ -191,8 +197,11 @@ public class MainActivity extends AppCompatActivity {
         sp = getSharedPreferences("data", 0);
 
         //读取用户设置“是否隐藏后台”，并进行隐藏后台
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP)
-            ((ActivityManager) getSystemService(Service.ACTIVITY_SERVICE)).getAppTasks().get(0).setExcludeFromRecents(sp.getBoolean("hide", true));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            List<ActivityManager.AppTask> tasks = ((ActivityManager) getSystemService(Service.ACTIVITY_SERVICE)).getAppTasks();
+            if (!tasks.isEmpty())
+                tasks.get(0).setExcludeFromRecents(sp.getBoolean("hide", true));
+        }
 
         daemon = sp.getString("daemon", "");
         top = sp.getString("top", "");
@@ -829,7 +838,9 @@ public class MainActivity extends AppCompatActivity {
         switchHide.setOnCheckedChangeListener((btn, checked) -> {
             sp.edit().putBoolean("hide", checked).apply();
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                ((ActivityManager) getSystemService(Service.ACTIVITY_SERVICE)).getAppTasks().get(0).setExcludeFromRecents(checked);
+                List<ActivityManager.AppTask> tasks = ((ActivityManager) getSystemService(Service.ACTIVITY_SERVICE)).getAppTasks();
+                if (!tasks.isEmpty())
+                    tasks.get(0).setExcludeFromRecents(checked);
             }
         });
 
