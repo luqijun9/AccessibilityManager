@@ -16,6 +16,7 @@ import java.net.URL;
 public class UpdateChecker {
 
     private static final String GITHUB_RELEASE_URL = "https://api.github.com/repos/luqijun9/AccessibilityManager/releases/latest";
+    private static final String PROXY_DOWNLOAD_PREFIX = "https://ghfast.top/";
     private static boolean isChecking = false;
 
     public interface UpdateListener {
@@ -54,7 +55,7 @@ public class UpdateChecker {
                         JSONObject json = new JSONObject(response.toString());
                         final String latestVersion = json.getString("tag_name");
                         final String releaseNotes = json.optString("body", "");
-                        final String downloadUrl = json.getJSONArray("assets").getJSONObject(0).getString("browser_download_url");
+                        final String downloadUrl = PROXY_DOWNLOAD_PREFIX + json.getJSONArray("assets").getJSONObject(0).getString("browser_download_url");
 
                         PackageInfo packageInfo = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
                         final String currentVersion = packageInfo.versionName;
