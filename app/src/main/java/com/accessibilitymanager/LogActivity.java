@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.SpannableStringBuilder;
@@ -25,6 +26,7 @@ import rikka.shizuku.Shizuku;
 
 import java.io.BufferedReader;
 import java.io.DataOutputStream;
+import java.io.File;
 import java.io.InputStreamReader;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -136,10 +138,32 @@ public class LogActivity extends Activity {
         fullLog.append("\n\n=============== Application Logs ===============\n\n");
         fullLog.append(logText);
 
-        Intent intent = new Intent(Intent.ACTION_SEND);
-        intent.setType("text/plain");
-        intent.putExtra(Intent.EXTRA_TEXT, fullLog.toString());
-        startActivity(Intent.createChooser(intent, "分享日志"));
+        try {
+            String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(new java.util.Date());
+            File cacheDir = getCacheDir();
+            File logFile = new File(cacheDir, "accessibility_log_" + timestamp + ".txt");
+
+            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(logFile)) {
+                fos.write(fullLog.toString().getBytes("UTF-8"));
+            }
+
+            // 使用 AndroidX FileProvider 生成 content:// URI，APP 关闭后缓存文件自动清理
+            Uri contentUri = androidx.core.content.FileProvider.getUriForFile(
+                    this, getPackageName() + ".logshare", logFile);
+
+            Intent intent = new Intent(Intent.ACTION_SEND);
+            intent.setType("text/plain");
+            intent.putExtra(Intent.EXTRA_STREAM, contentUri);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.setClipData(android.content.ClipData.newRawUri("", contentUri));
+            startActivity(Intent.createChooser(intent, "分享日志文件"));
+        } catch (Exception e) {
+            // 文件分享失败时降级为纯文本分享
+            Intent intent = new Intent(Intent.ACTION_SEND);
+            intent.setType("text/plain");
+            intent.putExtra(Intent.EXTRA_TEXT, fullLog.toString());
+            startActivity(Intent.createChooser(intent, "分享日志"));
+        }
     }
 
     private String getAccessibilityServiceInfo() {

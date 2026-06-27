@@ -60,5 +60,5 @@ configurations.configureEach {
 dependencies {
     implementation "dev.rikka.shizuku:api:13.1.0"
     implementation "dev.rikka.shizuku:provider:13.1.0"
-    // 移除 AppCompat、Fragment、RecyclerView 依赖以减小 APK 体积
+    implementation "androidx.core:core:1.12.0"
 }
