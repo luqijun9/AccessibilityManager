@@ -630,6 +630,12 @@ public class daemonService extends Service {
             startForeground(1, notification.build());
         }
 
+        // ★ 先无条件取消旧定时器，避免更新/重启后残留定时器触发
+        // 即使 daemon 为空也执行 cancel，防止旧 PendingIntent 残留
+        TimerReceiver.cancel(this);
+        // TimerReceiver 调度（内部会根据 periodic_check 开关决定是否设置新定时器）
+        new Thread(() -> TimerReceiver.scheduleNext(daemonService.this)).start();
+
         if (daemonVal.length() == 0) {
             Log.d("AM_DIAG", "[daemonService] daemon为空, 停止保活服务");
             stopSelf();
@@ -658,8 +664,6 @@ public class daemonService extends Service {
 
         // crashCheckExecutor 执行首次崩溃检测
         crashCheckExecutor.submit(() -> checkCrashedServicesInternal("服务启动"));
-        // TimerReceiver 无需进入执行器
-        new Thread(() -> TimerReceiver.scheduleNext(daemonService.this)).start();
     }
 
     @Override

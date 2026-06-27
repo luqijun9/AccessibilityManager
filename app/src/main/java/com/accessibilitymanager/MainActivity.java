@@ -878,6 +878,11 @@ public class MainActivity extends Activity {
                 }
             }
             sp.edit().putBoolean("crashfix", checked).putBoolean("crashfix_auto_disabled", false).apply();
+            if (checked) {
+                TimerReceiver.scheduleNext(MainActivity.this);
+            } else {
+                TimerReceiver.cancel(MainActivity.this);
+            }
             refreshCrashFixDependent(dialogView);
             updateToolbarMenu();
         };
