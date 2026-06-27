@@ -1,23 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<menu xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto">
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
 
     <item
         android:id="@+id/perm_status"
-        app:showAsAction="always"
+        android:showAsAction="always"
         android:title="" />
     <item
         android:id="@+id/viewlog"
-        app:showAsAction="always|withText"
+        android:showAsAction="always|withText"
         android:title="日志" />
     <item
         android:id="@+id/search"
         android:icon="@drawable/ic_search"
-        app:showAsAction="always"
+        android:showAsAction="always"
         android:title="搜索" />
     <item
         android:id="@+id/settings"
         android:icon="@drawable/ic_settings"
-        app:showAsAction="always"
+        android:showAsAction="always"
         android:title="设置" />
 </menu>

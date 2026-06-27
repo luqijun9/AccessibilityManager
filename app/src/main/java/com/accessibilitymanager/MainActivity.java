@@ -2,7 +2,7 @@ package com.accessibilitymanager;
 
 import android.Manifest;
 import android.accessibilityservice.AccessibilityServiceInfo;
-import androidx.appcompat.app.AppCompatActivity;
+import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.AlertDialog;
 import android.app.NotificationManager;
@@ -52,6 +52,7 @@ import android.widget.CompoundButton;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
+import android.widget.Toolbar;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.inputmethod.InputMethodManager;
@@ -69,9 +70,8 @@ import java.util.regex.Pattern;
 
 import android.util.Log;
 import rikka.shizuku.Shizuku;
-import androidx.appcompat.widget.Toolbar;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends Activity {
 
     private SettingsValueChangeContentObserver mContentOb;  //自定义的内容监视器
     List<AccessibilityServiceInfo> l, tmp;//所有AccessibilityServiceInfo列表，临时列表
@@ -144,7 +144,7 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         toolbar = findViewById(R.id.toolbar);
-        setSupportActionBar(toolbar);
+        toolbar.setTitle("无障碍管理");
         toolbar.setTitleTextColor(night ? Color.WHITE : Color.BLACK);
         toolbar.setPaddingRelative(
                 toolbar.getPaddingStart(),
@@ -152,6 +152,40 @@ public class MainActivity extends AppCompatActivity {
                 (int) (8 * getResources().getDisplayMetrics().density + 0.5f),
                 toolbar.getPaddingBottom()
         );
+        toolbar.inflateMenu(R.menu.arrange);
+        mMenu = toolbar.getMenu();
+        toolbar.setOnMenuItemClickListener(item -> {
+            int itemId = item.getItemId();
+            if (itemId == R.id.search) {
+                enterSearchMode();
+                return true;
+            }
+            if (itemId == R.id.perm_status) {
+                if (sp.getBoolean("crashfix", false) && !ShellUtil.hasAnyPermission()) {
+                    showNoPermissionDialog(false);
+                    return true;
+                }
+                int state = ShellUtil.getPermissionState();
+                if (state == ShellUtil.PERM_ROOT) {
+                    Toast.makeText(this, "已获取root权限", Toast.LENGTH_SHORT).show();
+                } else if (state == ShellUtil.PERM_SHIZUKU) {
+                    Toast.makeText(this, "已获取shizuku权限", Toast.LENGTH_SHORT).show();
+                }
+                return true;
+            }
+            if (itemId == R.id.settings) {
+                showSettingsDialog();
+                return true;
+            }
+            if (itemId == R.id.viewlog) {
+                startActivity(new Intent(this, LogActivity.class));
+                return true;
+            }
+            return false;
+        });
+        sp = getSharedPreferences("data", 0);
+        updateToolbarMenu();
+        setTitle("无障碍管理");
 
         if (!night) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -194,7 +228,6 @@ public class MainActivity extends AppCompatActivity {
 
         //获取本机安装的无障碍服务列表，包括开启的和未开启的都有
         l = ((AccessibilityManager) getSystemService(Context.ACCESSIBILITY_SERVICE)).getInstalledAccessibilityServiceList();
-        sp = getSharedPreferences("data", 0);
 
         //读取用户设置“是否隐藏后台”，并进行隐藏后台
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -214,7 +247,7 @@ public class MainActivity extends AppCompatActivity {
         // 列表底部提示：长按置顶
         TextView pinHint = new TextView(this);
         pinHint.setText("长按服务项可将其置顶");
-        pinHint.setTextColor(getColor(R.color.text_hint));
+        pinHint.setTextColor(getResources().getColor(R.color.text_hint));
         pinHint.setTextSize(12f);
         pinHint.setGravity(Gravity.CENTER);
         pinHint.setPadding(0, 6, 0, 6);
@@ -259,7 +292,7 @@ public class MainActivity extends AppCompatActivity {
         new Thread(() -> {
             ShellUtil.reset();
             ShellUtil.getPermissionState();
-            runOnUiThread(() -> invalidateOptionsMenu());
+            runOnUiThread(() -> updateToolbarMenu());
         }).start();
 
         if (Settings.Secure.getString(getContentResolver(), Settings.Secure.ACCESSIBILITY_ENABLED) != null) {
@@ -512,7 +545,7 @@ public class MainActivity extends AppCompatActivity {
     private void enableCrashFix() {
         LogUtil.log(this, "[权限] 启用崩溃修复");
         sp.edit().putBoolean("crashfix", true).putBoolean("crashfix_auto_disabled", false).apply();
-        invalidateOptionsMenu();
+        updateToolbarMenu();
         if (mSettingsDialogView != null) {
             Switch crashFixSwitch = mSettingsDialogView.findViewById(R.id.crashfix);
             if (crashFixSwitch != null && !crashFixSwitch.isChecked()) {
@@ -561,7 +594,7 @@ public class MainActivity extends AppCompatActivity {
                     sp.edit().putBoolean("crashfix", false).putBoolean("crashfix_auto_disabled", false).apply();
                     LogUtil.log(MainActivity.this, "[权限] 对话框取消，崩溃修复已关闭");
                     Toast.makeText(MainActivity.this, "崩溃修复已关闭", Toast.LENGTH_SHORT).show();
-                    invalidateOptionsMenu();
+                    updateToolbarMenu();
                 } else {
                     LogUtil.log(MainActivity.this, "[权限] 对话框取消");
                 }
@@ -575,7 +608,7 @@ public class MainActivity extends AppCompatActivity {
         if (shizukuRunning) {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTransformationMethod(null);
         }
-        invalidateOptionsMenu();
+        updateToolbarMenu();
     }
 
     //一些收尾工作，取消注册监听器什么的
@@ -587,9 +620,9 @@ public class MainActivity extends AppCompatActivity {
         super.onDestroy();
     }
 
-
-    @Override
-    public boolean onPrepareOptionsMenu(Menu menu) {
+    private void updateToolbarMenu() {
+        Menu menu = toolbar.getMenu();
+        if (menu == null) return;
         MenuItem permItem = menu.findItem(R.id.perm_status);
         if (permItem != null) {
             int state = ShellUtil.getPermissionState();
@@ -616,47 +649,6 @@ public class MainActivity extends AppCompatActivity {
                 permItem.setVisible(false);
             }
         }
-
-        return super.onPrepareOptionsMenu(menu);
-    }
-
-
-    @Override
-    public boolean onCreateOptionsMenu(Menu menu) {
-        getMenuInflater().inflate(R.menu.arrange, menu);
-        mMenu = menu;
-        return super.onCreateOptionsMenu(menu);
-    }
-
-    @Override
-    public boolean onOptionsItemSelected(MenuItem menuItem) {
-        int itemId = menuItem.getItemId();
-
-        if (itemId == R.id.search) {
-            enterSearchMode();
-            return true;
-        }
-
-        if (itemId == R.id.perm_status) {
-            if (sp.getBoolean("crashfix", false) && !ShellUtil.hasAnyPermission()) {
-                showNoPermissionDialog(false);
-                return true;
-            }
-            int state = ShellUtil.getPermissionState();
-            if (state == ShellUtil.PERM_ROOT) {
-                Toast.makeText(this, "已获取root权限", Toast.LENGTH_SHORT).show();
-            } else if (state == ShellUtil.PERM_SHIZUKU) {
-                Toast.makeText(this, "已获取shizuku权限", Toast.LENGTH_SHORT).show();
-            }
-            return true;
-        }
-
-        if (itemId == R.id.settings) {
-            showSettingsDialog();
-        } else if (itemId == R.id.viewlog) {
-            startActivity(new Intent(this, LogActivity.class));
-        }
-        return super.onOptionsItemSelected(menuItem);
     }
 
     //==================== 搜索功能 ====================
@@ -665,7 +657,7 @@ public class MainActivity extends AppCompatActivity {
         mIsSearching = true;
 
         //隐藏标题和菜单项
-        getSupportActionBar().setTitle("");
+        toolbar.setTitle("");
         if (mMenu != null) {
             mMenu.findItem(R.id.search).setVisible(false);
             mMenu.findItem(R.id.viewlog).setVisible(false);
@@ -701,9 +693,7 @@ public class MainActivity extends AppCompatActivity {
         mSearchInput = null;
 
         //恢复标题
-        if (getSupportActionBar() != null) {
-            getSupportActionBar().setTitle(getTitle());
-        }
+        toolbar.setTitle(getTitle());
 
         //恢复菜单项
         if (mMenu != null) {
@@ -864,7 +854,7 @@ public class MainActivity extends AppCompatActivity {
             }
             sp.edit().putBoolean("crashfix", checked).putBoolean("crashfix_auto_disabled", false).apply();
             refreshCrashFixDependent(dialogView);
-            invalidateOptionsMenu();
+            updateToolbarMenu();
         };
         switchCrashFix.setOnCheckedChangeListener(crashFixListenerHolder[0]);
 
@@ -945,7 +935,7 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 TimerReceiver.cancel(MainActivity.this);
             }
-            intervalLabel.setTextColor(checked ? getColor(R.color.bg) : getColor(R.color.text_hint));
+            intervalLabel.setTextColor(checked ? getResources().getColor(R.color.bg) : getResources().getColor(R.color.text_hint));
         });
 
         switchIgnoreSystemCrash.setOnCheckedChangeListener((btn, checked) -> {
@@ -1008,7 +998,7 @@ public class MainActivity extends AppCompatActivity {
         dialogView.findViewById(R.id.fixmode).setEnabled(crashFixEnabled);
         dialogView.findViewById(R.id.periodic_check).setEnabled(crashFixEnabled);
         dialogView.findViewById(R.id.ignore_system_crash).setEnabled(crashFixEnabled);
-        ((TextView) dialogView.findViewById(R.id.periodic_interval_label)).setTextColor(periodicEnabled ? getColor(R.color.bg) : getColor(R.color.text_hint));
+        ((TextView) dialogView.findViewById(R.id.periodic_interval_label)).setTextColor(periodicEnabled ? getResources().getColor(R.color.bg) : getResources().getColor(R.color.text_hint));
     }
 
     // 首次置顶提示（仅触发一次）

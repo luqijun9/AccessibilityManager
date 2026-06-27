@@ -1,10 +1,10 @@
 package com.accessibilitymanager;
 
+import android.app.Activity;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
-import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.SpannableStringBuilder;
@@ -15,31 +15,29 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsetsController;
+import android.widget.BaseAdapter;
 import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
-
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.content.FileProvider;
-import androidx.recyclerview.widget.LinearLayoutManager;
-import androidx.recyclerview.widget.RecyclerView;
 
 import rikka.shizuku.Shizuku;
 
 import java.io.BufferedReader;
 import java.io.DataOutputStream;
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
-public class LogActivity extends AppCompatActivity {
+public class LogActivity extends Activity {
 
-    private RecyclerView recyclerView;
+    private static final int VIEW_TYPE_LOG = 0;
+    private static final int VIEW_TYPE_DATE = 1;
+    private static final int VIEW_TYPE_GAP = 2;
+
+    private ListView listView;
     private TextView tvEmpty;
     private LogAdapter adapter;
     private List<LogUtil.LogEntry> entries;
@@ -66,15 +64,14 @@ public class LogActivity extends AppCompatActivity {
         ));
 
         if (adapter == null) {
-            recyclerView.setVisibility(View.VISIBLE);
+            listView.setVisibility(View.VISIBLE);
             tvEmpty.setVisibility(View.GONE);
             adapter = new LogAdapter(entries, night);
-            recyclerView.setLayoutManager(new LinearLayoutManager(this));
-            recyclerView.setAdapter(adapter);
+            listView.setAdapter(adapter);
         } else {
             adapter.notifyDataSetChanged();
         }
-        recyclerView.scrollToPosition(entries.size() - 1);
+        listView.setSelection(entries.size() - 1);
     }
 
     @Override
@@ -103,7 +100,7 @@ public class LogActivity extends AppCompatActivity {
             }
         }
 
-        recyclerView = findViewById(R.id.recycler_log);
+        listView = findViewById(R.id.recycler_log);
         tvEmpty = findViewById(R.id.tv_empty);
         findViewById(R.id.btn_close).setOnClickListener(v -> finish());
         findViewById(R.id.btn_share).setOnClickListener(v -> shareLog());
@@ -112,15 +109,14 @@ public class LogActivity extends AppCompatActivity {
 
         entries = LogUtil.readRecentLogs(this);
         if (entries.isEmpty()) {
-            recyclerView.setVisibility(View.GONE);
+            listView.setVisibility(View.GONE);
             tvEmpty.setVisibility(View.VISIBLE);
         } else {
-            recyclerView.setVisibility(View.VISIBLE);
+            listView.setVisibility(View.VISIBLE);
             tvEmpty.setVisibility(View.GONE);
             adapter = new LogAdapter(entries, night);
-            recyclerView.setLayoutManager(new LinearLayoutManager(this));
-            recyclerView.setAdapter(adapter);
-            recyclerView.scrollToPosition(entries.size() - 1);
+            listView.setAdapter(adapter);
+            listView.setSelection(entries.size() - 1);
         }
     }
 
@@ -140,37 +136,10 @@ public class LogActivity extends AppCompatActivity {
         fullLog.append("\n\n=============== Application Logs ===============\n\n");
         fullLog.append(logText);
 
-        File tempDir = getExternalFilesDir(null);
-        if (tempDir == null) {
-            tempDir = getFilesDir();
-        }
-
-        String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
-        File tempFile = new File(tempDir, "accessibility_log_" + timestamp + ".txt");
-
-        try {
-            FileOutputStream fos = new FileOutputStream(tempFile);
-            OutputStreamWriter writer = new OutputStreamWriter(fos, "UTF-8");
-            writer.write(fullLog.toString());
-            writer.flush();
-            writer.close();
-
-            Uri fileUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", tempFile);
-
-            Intent intent = new Intent(Intent.ACTION_SEND);
-            intent.setType("text/plain");
-            intent.putExtra(Intent.EXTRA_STREAM, fileUri);
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-
-            startActivityForResult(Intent.createChooser(intent, "分享日志文件"), 100);
-
-            tempFile.deleteOnExit();
-        } catch (Exception e) {
-            Toast.makeText(this, "分享失败", Toast.LENGTH_SHORT).show();
-            if (tempFile.exists()) {
-                tempFile.delete();
-            }
-        }
+        Intent intent = new Intent(Intent.ACTION_SEND);
+        intent.setType("text/plain");
+        intent.putExtra(Intent.EXTRA_TEXT, fullLog.toString());
+        startActivity(Intent.createChooser(intent, "分享日志"));
     }
 
     private String getAccessibilityServiceInfo() {
@@ -205,28 +174,7 @@ public class LogActivity extends AppCompatActivity {
         return sb.toString();
     }
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == 100) {
-            File tempDir = getExternalFilesDir(null);
-            if (tempDir == null) {
-                tempDir = getFilesDir();
-            }
-            File[] files = tempDir.listFiles((dir, name) -> name.startsWith("accessibility_log_") && name.endsWith(".txt"));
-            if (files != null) {
-                for (File f : files) {
-                    f.delete();
-                }
-            }
-        }
-    }
-
-    private class LogAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
-
-        private static final int VIEW_TYPE_LOG = 0;
-        private static final int VIEW_TYPE_DATE = 1;
-        private static final int VIEW_TYPE_GAP = 2;
+    private class LogAdapter extends BaseAdapter {
 
         private final List<LogUtil.LogEntry> entries;
         private boolean night;
@@ -234,6 +182,21 @@ public class LogActivity extends AppCompatActivity {
         LogAdapter(List<LogUtil.LogEntry> entries, boolean night) {
             this.entries = entries;
             this.night = night;
+        }
+
+        @Override
+        public int getCount() {
+            return entries.size();
+        }
+
+        @Override
+        public Object getItem(int position) {
+            return entries.get(position);
+        }
+
+        @Override
+        public long getItemId(int position) {
+            return position;
         }
 
         @Override
@@ -245,42 +208,47 @@ public class LogActivity extends AppCompatActivity {
         }
 
         @Override
-        public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
-            if (viewType == VIEW_TYPE_DATE) {
-                return createDateSeparatorHolder();
-            } else if (viewType == VIEW_TYPE_GAP) {
-                return new GapSeparatorHolder(createGapSeparatorView());
-            } else {
-                TextView tv = new TextView(LogActivity.this);
-                tv.setTextSize(12f);
-                tv.setPadding(0, 0, 0, 2);
-                tv.setLineSpacing(0, 1f);
-                RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                tv.setLayoutParams(lp);
-                return new LogLineHolder(tv);
-            }
+        public int getViewTypeCount() {
+            return 3;
         }
 
         @Override
-        public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
+        public View getView(int position, View convertView, ViewGroup parent) {
             LogUtil.LogEntry entry = entries.get(position);
-            if (holder instanceof DateSeparatorHolder) {
-                ((DateSeparatorHolder) holder).tvDate.setText(entry.text);
-            } else if (holder instanceof LogLineHolder) {
+            int type = getItemViewType(position);
+
+            if (type == VIEW_TYPE_DATE) {
+                if (convertView == null) {
+                    convertView = createDateSeparatorView();
+                }
+                TextView tvDate = (TextView) convertView.getTag();
+                tvDate.setText(entry.text);
+                return convertView;
+            } else if (type == VIEW_TYPE_GAP) {
+                if (convertView == null) {
+                    convertView = createGapSeparatorView();
+                }
+                return convertView;
+            } else {
+                TextView tv;
+                if (convertView == null) {
+                    tv = new TextView(LogActivity.this);
+                    tv.setTextSize(12f);
+                    tv.setPadding(0, 0, 0, 2);
+                    tv.setLineSpacing(0, 1f);
+                    tv.setLayoutParams(new ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                } else {
+                    tv = (TextView) convertView;
+                }
                 String line = entry.text;
-                TextView tv = ((LogLineHolder) holder).textView;
                 SpannableStringBuilder ssb = new SpannableStringBuilder(line);
                 int color = getLineColor(line);
                 ssb.setSpan(new ForegroundColorSpan(color), 0, line.length(),
                         Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 tv.setText(ssb);
+                return tv;
             }
-        }
-
-        @Override
-        public int getItemCount() {
-            return entries.size();
         }
 
         private int getLineColor(String line) {
@@ -290,7 +258,7 @@ public class LogActivity extends AppCompatActivity {
             return night ? 0xFFCCCCCC : 0xFF333333;
         }
 
-        private DateSeparatorHolder createDateSeparatorHolder() {
+        private View createDateSeparatorView() {
             LinearLayout layout = new LinearLayout(LogActivity.this);
             layout.setOrientation(LinearLayout.HORIZONTAL);
             layout.setGravity(Gravity.CENTER_VERTICAL);
@@ -317,46 +285,18 @@ public class LogActivity extends AppCompatActivity {
             lineRight.setLayoutParams(rightParams);
             layout.addView(lineRight);
 
-            RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            layout.setLayoutParams(lp);
-
-            return new DateSeparatorHolder(layout, tvDate);
+            layout.setLayoutParams(new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            layout.setTag(tvDate);
+            return layout;
         }
 
         private View createGapSeparatorView() {
             View line = new View(LogActivity.this);
             line.setBackgroundColor(0xFF444444);
-            RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, 2);
-            lp.topMargin = 6;
-            lp.bottomMargin = 6;
-            line.setLayoutParams(lp);
+            line.setLayoutParams(new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 2));
             return line;
-        }
-
-        class LogLineHolder extends RecyclerView.ViewHolder {
-            TextView textView;
-
-            LogLineHolder(TextView itemView) {
-                super(itemView);
-                this.textView = itemView;
-            }
-        }
-
-        class DateSeparatorHolder extends RecyclerView.ViewHolder {
-            TextView tvDate;
-
-            DateSeparatorHolder(View itemView, TextView tvDate) {
-                super(itemView);
-                this.tvDate = tvDate;
-            }
-        }
-
-        class GapSeparatorHolder extends RecyclerView.ViewHolder {
-            GapSeparatorHolder(View itemView) {
-                super(itemView);
-            }
         }
     }
 }
