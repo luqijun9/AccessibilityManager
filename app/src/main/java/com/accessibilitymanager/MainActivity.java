@@ -50,6 +50,7 @@ import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.CompoundButton;
 import android.widget.ScrollView;
+import android.widget.Button;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toolbar;
@@ -445,6 +446,27 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         checkBatteryOptimization();
+        if (sp.getBoolean("auto_update", true)) {
+            long lastCheckTime = sp.getLong("last_update_check_time", 0);
+            long currentTime = System.currentTimeMillis();
+            if (currentTime - lastCheckTime > 24 * 60 * 60 * 1000) {
+                UpdateChecker.checkForUpdate(MainActivity.this, new UpdateChecker.UpdateListener() {
+                    @Override
+                    public void onUpdateAvailable(String versionName, String downloadUrl, String releaseNotes) {
+                        showUpdateDialog(versionName, downloadUrl, releaseNotes);
+                    }
+
+                    @Override
+                    public void onNoUpdate() {
+                    }
+
+                    @Override
+                    public void onError(String errorMessage) {
+                    }
+                });
+                sp.edit().putLong("last_update_check_time", currentTime).apply();
+            }
+        }
     }
 
     private void checkBatteryOptimization() {
@@ -795,8 +817,11 @@ public class MainActivity extends Activity {
         TextView notifyCustomBtn = dialogView.findViewById(R.id.notify_custom_btn);
         TextView crashTutorialBtn = dialogView.findViewById(R.id.crash_tutorial_btn);
         TextView aboutBtn = dialogView.findViewById(R.id.about_btn);
+        Switch switchAutoUpdate = dialogView.findViewById(R.id.auto_update);
+        TextView checkUpdateBtn = dialogView.findViewById(R.id.check_update_btn);
 
         switchBoot.setChecked(sp.getBoolean("boot", true));
+        switchAutoUpdate.setChecked(sp.getBoolean("auto_update", true));
         switchToast.setChecked(sp.getBoolean("toast", true));
         switchUserOnly.setChecked(sp.getBoolean("useronly", false));
         switchHide.setChecked(sp.getBoolean("hide", true));
@@ -969,6 +994,14 @@ public class MainActivity extends Activity {
                             "6. 状态修复：服务被系统关闭时自动重新开启")
                     .setPositiveButton("知道了", null)
                     .create().show();
+        });
+
+        switchAutoUpdate.setOnCheckedChangeListener((btn, checked) -> {
+            sp.edit().putBoolean("auto_update", checked).apply();
+        });
+
+        checkUpdateBtn.setOnClickListener(v -> {
+            checkForUpdate();
         });
 
         aboutBtn.setOnClickListener(v -> {
@@ -1483,5 +1516,52 @@ public class MainActivity extends Activity {
 
     }
 
+    private void checkForUpdate() {
+        Toast.makeText(MainActivity.this, "正在检查更新...", Toast.LENGTH_SHORT).show();
+        UpdateChecker.checkForUpdate(MainActivity.this, new UpdateChecker.UpdateListener() {
+            @Override
+            public void onUpdateAvailable(String versionName, String downloadUrl, String releaseNotes) {
+                showUpdateDialog(versionName, downloadUrl, releaseNotes);
+            }
+
+            @Override
+            public void onNoUpdate() {
+                Toast.makeText(MainActivity.this, "当前已是最新版本", Toast.LENGTH_SHORT).show();
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                Toast.makeText(MainActivity.this, "检查更新失败: " + errorMessage, Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void showUpdateDialog(String versionName, String downloadUrl, String releaseNotes) {
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_update, null);
+
+        TextView title = dialogView.findViewById(R.id.update_title);
+        TextView version = dialogView.findViewById(R.id.update_version);
+        TextView changelog = dialogView.findViewById(R.id.update_changelog);
+        Button updateLater = dialogView.findViewById(R.id.update_later);
+        Button updateNow = dialogView.findViewById(R.id.update_now);
+
+        version.setText("版本 " + versionName);
+        changelog.setText(releaseNotes.isEmpty() ? "暂无更新内容" : releaseNotes);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setView(dialogView)
+                .setCancelable(false)
+                .create();
+
+        updateLater.setOnClickListener(v -> dialog.dismiss());
+
+        updateNow.setOnClickListener(v -> {
+            dialog.dismiss();
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl));
+            startActivity(intent);
+        });
+
+        dialog.show();
+    }
 
 }
