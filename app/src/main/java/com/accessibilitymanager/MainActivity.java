@@ -453,7 +453,10 @@ public class MainActivity extends Activity {
                 UpdateChecker.checkForUpdate(MainActivity.this, new UpdateChecker.UpdateListener() {
                     @Override
                     public void onUpdateAvailable(String versionName, String downloadUrl, String releaseNotes) {
-                        showUpdateDialog(versionName, downloadUrl, releaseNotes);
+                        String skippedVersion = sp.getString("skipped_update_version", "");
+                        if (!versionName.equals(skippedVersion)) {
+                            showUpdateDialog(versionName, downloadUrl, releaseNotes);
+                        }
                     }
 
                     @Override
@@ -1558,10 +1561,14 @@ public class MainActivity extends Activity {
                 .setCancelable(false)
                 .create();
 
-        updateLater.setOnClickListener(v -> dialog.dismiss());
+        updateLater.setOnClickListener(v -> {
+            sp.edit().putString("skipped_update_version", versionName).apply();
+            dialog.dismiss();
+        });
 
         updateNow.setOnClickListener(v -> {
             dialog.dismiss();
+            sp.edit().remove("skipped_update_version").apply();
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl));
             startActivity(intent);
         });
