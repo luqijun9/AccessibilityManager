@@ -32,7 +32,6 @@ import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
-import android.graphics.Typeface;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -84,7 +83,7 @@ public class MainActivity extends Activity {
     boolean perm = false;//是否获取了权限
     private boolean listenerAdded = false;//是否添加了内容监视器
     private boolean mPendingCrashFixRequest = false;//是否有待处理的崩溃修复请求
-    private View mSettingsDialogView = null;//设置对话框View引用，用于Shizuku授权后刷新开关状态
+    private static final int REQUEST_SETTINGS = 1001;
 
     LinearLayout batteryWarning;//电池警告布局
     TextView batteryWarningText;//电池警告文本
@@ -175,7 +174,8 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (itemId == R.id.settings) {
-                showSettingsDialog();
+                startActivityForResult(new Intent(this, SettingsActivity.class), REQUEST_SETTINGS);
+                overridePendingTransition(R.anim.slide_in_right, R.anim.slide_out_left);
                 return true;
             }
             if (itemId == R.id.viewlog) {
@@ -571,13 +571,6 @@ public class MainActivity extends Activity {
         LogUtil.log(this, "[权限] 启用崩溃修复");
         sp.edit().putBoolean("crashfix", true).putBoolean("crashfix_auto_disabled", false).apply();
         updateToolbarMenu();
-        if (mSettingsDialogView != null) {
-            Switch crashFixSwitch = mSettingsDialogView.findViewById(R.id.crashfix);
-            if (crashFixSwitch != null && !crashFixSwitch.isChecked()) {
-                crashFixSwitch.setChecked(true);
-                refreshCrashFixDependent(mSettingsDialogView);
-            }
-        }
         int state = ShellUtil.getPermissionState();
         String permName = state == ShellUtil.PERM_ROOT ? "root" : (state == ShellUtil.PERM_SHIZUKU ? "shizuku" : "未知");
         LogUtil.log(this, "[权限] 当前权限=" + permName + "(" + state + ")");
@@ -799,247 +792,6 @@ public class MainActivity extends Activity {
         }
 
         listView.setAdapter(new adapter(mFilteredList));
-    }
-
-    private void showSettingsDialog() {
-        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_settings, null);
-        mSettingsDialogView = dialogView;
-
-        Switch switchBoot = dialogView.findViewById(R.id.boot);
-        Switch switchToast = dialogView.findViewById(R.id.toast);
-        Switch switchUserOnly = dialogView.findViewById(R.id.useronly);
-        Switch switchHide = dialogView.findViewById(R.id.hide);
-        Switch switchDelayDaemon = dialogView.findViewById(R.id.delay_daemon);
-        Switch switchCrashFix = dialogView.findViewById(R.id.crashfix);
-        Switch switchUnlockCrashCheck = dialogView.findViewById(R.id.unlock_crash_check);
-        Switch switchFixMode = dialogView.findViewById(R.id.fixmode);
-        Switch switchPeriodicCheck = dialogView.findViewById(R.id.periodic_check);
-        Switch switchIgnoreSystemCrash = dialogView.findViewById(R.id.ignore_system_crash);
-        Switch switchKeepCustomNotify = dialogView.findViewById(R.id.keep_custom_notify);
-        TextView intervalLabel = dialogView.findViewById(R.id.periodic_interval_label);
-        TextView notifyCustomBtn = dialogView.findViewById(R.id.notify_custom_btn);
-        TextView crashTutorialBtn = dialogView.findViewById(R.id.crash_tutorial_btn);
-        TextView aboutBtn = dialogView.findViewById(R.id.about_btn);
-        Switch switchAutoUpdate = dialogView.findViewById(R.id.auto_update);
-        TextView checkUpdateBtn = dialogView.findViewById(R.id.check_update_btn);
-
-        switchBoot.setChecked(sp.getBoolean("boot", true));
-        switchAutoUpdate.setChecked(sp.getBoolean("auto_update", true));
-        switchToast.setChecked(sp.getBoolean("toast", true));
-        switchUserOnly.setChecked(sp.getBoolean("useronly", false));
-        switchHide.setChecked(sp.getBoolean("hide", true));
-        switchDelayDaemon.setChecked(sp.getBoolean("delay_daemon", false));
-        switchCrashFix.setChecked(sp.getBoolean("crashfix", false));
-        switchUnlockCrashCheck.setChecked(sp.getBoolean("unlock_crash_check", false));
-        switchFixMode.setChecked(sp.getBoolean("fixmode", false));
-        switchPeriodicCheck.setChecked(sp.getBoolean("periodic_check", false));
-        switchIgnoreSystemCrash.setChecked(sp.getBoolean("ignore_system_crash_trigger", true));
-        switchKeepCustomNotify.setChecked(sp.getBoolean("keep_custom_notify", false));
-        intervalLabel.setText(sp.getInt("periodic_check_interval", 10) + "分钟");
-
-        refreshCrashFixDependent(dialogView);
-
-        switchBoot.setOnCheckedChangeListener((btn, checked) -> {
-            sp.edit().putBoolean("boot", checked).apply();
-        });
-
-        switchToast.setOnCheckedChangeListener((btn, checked) -> {
-            sp.edit().putBoolean("toast", checked).apply();
-        });
-
-        switchUserOnly.setOnCheckedChangeListener((btn, checked) -> {
-            sp.edit().putBoolean("useronly", checked).apply();
-            Sort();
-            runOnUiThread(() -> listView.setAdapter(new adapter(tmp)));
-        });
-
-        switchHide.setOnCheckedChangeListener((btn, checked) -> {
-            sp.edit().putBoolean("hide", checked).apply();
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                List<ActivityManager.AppTask> tasks = ((ActivityManager) getSystemService(Service.ACTIVITY_SERVICE)).getAppTasks();
-                if (!tasks.isEmpty())
-                    tasks.get(0).setExcludeFromRecents(checked);
-            }
-        });
-
-        switchDelayDaemon.setOnCheckedChangeListener((btn, checked) -> {
-            sp.edit().putBoolean("delay_daemon", checked).apply();
-        });
-
-        final Switch crashFixRef = switchCrashFix;
-        final CompoundButton.OnCheckedChangeListener[] crashFixListenerHolder = new CompoundButton.OnCheckedChangeListener[1];
-        crashFixListenerHolder[0] = (btn, checked) -> {
-            if (checked) {
-                ShellUtil.reset();
-                ShellUtil.getPermissionState();
-                if (!ShellUtil.hasAnyPermission()) {
-                    crashFixRef.setOnCheckedChangeListener(null);
-                    crashFixRef.setChecked(false);
-                    crashFixRef.setOnCheckedChangeListener(crashFixListenerHolder[0]);
-                    requestCrashFixPermission();
-                    return;
-                }
-            }
-            sp.edit().putBoolean("crashfix", checked).putBoolean("crashfix_auto_disabled", false).apply();
-            if (checked) {
-                TimerReceiver.scheduleNext(MainActivity.this);
-            } else {
-                TimerReceiver.cancel(MainActivity.this);
-            }
-            refreshCrashFixDependent(dialogView);
-            updateToolbarMenu();
-        };
-        switchCrashFix.setOnCheckedChangeListener(crashFixListenerHolder[0]);
-
-        final Switch unlockCrashCheckRef = switchUnlockCrashCheck;
-        final CompoundButton.OnCheckedChangeListener[] unlockCrashCheckListenerHolder = new CompoundButton.OnCheckedChangeListener[1];
-        unlockCrashCheckListenerHolder[0] = (btn, checked) -> {
-            if (checked && !sp.getBoolean("unlock_crash_dialog_dismissed", false)) {
-                // 如果自身无障碍服务已开启且已保活，无需弹窗提示
-                String ownServiceId = new ComponentName(MainActivity.this, MyAccessibilityService.class).flattenToString();
-                if (isServiceEnabled(ownServiceId, settingValue) && containsService(daemon, ownServiceId)) {
-                    sp.edit().putBoolean("unlock_crash_check", true).apply();
-                    return;
-                }
-                SpannableString msg = new SpannableString("由于部分系统限制可能导致无法进行解锁检测，请进行以下操作查看是否能正常接收解锁广播:\n\n回到主界面后进行锁屏和解锁操作，打开管理器并点击日志，查看是否有\"收到USER_PRESENT广播\"的日志\n\n如果有则不需要额外操作，否则请使用以下方案其中之一：\n① 开启无障碍管理器的无障碍服务\n② 开启无障碍管理器的自启动权限\n\n现在是否要开启并保活管理器的无障碍服务？");
-                msg.setSpan(new StyleSpan(Typeface.BOLD), msg.toString().indexOf("回到主界面"), msg.toString().indexOf("回到主界面") + 5, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                msg.setSpan(new StyleSpan(Typeface.BOLD), msg.toString().indexOf("锁屏和解锁"), msg.toString().indexOf("锁屏和解锁") + 5, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                msg.setSpan(new StyleSpan(Typeface.BOLD), msg.toString().indexOf("收到USER_PRESENT广播"), msg.toString().indexOf("收到USER_PRESENT广播") + 17, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                msg.setSpan(new StyleSpan(Typeface.BOLD), msg.toString().indexOf("管理器"), msg.toString().indexOf("管理器") + 3, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                msg.setSpan(new StyleSpan(Typeface.BOLD), msg.toString().indexOf("日志"), msg.toString().indexOf("日志") + 2, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                msg.setSpan(new StyleSpan(Typeface.BOLD), msg.toString().indexOf("无障碍服务"), msg.toString().indexOf("无障碍服务") + 5, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                msg.setSpan(new StyleSpan(Typeface.BOLD), msg.toString().indexOf("自启动权限"), msg.toString().indexOf("自启动权限") + 5, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                new AlertDialog.Builder(this)
-                        .setTitle("提示")
-                        .setMessage(msg)
-                        .setNegativeButton("不开启", (d, w) -> {
-                            sp.edit().putBoolean("unlock_crash_check", true).apply();
-                            unlockCrashCheckRef.setOnCheckedChangeListener(null);
-                            unlockCrashCheckRef.setChecked(true);
-                            unlockCrashCheckRef.setOnCheckedChangeListener(unlockCrashCheckListenerHolder[0]);
-                        })
-                        .setNeutralButton("不再提示", (d, w) -> {
-                            sp.edit().putBoolean("unlock_crash_dialog_dismissed", true).apply();
-                            sp.edit().putBoolean("unlock_crash_check", true).apply();
-                            unlockCrashCheckRef.setOnCheckedChangeListener(null);
-                            unlockCrashCheckRef.setChecked(true);
-                            unlockCrashCheckRef.setOnCheckedChangeListener(unlockCrashCheckListenerHolder[0]);
-                        })
-                        .setPositiveButton("开启", (d, w) -> {
-                            sp.edit().putBoolean("unlock_crash_check", true).apply();
-                            unlockCrashCheckRef.setOnCheckedChangeListener(null);
-                            unlockCrashCheckRef.setChecked(true);
-                            unlockCrashCheckRef.setOnCheckedChangeListener(unlockCrashCheckListenerHolder[0]);
-                            if (checkPermission()) {
-                                Toast.makeText(MainActivity.this, "需要授予安全设置写入权限才能开启无障碍服务", Toast.LENGTH_SHORT).show();
-                                return;
-                            }
-                            String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-                            if (s == null) s = "";
-                            if (!isServiceEnabled(ownServiceId, s)) {
-                                tmpSettingValue = ownServiceId + ":" + s;
-                                Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
-                                settingValue = tmpSettingValue;
-                            }
-                            if (!containsService(daemon, ownServiceId)) {
-                                daemon = ownServiceId + ":" + daemon;
-                                sp.edit().putString("daemon", daemon).apply();
-                                StartForeGroundDaemon();
-                            }
-                            // 刷新主界面列表
-                            Sort();
-                            runOnUiThread(() -> listView.setAdapter(new adapter(tmp)));
-                        })
-                        .create().show();
-                return;
-            }
-            sp.edit().putBoolean("unlock_crash_check", checked).apply();
-        };
-        switchUnlockCrashCheck.setOnCheckedChangeListener(unlockCrashCheckListenerHolder[0]);
-
-        switchFixMode.setOnCheckedChangeListener((btn, checked) -> {
-            sp.edit().putBoolean("fixmode", checked).apply();
-        });
-
-        switchPeriodicCheck.setOnCheckedChangeListener((btn, checked) -> {
-            sp.edit().putBoolean("periodic_check", checked).apply();
-            if (checked) {
-                TimerReceiver.scheduleNext(MainActivity.this);
-            } else {
-                TimerReceiver.cancel(MainActivity.this);
-            }
-            intervalLabel.setTextColor(checked ? getResources().getColor(R.color.bg) : getResources().getColor(R.color.text_hint));
-        });
-
-        switchIgnoreSystemCrash.setOnCheckedChangeListener((btn, checked) -> {
-            sp.edit().putBoolean("ignore_system_crash_trigger", checked).apply();
-        });
-
-        switchKeepCustomNotify.setOnCheckedChangeListener((btn, checked) -> {
-            sp.edit().putBoolean("keep_custom_notify", checked).apply();
-            if (checked) {
-                Toast.makeText(MainActivity.this, "重启服务生效", Toast.LENGTH_SHORT).show();
-            }
-        });
-
-        intervalLabel.setOnClickListener(v -> {
-            if (!switchPeriodicCheck.isChecked()) return;
-            showIntervalDialog(() -> {
-                intervalLabel.setText(sp.getInt("periodic_check_interval", 10) + "分钟");
-            });
-        });
-
-        notifyCustomBtn.setOnClickListener(v -> showNotifyCustomDialog());
-
-        crashTutorialBtn.setOnClickListener(v -> {
-            new AlertDialog.Builder(this)
-                    .setTitle("崩溃服务检测说明")
-                    .setMessage("1. 崩溃检测：检测无障碍服务是否假死（已开启但显示\"无法运行\"）\n\n" +
-                            "2. 解锁检测：如果解锁检测无效，请开启管理器的无障碍服务或自启动权限\n\n" +
-                            "3. 重启强杀app：默认重启方式为直接重启服务，勾选后强制停止APP后再重启\n\n" +
-                            "4. 定时检测：定时检测服务状态，建议间隔≥10分钟\n\n" +
-                            "5. 延迟1秒保活：延迟1秒执行服务重启，某些情况下也许能提高成功率\n\n" +
-                            "6. 状态修复：服务被系统关闭时自动重新开启")
-                    .setPositiveButton("知道了", null)
-                    .create().show();
-        });
-
-        switchAutoUpdate.setOnCheckedChangeListener((btn, checked) -> {
-            sp.edit().putBoolean("auto_update", checked).apply();
-        });
-
-        checkUpdateBtn.setOnClickListener(v -> {
-            checkForUpdate();
-        });
-
-        aboutBtn.setOnClickListener(v -> {
-            TextView aboutText = new TextView(this);
-            aboutText.setTextIsSelectable(true);
-            aboutText.setText("交流群\nQQ群：1079270847");
-            aboutText.setTextSize(16);
-            aboutText.setPadding(64, 32, 64, 32);
-            new AlertDialog.Builder(this)
-                    .setTitle("关于")
-                    .setView(aboutText)
-                    .setPositiveButton("关闭", null)
-                    .create().show();
-        });
-
-        new AlertDialog.Builder(this)
-                .setTitle("设置")
-                .setView(dialogView)
-                .setPositiveButton("关闭", null)
-                .create().show();
-    }
-
-    private void refreshCrashFixDependent(View dialogView) {
-        boolean crashFixEnabled = ((Switch) dialogView.findViewById(R.id.crashfix)).isChecked();
-        boolean periodicEnabled = crashFixEnabled && ((Switch) dialogView.findViewById(R.id.periodic_check)).isChecked();
-        dialogView.findViewById(R.id.unlock_crash_check).setEnabled(crashFixEnabled);
-        dialogView.findViewById(R.id.fixmode).setEnabled(crashFixEnabled);
-        dialogView.findViewById(R.id.periodic_check).setEnabled(crashFixEnabled);
-        dialogView.findViewById(R.id.ignore_system_crash).setEnabled(crashFixEnabled);
-        ((TextView) dialogView.findViewById(R.id.periodic_interval_label)).setTextColor(periodicEnabled ? getResources().getColor(R.color.bg) : getResources().getColor(R.color.text_hint));
     }
 
     // 首次置顶提示（仅触发一次）
@@ -1493,6 +1245,19 @@ public class MainActivity extends Activity {
             perm = (packageInfo.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
         }
         return !perm;
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_SETTINGS) {
+            // 从设置页面返回，刷新相关状态
+            updateToolbarMenu();
+            daemon = sp.getString("daemon", "");
+            top = sp.getString("top", "");
+            Sort();
+            runOnUiThread(() -> listView.setAdapter(new adapter(tmp)));
+        }
     }
 
     @Override

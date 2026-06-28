@@ -15,5 +15,6 @@
     <style name="ToolbarMenuTextStyle">
         <item name="android:textAllCaps">false</item>
         <item name="android:textSize">14sp</item>
+        <item name="android:textColor">#DE000000</item>
     </style>
 </resources>

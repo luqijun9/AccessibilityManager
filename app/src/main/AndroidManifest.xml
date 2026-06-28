@@ -31,6 +31,10 @@
             </intent-filter>
         </activity>
         <activity
+            android:name=".SettingsActivity"
+            android:configChanges="keyboardHidden|smallestScreenSize|fontScale|screenSize"
+            android:exported="false" />
+        <activity
             android:name=".LogActivity"
             android:configChanges="keyboardHidden|smallestScreenSize|fontScale|screenSize"
             android:exported="false" />
