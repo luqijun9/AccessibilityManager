@@ -641,12 +641,24 @@ public class MainActivity extends Activity {
     private void updateToolbarMenu() {
         Menu menu = toolbar.getMenu();
         if (menu == null) return;
+        int menuColor = night ? Color.WHITE : Color.BLACK;
+
+        // 日志按钮 - 使用与权限显示一致的样式
+        MenuItem logItem = menu.findItem(R.id.viewlog);
+        if (logItem != null) {
+            SpannableStringBuilder logSsb = new SpannableStringBuilder("日志");
+            logSsb.setSpan(new ForegroundColorSpan(menuColor),
+                    0, 2, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            logItem.setTitle(logSsb);
+        }
+
+        // 权限显示按钮
         MenuItem permItem = menu.findItem(R.id.perm_status);
         if (permItem != null) {
             int state = ShellUtil.getPermissionState();
             boolean crashFixEnabled = sp.getBoolean("crashfix", false);
             String text;
-            int color = night ? Color.WHITE : Color.BLACK;
+            int color = menuColor;
             if (state == ShellUtil.PERM_ROOT) {
                 text = "root";
             } else if (state == ShellUtil.PERM_SHIZUKU) {
