@@ -16,7 +16,7 @@ import java.net.URL;
 public class UpdateChecker {
 
     private static final String GITHUB_RELEASE_URL = "https://api.github.com/repos/luqijun9/AccessibilityManager/releases/latest";
-    private static final String PROXY_DOWNLOAD_PREFIX = "https://ghfast.top/";
+    private static final String PROXY_DOWNLOAD_PREFIX = "https://gh-proxy.com/";
     private static boolean isChecking = false;
 
     public interface UpdateListener {
@@ -55,7 +55,18 @@ public class UpdateChecker {
                         JSONObject json = new JSONObject(response.toString());
                         final String latestVersion = json.getString("tag_name");
                         final String releaseNotes = json.optString("body", "");
-                        final String downloadUrl = PROXY_DOWNLOAD_PREFIX + json.getJSONArray("assets").getJSONObject(0).getString("browser_download_url");
+                        final String rawDownloadUrl = json.getJSONArray("assets").getJSONObject(0).getString("browser_download_url");
+
+                        // 构造代理下载URL
+                        final String proxyDownloadUrl = PROXY_DOWNLOAD_PREFIX + rawDownloadUrl;
+
+                        // 测试代理连通性：先试代理，不通则降级直连
+                        String testedUrl = testDownloadUrl(proxyDownloadUrl, rawDownloadUrl);
+
+                        final String downloadUrl = testedUrl;
+
+                        // 记录日志供调试
+                        android.util.Log.i("UpdateChecker", "最终下载URL: " + downloadUrl);
 
                         PackageInfo packageInfo = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
                         final String currentVersion = packageInfo.versionName;
@@ -86,6 +97,34 @@ public class UpdateChecker {
                 }
             }
         }).start();
+    }
+
+    /**
+     * 测试下载URL连通性：先试代理，不通则降级直连
+     * @param proxyUrl  ghproxy 代理URL
+     * @param directUrl GitHub 原始直连URL
+     * @return 可用的下载URL
+     */
+    private static String testDownloadUrl(String proxyUrl, String directUrl) {
+        try {
+            URL url = new URL(proxyUrl);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("HEAD");
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0");
+            int code = conn.getResponseCode();
+            conn.disconnect();
+
+            if (code >= 200 && code < 400) {
+                android.util.Log.i("UpdateChecker", "代理下载可用, HTTP " + code);
+                return proxyUrl;
+            }
+            android.util.Log.w("UpdateChecker", "代理返回异常状态码 " + code + "，降级直连");
+        } catch (Exception e) {
+            android.util.Log.w("UpdateChecker", "代理连接失败: " + e.getMessage() + "，降级直连");
+        }
+        return directUrl;
     }
 
     private static int compareVersions(String v1, String v2) {
