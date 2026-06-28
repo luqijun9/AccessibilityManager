@@ -1,5 +1,9 @@
 # 无障碍管理器
 
+<p align="center">
+  <img src="https://img.shields.io/github/downloads/luqijun9/AccessibilityManager/total">
+</p>
+
 本APP可以彻底取代系统设置里的无障碍设置页面。仅需要授权本APP写入安全设置即可使用。支持无障碍保活，不耗电不主动唤醒，且保活速度极快。
 
 **forked from** [**WuDi-ZhanShen/AccessibilityManager**](https://github.com/WuDi-ZhanShen/AccessibilityManager)
@@ -12,7 +16,7 @@
 
 3\. 重启强杀app：默认重启方式为直接重启服务，勾选后强制停止APP后再重启
 
-4.定时检测：定时检测服务状态，建议间隔≥5分钟
+4\. 定时检测：定时检测服务状态，建议间隔≥5分钟
 
 5\. 延迟1秒保活：延迟1秒执行服务重启，某些情况下也许能提高成功率
 
