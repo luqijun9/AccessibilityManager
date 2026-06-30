@@ -15,8 +15,25 @@ import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class LogUtil {
+
+    // ── 日志监听器 ──
+    public interface LogListener {
+        /** 有新日志行写入时回调，type 为 LogEntry.TYPE_* */
+        void onNewLog(int type, String text);
+    }
+
+    private static final List<LogListener> sListeners = new CopyOnWriteArrayList<>();
+
+    public static void addListener(LogListener listener) {
+        sListeners.add(listener);
+    }
+
+    public static void removeListener(LogListener listener) {
+        sListeners.remove(listener);
+    }
 
     private static final String LOG_DIR = "logs";
     private static final String TAG = "AccMgr";
@@ -46,29 +63,51 @@ public class LogUtil {
                 String displayDate = DISPLAY_DATE_FMT.format(new Date(now));
                 FileOutputStream fos = new FileOutputStream(logFile, true);
                 OutputStreamWriter writer = new OutputStreamWriter(fos, "UTF-8");
-                writer.write(DATE_SEPARATOR_PREFIX + displayDate + "\n");
+                String dateLine = DATE_SEPARATOR_PREFIX + displayDate;
+                writer.write(dateLine + "\n");
                 writer.flush();
                 writer.close();
 
                 cleanupOldLogs(dir);
+                // 通知日期分隔行
+                notifyListeners(LogEntry.TYPE_DATE_SEPARATOR, displayDate);
             }
 
             String timestamp = TIME_FMT.format(new Date(now));
-            String line;
+            String body;
             if (sLastLogTime > 0 && now - sLastLogTime > SEPARATOR_INTERVAL) {
-                line = GAP_MARKER + "\n" + timestamp + "  " + msg + "\n";
+                body = GAP_MARKER + "\n" + timestamp + "  " + msg;
             } else {
-                line = timestamp + "  " + msg + "\n";
+                body = timestamp + "  " + msg;
             }
             sLastLogTime = now;
 
             FileOutputStream fos = new FileOutputStream(logFile, true);
             OutputStreamWriter writer = new OutputStreamWriter(fos, "UTF-8");
-            writer.write(line);
+            writer.write(body + "\n");
             writer.flush();
             writer.close();
             Log.d(TAG, msg);
+
+            // 通知监听者
+            String[] lines = body.split("\n", -1);
+            for (String l : lines) {
+                if (GAP_MARKER.equals(l)) {
+                    notifyListeners(LogEntry.TYPE_GAP_SEPARATOR, null);
+                } else if (!l.isEmpty()) {
+                    notifyListeners(LogEntry.TYPE_LOG_LINE, l);
+                }
+            }
         } catch (Exception ignored) {
+        }
+    }
+
+    private static void notifyListeners(int type, String text) {
+        for (LogListener l : sListeners) {
+            try {
+                l.onNewLog(type, text);
+            } catch (Exception ignored) {
+            }
         }
     }
 

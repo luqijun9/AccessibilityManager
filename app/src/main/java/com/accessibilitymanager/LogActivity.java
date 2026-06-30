@@ -45,6 +45,9 @@ public class LogActivity extends Activity {
     private List<LogUtil.LogEntry> entries;
     private boolean night;
 
+    // ── 实时监听 ──
+    private LogUtil.LogListener mLogListener;
+
     private void executeCommand() {
         String result = getAccessibilityServiceInfo();
 
@@ -109,17 +112,81 @@ public class LogActivity extends Activity {
         findViewById(R.id.btn_exec).setOnClickListener(v -> executeCommand());
         findViewById(R.id.btn_back).setOnClickListener(v -> finish());
 
-        entries = LogUtil.readRecentLogs(this);
-        if (entries.isEmpty()) {
-            listView.setVisibility(View.GONE);
-            tvEmpty.setVisibility(View.VISIBLE);
-        } else {
+        // 初次加载已有日志
+        loadLogs();
+        // 注册实时监听
+        startListening();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        stopListening();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 重新加载（可能跨天）
+        loadLogs();
+        startListening();
+    }
+
+    // ── 实时监听 ──
+
+    private void startListening() {
+        stopListening();
+        mLogListener = (type, text) -> runOnUiThread(() -> appendLog(type, text));
+        LogUtil.addListener(mLogListener);
+    }
+
+    private void stopListening() {
+        if (mLogListener != null) {
+            LogUtil.removeListener(mLogListener);
+            mLogListener = null;
+        }
+    }
+
+    /** 将新日志行追加到列表末尾 */
+    private void appendLog(int type, String text) {
+        // 懒初始化：如果还没有 entries，先从文件读取
+        if (entries == null) {
+            loadLogs();
+            return;
+        }
+
+        LogUtil.LogEntry entry = new LogUtil.LogEntry(type, text);
+        entries.add(entry);
+
+        if (adapter == null) {
             listView.setVisibility(View.VISIBLE);
             tvEmpty.setVisibility(View.GONE);
             adapter = new LogAdapter(entries, night);
             listView.setAdapter(adapter);
-            listView.setSelection(entries.size() - 1);
+        } else {
+            adapter.notifyDataSetChanged();
         }
+        // 自动滚动到底部
+        listView.setSelection(entries.size() - 1);
+    }
+
+    /** 从文件加载所有已有日志 */
+    private void loadLogs() {
+        List<LogUtil.LogEntry> newEntries = LogUtil.readRecentLogs(this);
+        if (newEntries.isEmpty()) {
+            listView.setVisibility(View.GONE);
+            tvEmpty.setVisibility(View.VISIBLE);
+            adapter = null;
+            entries = newEntries;
+            return;
+        }
+
+        entries = newEntries;
+        listView.setVisibility(View.VISIBLE);
+        tvEmpty.setVisibility(View.GONE);
+        adapter = new LogAdapter(entries, night);
+        listView.setAdapter(adapter);
+        listView.setSelection(entries.size() - 1);
     }
 
     private void shareLog() {
