@@ -61,6 +61,10 @@ public class daemonService extends Service {
     private String mCrashedFixLabel;
     private boolean mFirstCommandAfterCreate = true;
 
+    // ── 解锁检测重复触发追踪（仅在 crashCheckExecutor 线程读写）──
+    private long mLastUnlockBroadcastTime = 0;
+    private long mLastAccessibilityUnlockTime = 0;
+
     // ── 执行器 ──
     // daemonExecutor: 串行处理所有共享状态（保活、修复、设置读写）
     private final ExecutorService daemonExecutor = Executors.newSingleThreadExecutor(r -> {
@@ -379,6 +383,23 @@ public class daemonService extends Service {
     /** 在 crashCheckExecutor 线程中执行：运行 dumpsys，若发现崩溃则回调 daemonExecutor 修复 */
     //region debug-point crash-detection-internal
     private void checkCrashedServicesInternal(String source) {
+        // ── 解锁检测重复触发判断 ──
+        long now = System.currentTimeMillis();
+        boolean isBackground = !MainActivity.sIsForeground;
+        if ("解锁".equals(source)) {
+            mLastUnlockBroadcastTime = now;
+            if (isBackground && now - mLastAccessibilityUnlockTime <= 3000) {
+                LogUtil.log(daemonService.this, "[解锁检测] 后台同时触发解锁广播+无障碍检测，记录重复标志");
+                sp.edit().putBoolean("unlock_duplicate_detected", true).apply();
+            }
+        } else if ("解锁(无障碍检测)".equals(source)) {
+            mLastAccessibilityUnlockTime = now;
+            if (isBackground && now - mLastUnlockBroadcastTime <= 3000) {
+                LogUtil.log(daemonService.this, "[解锁检测] 后台同时触发无障碍检测+解锁广播，记录重复标志");
+                sp.edit().putBoolean("unlock_duplicate_detected", true).apply();
+            }
+        }
+
         String taskId = Integer.toHexString(System.identityHashCode(this)) + "-" + (int)(Math.random() * 0xFFFF);
         Log.d("AccMgrDebug", "[TASK-" + taskId + "] ENTER source=" + source);
         String daemonList = sp.getString("daemon", "");

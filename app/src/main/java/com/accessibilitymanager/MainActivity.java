@@ -73,6 +73,9 @@ import rikka.shizuku.Shizuku;
 
 public class MainActivity extends Activity {
 
+    /** 标记管理器是否在前台，供 daemonService 判断 */
+    public static volatile boolean sIsForeground = false;
+
     private SettingsValueChangeContentObserver mContentOb;  //自定义的内容监视器
     List<AccessibilityServiceInfo> l, tmp;//所有AccessibilityServiceInfo列表，临时列表
     ListView listView;//列表视图
@@ -443,8 +446,22 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onPause() {
+        super.onPause();
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        boolean interactive = pm != null && pm.isInteractive();
+        // 屏幕关闭（锁屏/按电源键）不属于真正的后台
+        // 只有在屏幕亮着时用户切换到其他应用才算后台
+        if (pm == null || interactive) {
+            sIsForeground = false;
+        }
+        // 如果屏幕关闭（锁屏中），保持 sIsForeground = true
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
+        sIsForeground = true;
         checkBatteryOptimization();
         if (sp.getBoolean("auto_update", true)) {
             long lastCheckTime = sp.getLong("last_update_check_time", 0);
@@ -469,6 +486,12 @@ public class MainActivity extends Activity {
                 });
                 sp.edit().putLong("last_update_check_time", currentTime).apply();
             }
+        }
+        // ── 检查解锁检测重复触发提示 ──
+        if (sp.getBoolean("unlock_duplicate_detected", false)
+                && !sp.getBoolean("unlock_duplicate_dialog_dismissed", false)) {
+            sp.edit().putBoolean("unlock_duplicate_detected", false).apply();
+            showUnlockDuplicateDialog();
         }
     }
 
@@ -813,6 +836,108 @@ public class MainActivity extends Activity {
         new Handler().postDelayed(() ->
                 Toast.makeText(MainActivity.this, "长按服务项可将其置顶", Toast.LENGTH_LONG).show()
         , 500);
+    }
+
+    private void showUnlockDuplicateDialog() {
+        final android.app.Dialog dialog = new android.app.Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        View dv = getLayoutInflater().inflate(R.layout.dialog_unlock_duplicate, null);
+        dialog.setContentView(dv);
+        android.view.Window w = dialog.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(
+                    android.graphics.Color.TRANSPARENT));
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            int marginPx = (int) (16 * dm.density + 0.5f);
+            android.view.WindowManager.LayoutParams lp = w.getAttributes();
+            lp.width = dm.widthPixels - marginPx * 2;
+            lp.height = android.view.WindowManager.LayoutParams.WRAP_CONTENT;
+            w.setAttributes(lp);
+        }
+
+        String msg = "检测到您的系统可以正常接收解锁广播，无需开启无障碍服务也能进行解锁检测。\n\n"
+                + "当前解锁检测同时触发了「广播接收」和「无障碍服务」两种方式，"
+                + "无障碍管理器的无障碍服务可以关闭以节省资源。\n\n"
+                + "是否要取消保活并关闭管理器的无障碍服务？";
+        ((TextView) dv.findViewById(R.id.unlock_dup_msg)).setText(msg);
+
+        // "取消保活并关闭无障碍"
+        dv.findViewById(R.id.unlock_dup_btn_positive).setOnClickListener(v -> {
+            dialog.dismiss();
+            String ownServiceId = new ComponentName(MainActivity.this,
+                    MyAccessibilityService.class).flattenToString();
+
+            // 从保活列表中移除
+            String daemonStr = sp.getString("daemon", "");
+            StringBuilder newDaemon = new StringBuilder();
+            for (String entry : daemonStr.split(":")) {
+                if (entry.isEmpty()) continue;
+                ComponentName cn = ComponentName.unflattenFromString(entry);
+                if (cn != null && ownServiceId.equals(cn.flattenToString())) {
+                    continue; // 跳过管理器自己的无障碍服务
+                }
+                if (newDaemon.length() > 0) newDaemon.append(":");
+                newDaemon.append(entry);
+            }
+            String resultDaemon = newDaemon.toString();
+            sp.edit().putString("daemon", resultDaemon).apply();
+
+            // 从已开启的无障碍服务列表中移除
+            String sv = Settings.Secure.getString(getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (sv != null) {
+                StringBuilder newSv = new StringBuilder();
+                for (String entry : sv.split(":")) {
+                    if (entry.isEmpty()) continue;
+                    ComponentName cn = ComponentName.unflattenFromString(entry);
+                    if (cn != null && ownServiceId.equals(cn.flattenToString())) {
+                        continue; // 跳过管理器自己的无障碍服务
+                    }
+                    if (newSv.length() > 0) newSv.append(":");
+                    newSv.append(entry);
+                }
+                Settings.Secure.putString(getContentResolver(),
+                        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, newSv.toString());
+            }
+
+            // 如果保活列表为空，停止保活服务
+            if (resultDaemon.isEmpty()) {
+                stopService(new Intent(MainActivity.this, daemonService.class));
+            } else {
+                // 否则刷新保活服务
+                Intent intent = new Intent(MainActivity.this, daemonService.class);
+                intent.putExtra("source", "服务刷新");
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(intent);
+                    } else {
+                        startService(intent);
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            // 刷新本地字段，确保界面使用最新数据
+            settingValue = Settings.Secure.getString(getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (settingValue == null) settingValue = "";
+            daemon = sp.getString("daemon", "");
+
+            // 刷新列表显示
+            runOnUiThread(() -> listView.setAdapter(new adapter(tmp)));
+
+            Toast.makeText(MainActivity.this, "已取消保活并关闭无障碍服务", Toast.LENGTH_SHORT).show();
+        });
+
+        // "知道了"
+        dv.findViewById(R.id.unlock_dup_btn_negative).setOnClickListener(v -> dialog.dismiss());
+
+        // "不再提示"
+        dv.findViewById(R.id.unlock_dup_btn_neutral).setOnClickListener(v -> {
+            sp.edit().putBoolean("unlock_duplicate_dialog_dismissed", true).apply();
+            dialog.dismiss();
+        });
+
+        dialog.show();
     }
 
     //这个是用于适配列表中的每一项设置项的显示
