@@ -377,36 +377,58 @@ public class daemonService extends Service {
     }
 
     /** 在 crashCheckExecutor 线程中执行：运行 dumpsys，若发现崩溃则回调 daemonExecutor 修复 */
+    //region debug-point crash-detection-internal
     private void checkCrashedServicesInternal(String source) {
+        String taskId = Integer.toHexString(System.identityHashCode(this)) + "-" + (int)(Math.random() * 0xFFFF);
+        Log.d("AccMgrDebug", "[TASK-" + taskId + "] ENTER source=" + source);
         String daemonList = sp.getString("daemon", "");
-        if (daemonList.length() == 0) return;
+        if (daemonList.length() == 0) {
+            Log.d("AccMgrDebug", "[TASK-" + taskId + "] daemonList empty, return");
+            return;
+        }
         LogUtil.log(daemonService.this, "[崩溃检测] 触发来源：" + source);
         try {
             Process p;
             try {
                 p = ShellUtil.exec();
+                Log.d("AccMgrDebug", "[TASK-" + taskId + "] ShellUtil.exec() OK pid=" + p);
             } catch (Exception e) {
                 LogUtil.log(daemonService.this, "[崩溃检测] 获取 shell 失败：" + e.getMessage());
+                Log.d("AccMgrDebug", "[TASK-" + taskId + "] ShellUtil.exec() FAILED: " + e.getClass().getName() + ": " + e.getMessage());
                 return;
             }
+            Log.d("AccMgrDebug", "[TASK-" + taskId + "] Writing dumpsys command...");
             DataOutputStream os = new DataOutputStream(p.getOutputStream());
             os.writeBytes("dumpsys accessibility 2>/dev/null\n");
             os.writeBytes("exit\n");
             os.flush();
             os.close();
+            Log.d("AccMgrDebug", "[TASK-" + taskId + "] Commands written, starting read...");
 
             BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
             StringBuilder allOutput = new StringBuilder();
             String line;
+            int lineCount = 0;
             while ((line = reader.readLine()) != null) {
                 allOutput.append(line).append("\n");
+                lineCount++;
             }
             reader.close();
-            if (!p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
-                p.destroyForcibly();
-                LogUtil.log(daemonService.this, "[崩溃检测] dumpsys 超时(10s)，强制终止");
-                return;
+            Log.d("AccMgrDebug", "[TASK-" + taskId + "] Read complete, lines=" + lineCount + ", waiting for process...");
+
+            try {
+                if (!p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                    p.destroyForcibly();
+                    LogUtil.log(daemonService.this, "[崩溃检测] dumpsys 超时(10s)，强制终止");
+                    Log.d("AccMgrDebug", "[TASK-" + taskId + "] waitFor TIMEOUT, destroyed");
+                    return;
+                }
+            } catch (IllegalArgumentException e) {
+                // ShizukuRemoteProcess.waitFor() 可能在进程还未完全退出时抛出
+                // "process hasn't exited"，此时输出已读完，无需等待
+                Log.d("AccMgrDebug", "[TASK-" + taskId + "] waitFor threw: " + e.getMessage() + ", skipping wait");
             }
+            Log.d("AccMgrDebug", "[TASK-" + taskId + "] waitFor OK, parsing output...");
 
             String fullOutput = allOutput.toString();
 
@@ -417,6 +439,7 @@ public class daemonService extends Service {
             } else {
                 rawCrashedLine = "Crashed services: (未找到此行)";
             }
+            Log.d("AccMgrDebug", "[TASK-" + taskId + "] rawCrashedLine=" + rawCrashedLine);
             LogUtil.log(daemonService.this, "[崩溃检测] 返回 " + rawCrashedLine);
 
             List<String> crashedServicesList = new ArrayList<>();
@@ -429,8 +452,10 @@ public class daemonService extends Service {
             }
 
             if (crashedServicesList.isEmpty()) {
+                Log.d("AccMgrDebug", "[TASK-" + taskId + "] crashedServicesList empty, return");
                 return;
             }
+            Log.d("AccMgrDebug", "[TASK-" + taskId + "] crashedServicesList=" + crashedServicesList);
 
             String[] trackedServices = daemonList.split(":");
 
@@ -447,9 +472,13 @@ public class daemonService extends Service {
                     }
                 }
             }
-        } catch (Exception ignored) {
+            Log.d("AccMgrDebug", "[TASK-" + taskId + "] NORMAL_EXIT");
+        } catch (Exception e) {
+            LogUtil.log(daemonService.this, "[崩溃检测] 异常: " + e.getClass().getName() + ": " + e.getMessage());
+            Log.d("AccMgrDebug", "[TASK-" + taskId + "] OUTER_CATCH: " + e.getClass().getName() + ": " + e.getMessage());
         }
     }
+    //endregion
 
     /** 在 daemonExecutor 线程中执行：处理首次检测到的崩溃 */
     private void handleFixDetected(String cs) {
