@@ -365,17 +365,7 @@ public class SettingsActivity extends Activity {
         ((View) notifyCustomBtn.getParent()).setOnClickListener(v -> showNotifyCustomDialog());
         notifyCustomBtn.setOnClickListener(v -> showNotifyCustomDialog());
 
-        crashTutorialBtn.setOnClickListener(v ->
-                new AlertDialog.Builder(this)
-                        .setTitle("崩溃服务检测说明")
-                        .setMessage("1. 崩溃检测：检测无障碍服务是否假死（已开启但显示\"无法运行\"）\n\n"
-                                + "2. 解锁检测：如果解锁检测无效，请开启管理器的无障碍服务或自启动权限\n\n"
-                                + "3. 重启强杀app：默认重启方式为直接重启服务，勾选后强制停止APP后再重启\n\n"
-                                + "4. 定时检测：定时检测服务状态，建议间隔≥10分钟\n\n"
-                                + "5. 延迟1秒保活：延迟1秒执行服务重启，某些情况下也许能提高成功率\n\n"
-                                + "6. 状态修复：服务被系统关闭时自动重新开启")
-                        .setPositiveButton("知道了", null)
-                        .create().show());
+        crashTutorialBtn.setOnClickListener(v -> showCrashTutorialDialog());
 
         switchAutoUpdate.setOnCheckedChangeListener((btn, checked) ->
                 sp.edit().putBoolean("auto_update", checked).apply());
@@ -482,6 +472,35 @@ public class SettingsActivity extends Activity {
     }
 
     // ========== 对话框 ==========
+
+    private void showCrashTutorialDialog() {
+        View dv = getLayoutInflater().inflate(R.layout.dialog_crash_tutorial, null);
+        ((TextView) dv.findViewById(R.id.tutorial_msg)).setText(
+                "1. 崩溃检测：检测无障碍服务是否假死（已开启但显示\"无法运行\"）\n\n"
+                + "2. 解锁检测：如果解锁检测无效，请开启管理器的无障碍服务或自启动权限\n\n"
+                + "3. 重启强杀app：默认重启方式为直接重启服务，勾选后强制停止APP后再重启\n\n"
+                + "4. 定时检测：定时检测服务状态，建议间隔≥10分钟\n\n"
+                + "5. 延迟1秒保活：延迟1秒执行服务重启，某些情况下也许能提高成功率\n\n"
+                + "6. 状态修复：服务被系统关闭时自动重新开启");
+
+        final android.app.Dialog dialog = new android.app.Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        dialog.setContentView(dv);
+        android.view.Window w = dialog.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(
+                    android.graphics.Color.TRANSPARENT));
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            int marginPx = (int) (16 * dm.density + 0.5f);
+            android.view.WindowManager.LayoutParams lp = w.getAttributes();
+            lp.width = dm.widthPixels - marginPx * 2;
+            lp.height = android.view.WindowManager.LayoutParams.WRAP_CONTENT;
+            w.setAttributes(lp);
+        }
+
+        dv.findViewById(R.id.tutorial_ok_btn).setOnClickListener(v -> dialog.dismiss());
+        dialog.show();
+    }
 
     private void showNotifyCustomDialog() {
         String currentTitle = sp.getString("notify_title",

@@ -46,18 +46,6 @@
         android:gravity="end">
 
         <TextView
-            android:id="@+id/unlock_btn_negative"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:background="?android:attr/selectableItemBackground"
-            android:clickable="true"
-            android:focusable="true"
-            android:padding="10dp"
-            android:text="不开启"
-            android:textColor="@color/text_hint"
-            android:textSize="15sp" />
-
-        <TextView
             android:id="@+id/unlock_btn_neutral"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -65,9 +53,21 @@
             android:clickable="true"
             android:focusable="true"
             android:padding="10dp"
-            android:layout_marginLeft="8dp"
             android:text="不再提示"
-            android:textColor="@color/text_hint"
+            android:textColor="@color/bg"
+            android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/unlock_btn_negative"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="?android:attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:padding="10dp"
+            android:layout_marginLeft="8dp"
+            android:text="不开启"
+            android:textColor="@color/bg"
             android:textSize="15sp" />
 
         <TextView
