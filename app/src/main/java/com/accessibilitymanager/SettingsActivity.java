@@ -707,7 +707,7 @@ public class SettingsActivity extends Activity {
         android.widget.Button updateLater = dialogView.findViewById(R.id.update_later);
         android.widget.Button updateNow = dialogView.findViewById(R.id.update_now);
 
-        title.setText("发现新版本 v" + versionName);
+        title.setText("发现新版本 " + versionName);
         version.setText("版本号: " + versionName);
         changelog.setText(releaseNotes.isEmpty() ? "暂无更新说明" : releaseNotes);
 
