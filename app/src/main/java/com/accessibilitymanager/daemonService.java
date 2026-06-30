@@ -386,6 +386,7 @@ public class daemonService extends Service {
             try {
                 p = ShellUtil.exec();
             } catch (Exception e) {
+                LogUtil.log(daemonService.this, "[崩溃检测] 获取 shell 失败：" + e.getMessage());
                 return;
             }
             DataOutputStream os = new DataOutputStream(p.getOutputStream());
