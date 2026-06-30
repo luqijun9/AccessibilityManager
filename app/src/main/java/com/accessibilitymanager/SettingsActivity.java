@@ -245,61 +245,85 @@ public class SettingsActivity extends Activity {
                     sp.edit().putBoolean("unlock_crash_check", true).apply();
                     return;
                 }
-                SpannableString msg = new SpannableString(
-                        "由于部分系统限制可能导致无法进行解锁检测，请进行以下操作查看是否能正常接收解锁广播:\n\n"
-                                + "回到主界面后进行锁屏和解锁操作，打开管理器并点击日志，查看是否有\"收到USER_PRESENT广播\"的日志\n\n"
-                                + "如果有则不需要额外操作，否则请使用以下方案其中之一：\n"
-                                + "① 开启无障碍管理器的无障碍服务\n"
-                                + "② 开启无障碍管理器的自启动权限\n\n"
-                                + "现在是否要开启并保活管理器的无障碍服务？");
-                msg.setSpan(new StyleSpan(Typeface.BOLD),
-                        msg.toString().indexOf("回到主界面"), 5, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                msg.setSpan(new StyleSpan(Typeface.BOLD),
-                        msg.toString().indexOf("锁屏和解锁"), 5, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                msg.setSpan(new StyleSpan(Typeface.BOLD),
-                        msg.toString().indexOf("收到USER_PRESENT广播"), 17, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
 
-                new AlertDialog.Builder(this)
-                        .setTitle("提示")
-                        .setMessage(msg)
-                        .setNegativeButton("不开启", (d, w) -> {
-                            sp.edit().putBoolean("unlock_crash_check", true).apply();
-                            unlockCrashCheckRef.setOnCheckedChangeListener(null);
-                            unlockCrashCheckRef.setChecked(true);
-                            unlockCrashCheckRef.setOnCheckedChangeListener(unlockListenerHolder[0]);
-                        })
-                        .setNeutralButton("不再提示", (d, w) -> {
-                            sp.edit().putBoolean("unlock_crash_dialog_dismissed", true).apply();
-                            sp.edit().putBoolean("unlock_crash_check", true).apply();
-                            unlockCrashCheckRef.setOnCheckedChangeListener(null);
-                            unlockCrashCheckRef.setChecked(true);
-                            unlockCrashCheckRef.setOnCheckedChangeListener(unlockListenerHolder[0]);
-                        })
-                        .setPositiveButton("开启", (d, w) -> {
-                            sp.edit().putBoolean("unlock_crash_check", true).apply();
-                            unlockCrashCheckRef.setOnCheckedChangeListener(null);
-                            unlockCrashCheckRef.setChecked(true);
-                            unlockCrashCheckRef.setOnCheckedChangeListener(unlockListenerHolder[0]);
-                            if (checkWriteSecurePermission()) {
-                                Toast.makeText(SettingsActivity.this,
-                                        "需要授予安全设置写入权限才能开启无障碍服务", Toast.LENGTH_SHORT).show();
-                                return;
-                            }
-                            String s = Settings.Secure.getString(getContentResolver(),
-                                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-                            if (s == null) s = "";
-                            if (!isServiceEnabled(ownServiceId, s)) {
-                                Settings.Secure.putString(getContentResolver(),
-                                        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
-                                        ownServiceId + ":" + s);
-                            }
-                            if (!containsService(daemon, ownServiceId)) {
-                                String newDaemon = ownServiceId + ":" + daemon;
-                                sp.edit().putString("daemon", newDaemon).apply();
-                                startDaemonService();
-                            }
-                        })
-                        .create().show();
+                final android.app.Dialog unlockDialog = new android.app.Dialog(this);
+                unlockDialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+                View dv = getLayoutInflater().inflate(R.layout.dialog_unlock_check, null);
+                unlockDialog.setContentView(dv);
+                android.view.Window w = unlockDialog.getWindow();
+                if (w != null) {
+                    w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(
+                            android.graphics.Color.TRANSPARENT));
+                    android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+                    int marginPx = (int) (16 * dm.density + 0.5f);
+                    android.view.WindowManager.LayoutParams lp = w.getAttributes();
+                    lp.width = dm.widthPixels - marginPx * 2;
+                    lp.height = android.view.WindowManager.LayoutParams.WRAP_CONTENT;
+                    w.setAttributes(lp);
+                }
+
+                // 构建带粗体的消息
+                String rawMsg = "由于部分系统限制可能导致无法进行解锁检测，请进行以下操作查看是否能正常接收解锁广播:\n\n"
+                        + "回到主界面后进行锁屏和解锁操作，打开管理器并点击日志，查看是否有\"收到USER_PRESENT广播\"的日志\n\n"
+                        + "如果有则不需要额外操作，否则请使用以下方案其中之一：\n"
+                        + "① 开启无障碍管理器的无障碍服务\n"
+                        + "② 开启无障碍管理器的自启动权限\n\n"
+                        + "现在是否要开启并保活管理器的无障碍服务？";
+                SpannableString msg = new SpannableString(rawMsg);
+                int idx1 = rawMsg.indexOf("回到主界面");
+                int idx2 = rawMsg.indexOf("锁屏和解锁");
+                int idx3 = rawMsg.indexOf("收到USER_PRESENT广播");
+                if (idx1 >= 0) msg.setSpan(new StyleSpan(Typeface.BOLD), idx1, idx1 + 5,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                if (idx2 >= 0) msg.setSpan(new StyleSpan(Typeface.BOLD), idx2, idx2 + 5,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                if (idx3 >= 0) msg.setSpan(new StyleSpan(Typeface.BOLD), idx3, idx3 + 17,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+
+                ((TextView) dv.findViewById(R.id.unlock_msg)).setText(msg);
+
+                dv.findViewById(R.id.unlock_btn_negative).setOnClickListener(v -> {
+                    sp.edit().putBoolean("unlock_crash_check", true).apply();
+                    unlockCrashCheckRef.setOnCheckedChangeListener(null);
+                    unlockCrashCheckRef.setChecked(true);
+                    unlockCrashCheckRef.setOnCheckedChangeListener(unlockListenerHolder[0]);
+                    unlockDialog.dismiss();
+                });
+                dv.findViewById(R.id.unlock_btn_neutral).setOnClickListener(v -> {
+                    sp.edit().putBoolean("unlock_crash_dialog_dismissed", true).apply();
+                    sp.edit().putBoolean("unlock_crash_check", true).apply();
+                    unlockCrashCheckRef.setOnCheckedChangeListener(null);
+                    unlockCrashCheckRef.setChecked(true);
+                    unlockCrashCheckRef.setOnCheckedChangeListener(unlockListenerHolder[0]);
+                    unlockDialog.dismiss();
+                });
+                dv.findViewById(R.id.unlock_btn_positive).setOnClickListener(v -> {
+                    sp.edit().putBoolean("unlock_crash_check", true).apply();
+                    unlockCrashCheckRef.setOnCheckedChangeListener(null);
+                    unlockCrashCheckRef.setChecked(true);
+                    unlockCrashCheckRef.setOnCheckedChangeListener(unlockListenerHolder[0]);
+                    unlockDialog.dismiss();
+                    if (checkWriteSecurePermission()) {
+                        Toast.makeText(SettingsActivity.this,
+                                "需要授予安全设置写入权限才能开启无障碍服务", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    String s = Settings.Secure.getString(getContentResolver(),
+                            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+                    if (s == null) s = "";
+                    if (!isServiceEnabled(ownServiceId, s)) {
+                        Settings.Secure.putString(getContentResolver(),
+                                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+                                ownServiceId + ":" + s);
+                    }
+                    if (!containsService(daemon, ownServiceId)) {
+                        String newDaemon = ownServiceId + ":" + daemon;
+                        sp.edit().putString("daemon", newDaemon).apply();
+                        startDaemonService();
+                    }
+                });
+
+                unlockDialog.show();
                 return;
             }
             sp.edit().putBoolean("unlock_crash_check", checked).apply();

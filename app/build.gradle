@@ -6,7 +6,7 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId "com.accessibilitymanager"
+        applicationId "com.accessibilitymanager.pro"
         minSdk 21
         targetSdk 35
         versionCode 31
