@@ -420,12 +420,26 @@ public class SettingsActivity extends Activity {
             message.append("当前未检测到任何权限。\n请安装Shizuku并授权，或获取root权限后重试。");
         }
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(this)
-                .setTitle("权限不足")
-                .setMessage(message.toString());
+        final android.app.Dialog permDialog = new android.app.Dialog(this);
+        permDialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        View dv = getLayoutInflater().inflate(R.layout.dialog_permission, null);
+        permDialog.setContentView(dv);
+        android.view.Window w = permDialog.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(
+                    android.graphics.Color.TRANSPARENT));
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            int marginPx = (int) (16 * dm.density + 0.5f);
+            android.view.WindowManager.LayoutParams lp = w.getAttributes();
+            lp.width = dm.widthPixels - marginPx * 2;
+            lp.height = android.view.WindowManager.LayoutParams.WRAP_CONTENT;
+            w.setAttributes(lp);
+        }
+
+        ((TextView) dv.findViewById(R.id.perm_msg)).setText(message.toString());
 
         if (shizukuRunning) {
-            builder.setPositiveButton("申请Shizuku权限", (dialog, which) -> {
+            dv.findViewById(R.id.perm_btn_positive).setOnClickListener(v -> {
                 LogUtil.log(SettingsActivity.this, "[权限] 对话框中点击申请Shizuku权限");
                 mPendingCrashFixRequest = true;
                 try {
@@ -436,25 +450,29 @@ public class SettingsActivity extends Activity {
                     mPendingCrashFixRequest = false;
                     Toast.makeText(this, "Shizuku权限申请失败", Toast.LENGTH_SHORT).show();
                 }
+                permDialog.dismiss();
             });
-            builder.setNeutralButton("取消", (dialog, which) -> {
+            dv.findViewById(R.id.perm_btn_neutral).setOnClickListener(v -> {
                 if (closeCrashFixOnCancel) {
                     sp.edit().putBoolean("crashfix", false)
                             .putBoolean("crashfix_auto_disabled", false).apply();
                     LogUtil.log(SettingsActivity.this, "[权限] 对话框取消，崩溃修复已关闭");
                     Toast.makeText(SettingsActivity.this, "崩溃修复已关闭", Toast.LENGTH_SHORT).show();
                 }
+                permDialog.dismiss();
             });
         } else {
-            builder.setPositiveButton("知道了", null);
+            ((TextView) dv.findViewById(R.id.perm_btn_positive)).setText("知道了");
+            dv.findViewById(R.id.perm_btn_neutral).setVisibility(View.GONE);
+            dv.findViewById(R.id.perm_btn_positive).setOnClickListener(v -> permDialog.dismiss());
             if (closeCrashFixOnCancel) {
-                builder.setOnDismissListener(dialog -> {
+                permDialog.setOnDismissListener(d -> {
                     sp.edit().putBoolean("crashfix", false)
                             .putBoolean("crashfix_auto_disabled", false).apply();
                 });
             }
         }
-        builder.create().show();
+        permDialog.show();
     }
 
     // ========== 刷新子项状态 ==========
@@ -477,7 +495,7 @@ public class SettingsActivity extends Activity {
         View dv = getLayoutInflater().inflate(R.layout.dialog_crash_tutorial, null);
         ((TextView) dv.findViewById(R.id.tutorial_msg)).setText(
                 "1. 崩溃检测：检测无障碍服务是否假死（已开启但显示\"无法运行\"）\n\n"
-                + "2. 解锁检测：如果解锁检测无效，请开启管理器的无障碍服务或自启动权限\n\n"
+                + "2. 解锁检测：设备解锁时进行检测。如果解锁检测无效（无法看到接收USER_PRESENT广播的日志），请开启管理器的无障碍服务或自启动权限\n\n"
                 + "3. 重启强杀app：默认重启方式为直接重启服务，勾选后强制停止APP后再重启\n\n"
                 + "4. 定时检测：定时检测服务状态，建议间隔≥10分钟\n\n"
                 + "5. 延迟1秒保活：延迟1秒执行服务重启，某些情况下也许能提高成功率\n\n"
