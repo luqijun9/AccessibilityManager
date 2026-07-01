@@ -3,8 +3,6 @@ package com.accessibilitymanager;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.NotificationManager;
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -664,10 +662,13 @@ public class SettingsActivity extends Activity {
         dialog.show();
 
         dialogView.findViewById(R.id.about_copy_btn).setOnClickListener(v -> {
-            ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            ClipData clip = ClipData.newPlainText("QQ群号", "1079270847");
-            clipboard.setPrimaryClip(clip);
-            Toast.makeText(SettingsActivity.this, "群号已复制到剪贴板", Toast.LENGTH_SHORT).show();
+            try {
+                Intent intent = new Intent(Intent.ACTION_VIEW);
+                intent.setData(Uri.parse("mqqapi://card/show_pslcard?src_type=internal&card_type=group&uin=1079270847&version=1"));
+                startActivity(intent);
+            } catch (Exception e) {
+                Toast.makeText(SettingsActivity.this, "未检测到QQ客户端", Toast.LENGTH_SHORT).show();
+            }
         });
 
         dialogView.findViewById(R.id.about_close_btn).setOnClickListener(v -> dialog.dismiss());
