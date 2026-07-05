@@ -397,8 +397,8 @@ public class MainActivity extends Activity {
         tabFavorites = findViewById(R.id.tab_favorites);
         fabAdd = findViewById(R.id.fab_add);
 
-        tabAll.setOnClickListener(v -> switchToTab(false));
-        tabFavorites.setOnClickListener(v -> switchToTab(true));
+        findViewById(R.id.tab_all_container).setOnClickListener(v -> switchToTab(false));
+        findViewById(R.id.tab_favorites_container).setOnClickListener(v -> switchToTab(true));
         fabAdd.setOnClickListener(v -> showAddFavoritesDialog());
 
         favorites = sp.getString("favorites", "");
@@ -554,6 +554,16 @@ public class MainActivity extends Activity {
         int inactiveColor = getResources().getColor(R.color.text_hint);
         tabAll.setTextColor(mIsFavoritesTab ? inactiveColor : activeColor);
         tabFavorites.setTextColor(mIsFavoritesTab ? activeColor : inactiveColor);
+
+        // 更新 Tab 图标颜色
+        Drawable allIcon = tabAll.getCompoundDrawablesRelative()[0];
+        Drawable favIcon = tabFavorites.getCompoundDrawablesRelative()[0];
+        if (allIcon != null) {
+            allIcon.mutate().setTint(mIsFavoritesTab ? inactiveColor : activeColor);
+        }
+        if (favIcon != null) {
+            favIcon.mutate().setTint(mIsFavoritesTab ? activeColor : inactiveColor);
+        }
     }
 
     private boolean isServiceFavorite(String serviceId) {

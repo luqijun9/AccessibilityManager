@@ -98,17 +98,27 @@
             android:background="@color/card_bg"
             android:orientation="horizontal">
 
-            <TextView
-                android:id="@+id/tab_all"
+            <LinearLayout
+                android:id="@+id/tab_all_container"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:gravity="center"
-                android:text="全部服务"
-                android:textSize="14sp"
+                android:orientation="horizontal"
                 android:background="?android:attr/selectableItemBackground"
                 android:clickable="true"
-                android:focusable="true" />
+                android:focusable="true">
+
+                <TextView
+                    android:id="@+id/tab_all"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:drawableStart="@drawable/ic_grid"
+                    android:drawablePadding="6dp"
+                    android:text="全部"
+                    android:textSize="14sp"
+                    android:gravity="center" />
+            </LinearLayout>
 
             <View
                 android:layout_width="1dp"
@@ -116,17 +126,27 @@
                 android:layout_gravity="center_vertical"
                 android:background="@color/divider" />
 
-            <TextView
-                android:id="@+id/tab_favorites"
+            <LinearLayout
+                android:id="@+id/tab_favorites_container"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:gravity="center"
-                android:text="收藏服务"
-                android:textSize="14sp"
+                android:orientation="horizontal"
                 android:background="?android:attr/selectableItemBackground"
                 android:clickable="true"
-                android:focusable="true" />
+                android:focusable="true">
+
+                <TextView
+                    android:id="@+id/tab_favorites"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:drawableStart="@drawable/ic_star"
+                    android:drawablePadding="6dp"
+                    android:text="收藏"
+                    android:textSize="14sp"
+                    android:gravity="center" />
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 
