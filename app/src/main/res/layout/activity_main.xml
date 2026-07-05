@@ -3,6 +3,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/screen_bg"
+    android:clipChildren="false"
     android:fitsSystemWindows="true">
 
     <LinearLayout
@@ -83,21 +84,6 @@
                 android:textColor="@color/text_hint"
                 android:textSize="16sp"
                 android:visibility="gone" />
-
-            <!-- ===== FAB 添加收藏按钮（位于内容区右下角，底栏上方） ===== -->
-            <ImageButton
-                android:id="@+id/fab_add"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:layout_gravity="bottom|end"
-                android:layout_margin="16dp"
-                android:src="@drawable/ic_add"
-                android:background="@drawable/fab_bg"
-                android:clickable="true"
-                android:focusable="true"
-                android:elevation="4dp"
-                android:visibility="gone"
-                android:contentDescription="添加收藏" />
         </FrameLayout>
 
         <!-- ===== 底栏 Tab ===== -->
@@ -143,5 +129,21 @@
                 android:focusable="true" />
         </LinearLayout>
     </LinearLayout>
+
+    <!-- ===== FAB 添加收藏按钮（一半落在底栏上） ===== -->
+    <ImageButton
+        android:id="@+id/fab_add"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_gravity="bottom|end"
+        android:layout_marginBottom="20dp"
+        android:layout_marginEnd="16dp"
+        android:src="@drawable/ic_add"
+        android:background="@drawable/fab_bg"
+        android:clickable="true"
+        android:focusable="true"
+        android:elevation="4dp"
+        android:visibility="gone"
+        android:contentDescription="添加收藏" />
 
 </FrameLayout>
