@@ -104,68 +104,17 @@ public class TimerReceiver extends BroadcastReceiver {
 
         AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (am == null) return;
+
         Intent intent = new Intent(context, TimerReceiver.class);
         intent.setAction(ACTION_PERIODIC_CHECK);
 
-        // ════════════════════════════════════════════════════════════════
-        //  跨版本 PendingIntent cancel 兼容方案
-        // ════════════════════════════════════════════════════════════════
-        // Android 12+ (API 31) 要求 PendingIntent.getBroadcast() 必须指定
-        // FLAG_IMMUTABLE 或 FLAG_MUTABLE。旧版本创建的 PendingIntent 是
-        // MUTABLE（默认），而新版本使用 IMMUTABLE 去 getBroadcast() 可能
-        // 返回的是新创建的 PendingIntent，而非旧的 → am.cancel() 失效！
-        //
-        // 因此必须同时尝试 IMMUTABLE 和 MUTABLE 两种 flags。
-
-        int matchedFlags = 0;
-        String matchedDesc = "无";
-
-        // ── API 31+：同时尝试 IMMUTABLE 和 MUTABLE ──
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            for (int mutableFlag : new int[]{PendingIntent.FLAG_IMMUTABLE, PendingIntent.FLAG_MUTABLE}) {
-                try {
-                    PendingIntent pi = PendingIntent.getBroadcast(context, 0, intent,
-                            PendingIntent.FLAG_UPDATE_CURRENT | mutableFlag);
-                    am.cancel(pi);
-                    matchedFlags++;
-                    matchedDesc = (mutableFlag == PendingIntent.FLAG_IMMUTABLE) ? "IMMUTABLE" : "MUTABLE";
-                } catch (Exception ignored) {
-                }
-            }
-        }
-
-        // ── API < 31：尝试带和不带 FLAG_IMMUTABLE ──
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-            try {
-                PendingIntent pi = PendingIntent.getBroadcast(context, 0, intent,
-                        PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-                am.cancel(pi);
-                matchedFlags++;
-                matchedDesc = "IMMUTABLE";
-            } catch (Exception ignored) {
-            }
-            try {
-                PendingIntent pi = PendingIntent.getBroadcast(context, 0, intent,
-                        PendingIntent.FLAG_UPDATE_CURRENT);
-                am.cancel(pi);
-                matchedFlags++;
-                matchedDesc = "无FLAG";
-            } catch (Exception ignored) {
-            }
-        }
-
-        // ── 兜底：先 set 一个即将触发的 alarm 覆盖旧的，再取消 ──
-        // 对于部分 OEM ROM，以上方式仍可能无效，通过 set() 强制覆盖旧 alarm
-        try {
-            PendingIntent pi = PendingIntent.getBroadcast(context, 0, intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-                            ? PendingIntent.FLAG_IMMUTABLE : 0));
-            am.set(AlarmManager.ELAPSED_REALTIME, SystemClock.elapsedRealtime() + 100, pi);
+        // 官方推荐方式：先使用 FLAG_NO_CREATE 获取已有 PendingIntent，存在则取消
+        // 参见 https://developer.android.com/develop/background-work/services/alarms#cancel
+        PendingIntent pi = PendingIntent.getBroadcast(context, 0, intent,
+                PendingIntent.FLAG_NO_CREATE | PendingIntent.FLAG_IMMUTABLE);
+        if (pi != null) {
             am.cancel(pi);
-            matchedDesc += "+兜底set";
-        } catch (Exception ignored) {
         }
-
-        LogUtil.log(context, "[定时唤醒] cancel 完成, 匹配方式=" + matchedDesc);
+        LogUtil.log(context, "[定时唤醒] cancel 完成");
     }
 }
