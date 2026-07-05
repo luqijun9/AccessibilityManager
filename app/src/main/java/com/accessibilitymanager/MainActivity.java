@@ -47,6 +47,7 @@ import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.AbsListView;
 import android.widget.CompoundButton;
 import android.widget.ScrollView;
 import android.widget.Button;
@@ -87,6 +88,15 @@ public class MainActivity extends Activity {
     private boolean listenerAdded = false;//是否添加了内容监视器
     private boolean mPendingCrashFixRequest = false;//是否有待处理的崩溃修复请求
     private static final int REQUEST_SETTINGS = 1001;
+
+    // 底栏 Tab & 收藏相关
+    private TextView tabAll, tabFavorites;
+    private ImageButton fabAdd;
+    private boolean mIsFavoritesTab = false;
+    private boolean mFabHidden = false;
+    private String favorites = "";
+    private List<AccessibilityServiceInfo> mFavoritesList;
+    private TextView mPinHint;
 
     LinearLayout batteryWarning;//电池警告布局
     TextView batteryWarningText;//电池警告文本
@@ -248,14 +258,39 @@ public class MainActivity extends Activity {
         listView = findViewById(R.id.list);
         listView.setEmptyView(findViewById(R.id.empty_view));
 
-        // 列表底部提示：长按置顶
-        TextView pinHint = new TextView(this);
-        pinHint.setText("长按服务项可将其置顶");
-        pinHint.setTextColor(getResources().getColor(R.color.text_hint));
-        pinHint.setTextSize(12f);
-        pinHint.setGravity(Gravity.CENTER);
-        pinHint.setPadding(0, 6, 0, 6);
-        listView.addFooterView(pinHint, null, false);
+        // 列表底部提示
+        mPinHint = new TextView(this);
+        mPinHint.setText("长按服务项可将其置顶");
+        mPinHint.setTextColor(getResources().getColor(R.color.text_hint));
+        mPinHint.setTextSize(12f);
+        mPinHint.setGravity(Gravity.CENTER);
+        mPinHint.setPadding(0, 6, 0, 6);
+        listView.addFooterView(mPinHint, null, false);
+
+        // ListView 滚动监听：FAB 显示/隐藏动画
+        listView.setOnScrollListener(new AbsListView.OnScrollListener() {
+            private int mLastFirstVisibleItem = 0;
+
+            @Override
+            public void onScrollStateChanged(AbsListView view, int scrollState) {}
+
+            @Override
+            public void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount, int totalItemCount) {
+                if (!mIsFavoritesTab || fabAdd.getVisibility() != View.VISIBLE) return;
+                if (firstVisibleItem > mLastFirstVisibleItem && !mFabHidden) {
+                    // 向下滑动 → 隐藏 FAB
+                    fabAdd.animate().cancel();
+                    fabAdd.animate().translationY(fabAdd.getHeight() + 32).alpha(0f).setDuration(200)
+                            .withEndAction(() -> mFabHidden = true).start();
+                } else if (firstVisibleItem < mLastFirstVisibleItem && mFabHidden) {
+                    // 向上滑动 → 显示 FAB
+                    fabAdd.animate().cancel();
+                    fabAdd.animate().translationY(0).alpha(1f).setDuration(200)
+                            .withEndAction(() -> mFabHidden = false).start();
+                }
+                mLastFirstVisibleItem = firstVisibleItem;
+            }
+        });
 
         batteryWarning = findViewById(R.id.battery_warning);
         batteryWarningText = findViewById(R.id.battery_warning_text);
@@ -353,6 +388,21 @@ public class MainActivity extends Activity {
         }
 
         checkBatteryOptimization();
+
+        // ── 底栏 Tab & FAB 初始化 ──
+        tabAll = findViewById(R.id.tab_all);
+        tabFavorites = findViewById(R.id.tab_favorites);
+        fabAdd = findViewById(R.id.fab_add);
+
+        tabAll.setOnClickListener(v -> switchToTab(false));
+        tabFavorites.setOnClickListener(v -> switchToTab(true));
+        fabAdd.setOnClickListener(v -> showAddFavoritesDialog());
+
+        favorites = sp.getString("favorites", "");
+
+        // 恢复上次的 Tab 状态
+        mIsFavoritesTab = sp.getBoolean("favorites_tab_active", false);
+        switchToTab(mIsFavoritesTab);
     }
 
     private void Sort() {
@@ -433,6 +483,144 @@ public class MainActivity extends Activity {
         return cn != null ? cn.flattenToString() : serviceId;
     }
 
+    // ==================== 底栏 Tab & 收藏 ====================
+
+    private void switchToTab(boolean isFavorites) {
+        mIsFavoritesTab = isFavorites;
+        updateTabStyles();
+
+        // 重置 FAB 状态
+        if (isFavorites) {
+            fabAdd.setVisibility(View.VISIBLE);
+            fabAdd.animate().cancel();
+            fabAdd.setTranslationY(0);
+            fabAdd.setAlpha(1f);
+            mFabHidden = false;
+        } else {
+            fabAdd.setVisibility(View.GONE);
+        }
+
+        // 更新底部提示文本
+        mPinHint.setText(isFavorites ? "长按可取消收藏" : "长按服务项可将其置顶");
+
+        if (mIsSearching) {
+            exitSearchMode();
+        }
+
+        if (isFavorites) {
+            // 切换到收藏 Tab
+            List<AccessibilityServiceInfo> source = (mFilteredList != null) ? mFilteredList : tmp;
+            mFavoritesList = new ArrayList<>();
+            for (AccessibilityServiceInfo info : source) {
+                if (isServiceFavorite(normalizeServiceId(info.getId()))) {
+                    mFavoritesList.add(info);
+                }
+            }
+            if (mFavoritesList.isEmpty()) {
+                ((TextView) findViewById(R.id.empty_view)).setText("还没有收藏的服务\n点击右下角 + 添加");
+            } else {
+                ((TextView) findViewById(R.id.empty_view)).setText("未找到结果");
+            }
+            listView.setAdapter(new adapter(mFavoritesList));
+        } else {
+            // 切换到全部 Tab
+            ((TextView) findViewById(R.id.empty_view)).setText("未找到结果");
+            List<AccessibilityServiceInfo> source = (mFilteredList != null) ? mFilteredList : tmp;
+            listView.setAdapter(new adapter(source));
+        }
+    }
+
+    private void updateTabStyles() {
+        int activeColor = getResources().getColor(R.color.bg);
+        int inactiveColor = getResources().getColor(R.color.text_hint);
+        tabAll.setTextColor(mIsFavoritesTab ? inactiveColor : activeColor);
+        tabFavorites.setTextColor(mIsFavoritesTab ? activeColor : inactiveColor);
+    }
+
+    private boolean isServiceFavorite(String serviceId) {
+        return containsService(favorites, serviceId);
+    }
+
+    private void saveFavorites() {
+        sp.edit().putString("favorites", favorites).apply();
+    }
+
+    private void addToFavorites(String serviceId) {
+        if (!isServiceFavorite(serviceId)) {
+            favorites = serviceId + ":" + favorites;
+            saveFavorites();
+        }
+    }
+
+    private void removeFromFavorites(String serviceId) {
+        String[] entries = favorites.split(":");
+        StringBuilder sb = new StringBuilder();
+        ComponentName target = ComponentName.unflattenFromString(serviceId);
+        for (String entry : entries) {
+            if (entry.isEmpty()) continue;
+            ComponentName cn = ComponentName.unflattenFromString(entry);
+            if (target != null && target.equals(cn)) continue;
+            if (sb.length() > 0) sb.append(":");
+            sb.append(entry);
+        }
+        favorites = sb.toString();
+        saveFavorites();
+    }
+
+    private void showAddFavoritesDialog() {
+        if (tmp == null || tmp.isEmpty()) return;
+
+        final String[] items = new String[tmp.size()];
+        final boolean[] checked = new boolean[tmp.size()];
+        final String[] serviceIds = new String[tmp.size()];
+
+        for (int i = 0; i < tmp.size(); i++) {
+            AccessibilityServiceInfo info = tmp.get(i);
+            String rawName = normalizeServiceId(info.getId());
+            serviceIds[i] = rawName;
+
+            String[] parts = rawName.split("/");
+            String label;
+            try {
+                String packageName = parts[0];
+                String serviceName = parts.length > 1 ? parts[1] : "";
+                String appLabel = String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)));
+                if (!serviceName.isEmpty()) {
+                    android.content.pm.ServiceInfo si = pm.getServiceInfo(
+                            new ComponentName(packageName, serviceName),
+                            PackageManager.MATCH_DEFAULT_ONLY);
+                    String svcLabel = si.loadLabel(pm).toString();
+                    label = appLabel.equals(svcLabel) ? appLabel : appLabel + "/" + svcLabel;
+                } else {
+                    label = appLabel;
+                }
+            } catch (Exception e) {
+                label = parts.length > 1 ? parts[1] : parts[0];
+            }
+            items[i] = label;
+            checked[i] = isServiceFavorite(rawName);
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("添加收藏")
+                .setMultiChoiceItems(items, checked, (dialog, which, isChecked) -> {
+                    if (isChecked) {
+                        addToFavorites(serviceIds[which]);
+                    } else {
+                        removeFromFavorites(serviceIds[which]);
+                    }
+                })
+                .setPositiveButton("确定", (dialog, which) -> {
+                    // 如果当前在收藏 Tab，刷新列表
+                    if (mIsFavoritesTab) {
+                        switchToTab(true);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .create()
+                .show();
+    }
+
 
     //返回键退出APP，用于适配安卓12和高于12的系统上返回键默认仅把APP放后台的问题。
     @Override
@@ -448,6 +636,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        // 保存当前 Tab 状态
+        sp.edit().putBoolean("favorites_tab_active", mIsFavoritesTab).apply();
     }
 
     @Override
@@ -1160,9 +1350,17 @@ public class MainActivity extends Activity {
                 }
             });
             String finalServiceLabel = ServiceLabel;
-            convertView.setOnLongClickListener(new View.OnLongClickListener() {
-                @Override
-                public boolean onLongClick(View view) {
+            if (mIsFavoritesTab) {
+                // 收藏 Tab：长按取消收藏
+                convertView.setOnLongClickListener(v -> {
+                    removeFromFavorites(serviceName);
+                    Toast.makeText(MainActivity.this, "已取消收藏" + finalServiceLabel, Toast.LENGTH_SHORT).show();
+                    switchToTab(true);
+                    return true;
+                });
+            } else {
+                // 全部服务 Tab：长按置顶/取消置顶
+                convertView.setOnLongClickListener(v -> {
                     if (!containsService(top, serviceName)) {
                         top = serviceName + ":" + top;
                         Toast.makeText(MainActivity.this, "已将" + finalServiceLabel + "置顶", Toast.LENGTH_SHORT).show();
@@ -1180,15 +1378,16 @@ public class MainActivity extends Activity {
                     }
                     sp.edit().putString("top", top).apply();
                     Sort();
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
+                    runOnUiThread(() -> {
+                        if (mIsFavoritesTab) {
+                            switchToTab(true);
+                        } else {
                             listView.setAdapter(new adapter(tmp));
                         }
                     });
                     return true;
-                }
-            });
+                });
+            }
             if (top.contains(serviceName))
                 holder.pinIndicator.setVisibility(View.VISIBLE);
             else
@@ -1381,10 +1580,18 @@ public class MainActivity extends Activity {
         if (requestCode == REQUEST_SETTINGS) {
             // 从设置页面返回，刷新相关状态
             updateToolbarMenu();
+            favorites = sp.getString("favorites", "");
             daemon = sp.getString("daemon", "");
             top = sp.getString("top", "");
             Sort();
-            runOnUiThread(() -> listView.setAdapter(new adapter(tmp)));
+            runOnUiThread(() -> {
+                // 刷新当前 Tab
+                if (mIsFavoritesTab) {
+                    switchToTab(true);
+                } else {
+                    listView.setAdapter(new adapter(tmp));
+                }
+            });
         }
     }
 
