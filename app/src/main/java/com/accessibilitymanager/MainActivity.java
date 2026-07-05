@@ -515,8 +515,13 @@ public class MainActivity extends Activity {
             fabAdd.setTranslationY(0);
             fabAdd.setAlpha(1f);
             mFabHidden = false;
+            listView.setClipToPadding(false);
+            int paddingBottom = (int) (64 * getResources().getDisplayMetrics().density + 0.5f);
+            listView.setPaddingRelative(listView.getPaddingStart(), listView.getPaddingTop(), listView.getPaddingEnd(), paddingBottom);
         } else {
             fabAdd.setVisibility(View.GONE);
+            listView.setClipToPadding(true);
+            listView.setPaddingRelative(listView.getPaddingStart(), listView.getPaddingTop(), listView.getPaddingEnd(), 0);
         }
 
         // 更新底部提示文本

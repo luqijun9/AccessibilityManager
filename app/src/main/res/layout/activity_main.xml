@@ -73,9 +73,7 @@
                 android:layout_height="match_parent"
                 android:divider="@null"
                 android:dividerHeight="0dp"
-                android:scrollbarStyle="outsideOverlay"
-                android:clipToPadding="false"
-                android:paddingBottom="64dp" />
+                android:scrollbarStyle="outsideOverlay" />
 
             <TextView
                 android:id="@+id/empty_view"
