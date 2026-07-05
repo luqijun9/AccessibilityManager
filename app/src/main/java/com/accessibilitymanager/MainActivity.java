@@ -66,7 +66,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 import android.util.Log;
@@ -97,6 +99,7 @@ public class MainActivity extends Activity {
     private String favorites = "";
     private List<AccessibilityServiceInfo> mFavoritesList;
     private TextView mPinHint;
+    private final Map<String, ServiceCache> mServiceCache = new HashMap<>();
 
     LinearLayout batteryWarning;//电池警告布局
     TextView batteryWarningText;//电池警告文本
@@ -412,6 +415,22 @@ public class MainActivity extends Activity {
         for (AccessibilityServiceInfo info : l) {
             if (userOnly && !isUserApp(info)) continue;
             tmp.add(info);
+            // 预加载应用信息到缓存
+            String sid = normalizeServiceId(info.getId());
+            if (!mServiceCache.containsKey(sid)) {
+                String[] parts = Pattern.compile("/").split(sid);
+                if (parts.length >= 2) {
+                    try {
+                        Drawable icon = pm.getApplicationIcon(parts[0]);
+                        CharSequence pkgLabel = pm.getApplicationLabel(pm.getApplicationInfo(parts[0], PackageManager.GET_META_DATA));
+                        String packagelabel = pkgLabel != null ? pkgLabel.toString() : parts[0];
+                        String svcLabel = pm.getServiceInfo(new ComponentName(parts[0], parts[1]), PackageManager.MATCH_DEFAULT_ONLY).loadLabel(pm).toString();
+                        String desc = info.loadDescription(pm);
+                        mServiceCache.put(sid, new ServiceCache(icon, packagelabel, svcLabel, desc));
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
         }
         final String currentSetting = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         Collections.sort(tmp, new Comparator<AccessibilityServiceInfo>() {
@@ -1169,12 +1188,21 @@ public class MainActivity extends Activity {
             String Packagelabel = null;
             String ServiceLabel = null;
             String Description = null;
-            try {
-                icon = pm.getApplicationIcon(packageName[0]);
-                Packagelabel = String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(packageName[0], PackageManager.GET_META_DATA)));
-                ServiceLabel = pm.getServiceInfo(new ComponentName(packageName[0], packageName[1]), PackageManager.MATCH_DEFAULT_ONLY).loadLabel(pm).toString();
-                Description = info.loadDescription(pm);
-            } catch (PackageManager.NameNotFoundException ignored) {
+            ServiceCache cache = mServiceCache.get(serviceName);
+            if (cache != null) {
+                icon = cache.icon;
+                Packagelabel = cache.packageLabel;
+                ServiceLabel = cache.serviceLabel;
+                Description = cache.description;
+            } else {
+                // 缓存未命中时回退到原始加载
+                try {
+                    icon = pm.getApplicationIcon(packageName[0]);
+                    Packagelabel = String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(packageName[0], PackageManager.GET_META_DATA)));
+                    ServiceLabel = pm.getServiceInfo(new ComponentName(packageName[0], packageName[1]), PackageManager.MATCH_DEFAULT_ONLY).loadLabel(pm).toString();
+                    Description = info.loadDescription(pm);
+                } catch (PackageManager.NameNotFoundException ignored) {
+                }
             }
             if (ServiceLabel == null) ServiceLabel = Packagelabel;
             holder.imageView.setImageDrawable(icon);
@@ -1445,7 +1473,20 @@ public class MainActivity extends Activity {
             View pinIndicator;
         }
 
+    }
 
+    static class ServiceCache {
+        Drawable icon;
+        String packageLabel;
+        String serviceLabel;
+        String description;
+
+        ServiceCache(Drawable icon, String packageLabel, String serviceLabel, String description) {
+            this.icon = icon;
+            this.packageLabel = packageLabel;
+            this.serviceLabel = serviceLabel;
+            this.description = description;
+        }
     }
 
     private void showNotifyCustomDialog() {
