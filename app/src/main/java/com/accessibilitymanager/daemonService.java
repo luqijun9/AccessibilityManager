@@ -683,7 +683,7 @@ public class daemonService extends Service {
 
         // ★ 先无条件取消旧定时器，避免更新/重启后残留定时器触发
         // 即使 daemon 为空也执行 cancel，防止旧 PendingIntent 残留
-        TimerReceiver.cancel(this);
+        TimerReceiver.cancel(this, "服务启动清理");
         // TimerReceiver 调度（内部会根据 periodic_check 开关决定是否设置新定时器）
         new Thread(() -> TimerReceiver.scheduleNext(daemonService.this)).start();
 
@@ -722,7 +722,7 @@ public class daemonService extends Service {
         Log.d("AM_DIAG", "[daemonService] onDestroy 开始, pid=" + android.os.Process.myPid());
         super.onDestroy();
         cancelPostFixCheck();
-        TimerReceiver.cancel(this);
+        TimerReceiver.cancel(this, "服务销毁");
         try { unregisterReceiver(myReceiver); } catch (Exception ignored) { }
         if (mContentOb != null) {
             try { getContentResolver().unregisterContentObserver(mContentOb); } catch (Exception ignored) { }

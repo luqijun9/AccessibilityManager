@@ -1348,7 +1348,7 @@ public class MainActivity extends Activity {
                     return;
                 }
                 sp.edit().putInt("periodic_check_interval", minutes).apply();
-                TimerReceiver.cancel(MainActivity.this);
+                TimerReceiver.cancel(MainActivity.this, "检测间隔变更");
                 LogUtil.log(MainActivity.this, "[定时检测] 已取消旧定时");
                 TimerReceiver.scheduleNext(MainActivity.this);
                 LogUtil.log(MainActivity.this, "[定时检测] 已设置新间隔 = " + minutes + " 分钟");
