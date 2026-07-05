@@ -16,6 +16,7 @@
     <uses-sdk tools:overrideLibrary="rikka.shizuku.provider,rikka.shizuku.api,rikka.shizuku.shared,rikka.shizuku.aidl" />
 
     <application
+        android:name=".App"
         android:icon="@mipmap/icon"
         android:label="无障碍管理器"
         android:theme="@style/AppTheme">

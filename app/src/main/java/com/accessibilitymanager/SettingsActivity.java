@@ -11,7 +11,6 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
-import android.os.PowerManager;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.InputType;
@@ -812,16 +811,10 @@ public class SettingsActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        MainActivity.sIsForeground = true;
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-        boolean interactive = pm != null && pm.isInteractive();
-        if (pm == null || interactive) {
-            MainActivity.sIsForeground = false;
-        }
     }
 }

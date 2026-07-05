@@ -448,20 +448,11 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
-        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-        boolean interactive = pm != null && pm.isInteractive();
-        // 屏幕关闭（锁屏/按电源键）不属于真正的后台
-        // 只有在屏幕亮着时用户切换到其他应用才算后台
-        if (pm == null || interactive) {
-            sIsForeground = false;
-        }
-        // 如果屏幕关闭（锁屏中），保持 sIsForeground = true
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        sIsForeground = true;
         checkBatteryOptimization();
         if (sp.getBoolean("auto_update", true)) {
             long lastCheckTime = sp.getLong("last_update_check_time", 0);
