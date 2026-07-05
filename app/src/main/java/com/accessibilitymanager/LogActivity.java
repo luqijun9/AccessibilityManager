@@ -8,6 +8,7 @@ import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.style.ForegroundColorSpan;
@@ -122,11 +123,18 @@ public class LogActivity extends Activity {
     protected void onPause() {
         super.onPause();
         stopListening();
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        boolean interactive = pm != null && pm.isInteractive();
+        // 屏幕关闭（锁屏中）不属于真正的后台，保持 sIsForeground = true
+        if (pm == null || interactive) {
+            MainActivity.sIsForeground = false;
+        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        MainActivity.sIsForeground = true;
         // 重新加载（可能跨天）
         loadLogs();
         startListening();
