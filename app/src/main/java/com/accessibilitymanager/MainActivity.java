@@ -1032,9 +1032,6 @@ public class MainActivity extends Activity {
         mSearchView = null;
         mSearchInput = null;
 
-        //恢复标题
-        toolbar.setTitle(getTitle());
-
         //恢复菜单项
         if (mMenu != null) {
             mMenu.findItem(R.id.search).setVisible(true);
@@ -1045,7 +1042,24 @@ public class MainActivity extends Activity {
 
         //刷新排序并恢复完整列表
         Sort();
-        listView.setAdapter(new adapter(tmp));
+        if (mIsFavoritesTab) {
+            // 收藏 Tab → 恢复收藏列表
+            List<AccessibilityServiceInfo> favList = new ArrayList<>();
+            for (AccessibilityServiceInfo info : tmp) {
+                if (isServiceFavorite(normalizeServiceId(info.getId()))) {
+                    favList.add(info);
+                }
+            }
+            mFavoritesList = favList;
+            listView.setAdapter(new adapter(mFavoritesList));
+            if (mFavoritesList.isEmpty()) {
+                ((TextView) findViewById(R.id.empty_view)).setText("还没有收藏的服务\n点击右下角 + 添加");
+            } else {
+                ((TextView) findViewById(R.id.empty_view)).setText("未找到结果");
+            }
+        } else {
+            listView.setAdapter(new adapter(tmp));
+        }
         mFilteredList = null;
 
         //隐藏键盘
@@ -1064,16 +1078,30 @@ public class MainActivity extends Activity {
     };
 
     private void filterServices(String query) {
+        // 根据当前 Tab 确定搜索源
+        List<AccessibilityServiceInfo> source;
+        if (mIsFavoritesTab) {
+            // 收藏 Tab → 只在已收藏服务中搜索
+            source = new ArrayList<>();
+            for (AccessibilityServiceInfo info : tmp) {
+                if (isServiceFavorite(normalizeServiceId(info.getId()))) {
+                    source.add(info);
+                }
+            }
+        } else {
+            source = tmp;
+        }
+
         if (query.isEmpty()) {
-            listView.setAdapter(new adapter(tmp));
             mFilteredList = null;
+            listView.setAdapter(new adapter(source));
             return;
         }
 
         mFilteredList = new ArrayList<>();
         String lowerQuery = query.toLowerCase();
 
-        for (AccessibilityServiceInfo info : tmp) {
+        for (AccessibilityServiceInfo info : source) {
             String rawName = info.getId();
             String[] parts = rawName.split("/");
             if (parts.length < 1) continue;

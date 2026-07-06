@@ -6,3 +6,5 @@ local.properties
 *.iml
 app/release
 /.vscode/settings.json
+mtcr_diff.py
+debug-crash-detection-missing-log.md
