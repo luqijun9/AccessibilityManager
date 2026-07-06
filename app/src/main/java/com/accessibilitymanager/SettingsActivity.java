@@ -716,13 +716,10 @@ public class SettingsActivity extends Activity {
                 .create();
         updateDialog.show();
 
-        updateLater.setOnClickListener(v -> {
-            sp.edit().putString("skipped_update_version", versionName).apply();
-            updateDialog.dismiss();
-        });
+        updateLater.setText("暂不更新");
+        updateLater.setOnClickListener(v -> updateDialog.dismiss());
         updateNow.setOnClickListener(v -> {
             updateDialog.dismiss();
-            sp.edit().remove("skipped_update_version").apply();
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl));
             try {
                 startActivity(intent);
