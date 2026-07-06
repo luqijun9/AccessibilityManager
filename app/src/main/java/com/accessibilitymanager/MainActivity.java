@@ -92,6 +92,7 @@ public class MainActivity extends Activity {
     private boolean listenerAdded = false;//是否添加了内容监视器
     private boolean mPendingCrashFixRequest = false;//是否有待处理的崩溃修复请求
     private static final int REQUEST_SETTINGS = 1001;
+    private long mLastAutoUpdateCheckTime = 0;
 
     // 收藏相关
     private ImageButton fabAdd;
@@ -735,10 +736,14 @@ public class MainActivity extends Activity {
         super.onResume();
         checkBatteryOptimization();
         if (sp.getBoolean("auto_update", true)) {
+            long now = System.currentTimeMillis();
+            if (now - mLastAutoUpdateCheckTime < 10_000) {
+                return; // 10秒内防重复
+            }
+            mLastAutoUpdateCheckTime = now;
             long lastCheckTime = sp.getLong("last_update_check_time", 0);
             long currentTime = System.currentTimeMillis();
-            LogUtil.log(this, "[自动更新] 上次检测时间戳=" + lastCheckTime
-                    + ", 距上次已过=" + ((currentTime - lastCheckTime) / 1000 / 60) + "分钟");
+            long minutesSinceLastCheck = (currentTime - lastCheckTime) / 1000 / 60;
             if (currentTime - lastCheckTime > 24 * 60 * 60 * 1000) {
                 LogUtil.log(this, "[自动更新] 距上次检测超过24小时，开始检测更新");
                 UpdateChecker.checkForUpdate(MainActivity.this, new UpdateChecker.UpdateListener() {
@@ -766,7 +771,7 @@ public class MainActivity extends Activity {
                 sp.edit().putLong("last_update_check_time", currentTime).apply();
                 LogUtil.log(this, "[自动更新] 已更新上次检测时间戳=" + currentTime);
             } else {
-                LogUtil.log(this, "[自动更新] 距上次检测不足24小时，跳过本次检测");
+                // 距上次检测不足24小时，跳过本次检测（不输出日志）
             }
         }
         // ── 检查解锁检测重复触发提示 ──
