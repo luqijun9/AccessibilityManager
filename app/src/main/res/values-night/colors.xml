@@ -7,4 +7,5 @@
     <color name="text_secondary">#9E9E9E</color>
     <color name="text_hint">#666666</color>
     <color name="divider">#2C2C2C</color>
+    <color name="popup_bg">#2A2A2A</color>
 </resources>

@@ -19,6 +19,7 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.database.ContentObserver;
+import android.content.res.TypedArray;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
@@ -48,6 +49,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.AbsListView;
+import android.widget.PopupWindow;
 import android.widget.CompoundButton;
 import android.widget.ScrollView;
 import android.widget.Button;
@@ -91,8 +93,7 @@ public class MainActivity extends Activity {
     private boolean mPendingCrashFixRequest = false;//是否有待处理的崩溃修复请求
     private static final int REQUEST_SETTINGS = 1001;
 
-    // 底栏 Tab & 收藏相关
-    private TextView tabAll, tabFavorites;
+    // 收藏相关
     private ImageButton fabAdd;
     private boolean mIsFavoritesTab = false;
     private boolean mFabHidden = false;
@@ -100,6 +101,8 @@ public class MainActivity extends Activity {
     private List<AccessibilityServiceInfo> mFavoritesList;
     private TextView mPinHint;
     private final Map<String, ServiceCache> mServiceCache = new HashMap<>();
+    private View mTitleView;
+    private TextView mTitleText;
 
     LinearLayout batteryWarning;//电池警告布局
     TextView batteryWarningText;//电池警告文本
@@ -160,8 +163,7 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
 
         toolbar = findViewById(R.id.toolbar);
-        toolbar.setTitle("无障碍管理");
-        toolbar.setTitleTextColor(night ? Color.WHITE : Color.BLACK);
+        setupToolbarTitle();
         toolbar.setPaddingRelative(
                 toolbar.getPaddingStart(),
                 toolbar.getPaddingTop(),
@@ -392,13 +394,8 @@ public class MainActivity extends Activity {
 
         checkBatteryOptimization();
 
-        // ── 底栏 Tab & FAB 初始化 ──
-        tabAll = findViewById(R.id.tab_all);
-        tabFavorites = findViewById(R.id.tab_favorites);
+        // ── FAB 初始化 ──
         fabAdd = findViewById(R.id.fab_add);
-
-        findViewById(R.id.tab_all_container).setOnClickListener(v -> switchToTab(false));
-        findViewById(R.id.tab_favorites_container).setOnClickListener(v -> switchToTab(true));
         fabAdd.setOnClickListener(v -> showAddFavoritesDialog());
 
         favorites = sp.getString("favorites", "");
@@ -506,7 +503,7 @@ public class MainActivity extends Activity {
 
     private void switchToTab(boolean isFavorites) {
         mIsFavoritesTab = isFavorites;
-        updateTabStyles();
+        updateTitleView();
 
         // 重置 FAB 状态
         if (isFavorites) {
@@ -554,21 +551,80 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void updateTabStyles() {
-        int activeColor = getResources().getColor(R.color.bg);
-        int inactiveColor = getResources().getColor(R.color.text_hint);
-        tabAll.setTextColor(mIsFavoritesTab ? inactiveColor : activeColor);
-        tabFavorites.setTextColor(mIsFavoritesTab ? activeColor : inactiveColor);
+    private void updateTitleView() {
+        int textColor = night ? Color.WHITE : Color.BLACK;
+        mTitleText.setText(mIsFavoritesTab ? "收藏" : "全部");
+        mTitleText.setTextColor(textColor);
+        Drawable icon = getResources().getDrawable(mIsFavoritesTab ? R.drawable.ic_star : R.drawable.ic_grid).mutate();
+        icon.setColorFilter(textColor, android.graphics.PorterDuff.Mode.SRC_IN);
+        mTitleText.setCompoundDrawablesRelativeWithIntrinsicBounds(icon, null, null, null);
+    }
 
-        // 更新 Tab 图标颜色
-        Drawable allIcon = tabAll.getCompoundDrawablesRelative()[0];
-        Drawable favIcon = tabFavorites.getCompoundDrawablesRelative()[0];
-        if (allIcon != null) {
-            allIcon.mutate().setTint(mIsFavoritesTab ? inactiveColor : activeColor);
+    private void setupToolbarTitle() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.HORIZONTAL);
+        layout.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        layout.setClickable(true);
+        layout.setFocusable(true);
+        TypedArray ta = getTheme().obtainStyledAttributes(new int[]{android.R.attr.selectableItemBackground});
+        Drawable bg = ta.getDrawable(0);
+        ta.recycle();
+        layout.setBackground(bg);
+
+        mTitleText = new TextView(this);
+        mTitleText.setTextSize(18);
+        mTitleText.setIncludeFontPadding(false);
+        mTitleText.setCompoundDrawablePadding((int) (6 * getResources().getDisplayMetrics().density + 0.5f));
+        mTitleText.setPaddingRelative(0, 0, (int) (4 * getResources().getDisplayMetrics().density + 0.5f), 0);
+
+        ImageView arrowDown = new ImageView(this);
+        int arrowSize = (int) (16 * getResources().getDisplayMetrics().density + 0.5f);
+        arrowDown.setLayoutParams(new LinearLayout.LayoutParams(arrowSize, arrowSize));
+        arrowDown.setImageResource(R.drawable.ic_arrow_down);
+        arrowDown.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        int arrowMargin = (int) (2 * getResources().getDisplayMetrics().density + 0.5f);
+        ((LinearLayout.LayoutParams) arrowDown.getLayoutParams()).setMarginStart(arrowMargin);
+
+        updateTitleView();
+
+        layout.addView(mTitleText);
+        layout.addView(arrowDown);
+
+        layout.setOnClickListener(v -> showTabSwitcherPopup(v));
+
+        toolbar.addView(layout, new Toolbar.LayoutParams(
+                Toolbar.LayoutParams.WRAP_CONTENT,
+                Toolbar.LayoutParams.WRAP_CONTENT,
+                android.view.Gravity.START
+        ));
+
+        mTitleView = layout;
+    }
+
+    private void showTabSwitcherPopup(View anchor) {
+        View contentView = getLayoutInflater().inflate(R.layout.popup_tab_switcher, null);
+        PopupWindow popup = new PopupWindow(contentView,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                true);
+        popup.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
+        popup.setElevation(8);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            contentView.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
         }
-        if (favIcon != null) {
-            favIcon.mutate().setTint(mIsFavoritesTab ? activeColor : inactiveColor);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            popup.setEnterTransition(new android.transition.Fade());
         }
+        popup.showAsDropDown(anchor, 0, (int) (8 * getResources().getDisplayMetrics().density + 0.5f));
+
+        contentView.findViewById(R.id.item_all).setOnClickListener(v -> {
+            switchToTab(false);
+            popup.dismiss();
+        });
+        contentView.findViewById(R.id.item_fav).setOnClickListener(v -> {
+            switchToTab(true);
+            popup.dismiss();
+        });
     }
 
     private boolean isServiceFavorite(String serviceId) {
