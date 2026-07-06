@@ -165,7 +165,6 @@ public class daemonService extends Service {
         String systemAppLabel = getSystemAppChangeLabel(oldValue, currentSetting);
         boolean ignoreSystemChange = sp.getBoolean("ignore_system_crash_trigger", true);
         if (systemAppLabel != null && ignoreSystemChange) {
-            LogUtil.log(daemonService.this, "忽略" + systemAppLabel + "的服务变化，不触发检测");
             return;
         }
         crashCheckExecutor.submit(() -> checkCrashedServicesInternal("服务变化"));
