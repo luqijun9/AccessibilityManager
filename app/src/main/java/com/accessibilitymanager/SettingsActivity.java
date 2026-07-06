@@ -716,9 +716,13 @@ public class SettingsActivity extends Activity {
                 .create();
         updateDialog.show();
 
-        updateLater.setOnClickListener(v -> updateDialog.dismiss());
+        updateLater.setOnClickListener(v -> {
+            sp.edit().putString("skipped_update_version", versionName).apply();
+            updateDialog.dismiss();
+        });
         updateNow.setOnClickListener(v -> {
             updateDialog.dismiss();
+            sp.edit().remove("skipped_update_version").apply();
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl));
             try {
                 startActivity(intent);

@@ -102,7 +102,7 @@ public class daemonService extends Service {
         // 保活逻辑：如果设置变化，刷新已安装列表并执行保活
         if (settingChanged) {
             refreshInstalledServiceList();
-            doDaemonImpl(currentSetting);
+            doDaemon(currentSetting);
         }
 
         // 崩溃检测逻辑
@@ -154,7 +154,7 @@ public class daemonService extends Service {
 
         if (settingChanged) {
             refreshInstalledServiceList();
-            doDaemonImpl(currentSetting);
+            doDaemon(currentSetting);
         }
 
         if (mIsFixing && System.currentTimeMillis() - mLastFixStartTime <= 5000) {

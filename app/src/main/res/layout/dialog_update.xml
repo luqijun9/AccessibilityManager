@@ -89,7 +89,7 @@
             android:layout_width="0dp"
             android:layout_height="44dp"
             android:layout_weight="1"
-            android:text="稍后更新"
+            android:text="忽略此版本"
             android:textColor="@color/text_secondary"
             android:textSize="16sp"
             android:background="@null"

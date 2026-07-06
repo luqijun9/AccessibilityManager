@@ -681,25 +681,36 @@ public class MainActivity extends Activity {
         if (sp.getBoolean("auto_update", true)) {
             long lastCheckTime = sp.getLong("last_update_check_time", 0);
             long currentTime = System.currentTimeMillis();
+            LogUtil.log(this, "[自动更新] 上次检测时间戳=" + lastCheckTime
+                    + ", 距上次已过=" + ((currentTime - lastCheckTime) / 1000 / 60) + "分钟");
             if (currentTime - lastCheckTime > 24 * 60 * 60 * 1000) {
+                LogUtil.log(this, "[自动更新] 距上次检测超过24小时，开始检测更新");
                 UpdateChecker.checkForUpdate(MainActivity.this, new UpdateChecker.UpdateListener() {
                     @Override
                     public void onUpdateAvailable(String versionName, String downloadUrl, String releaseNotes) {
                         String skippedVersion = sp.getString("skipped_update_version", "");
                         if (!versionName.equals(skippedVersion)) {
+                            LogUtil.log(MainActivity.this, "[自动更新] 发现新版本: " + versionName);
                             showUpdateDialog(versionName, downloadUrl, releaseNotes);
+                        } else {
+                            LogUtil.log(MainActivity.this, "[自动更新] 发现新版本 " + versionName + " 但已被跳过，不显示弹窗");
                         }
                     }
 
                     @Override
                     public void onNoUpdate() {
+                        LogUtil.log(MainActivity.this, "[自动更新] 当前已是最新版本");
                     }
 
                     @Override
                     public void onError(String errorMessage) {
+                        LogUtil.log(MainActivity.this, "[自动更新] 检测失败: " + errorMessage);
                     }
                 });
                 sp.edit().putLong("last_update_check_time", currentTime).apply();
+                LogUtil.log(this, "[自动更新] 已更新上次检测时间戳=" + currentTime);
+            } else {
+                LogUtil.log(this, "[自动更新] 距上次检测不足24小时，跳过本次检测");
             }
         }
         // ── 检查解锁检测重复触发提示 ──
