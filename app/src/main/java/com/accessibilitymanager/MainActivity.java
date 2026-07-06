@@ -615,7 +615,7 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             popup.setEnterTransition(new android.transition.Fade());
         }
-        popup.showAsDropDown(anchor, 0, (int) (8 * getResources().getDisplayMetrics().density + 0.5f));
+        popup.showAsDropDown(anchor, (int) (-10 * getResources().getDisplayMetrics().density + 0.5f), (int) (8 * getResources().getDisplayMetrics().density + 0.5f));
 
         contentView.findViewById(R.id.item_all).setOnClickListener(v -> {
             switchToTab(false);
