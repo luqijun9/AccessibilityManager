@@ -302,12 +302,6 @@ public class daemonService extends Service {
             tmpSettingValue = add + s;
             Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
             final String text = add1.toString();
-            mHandler.post(() -> {
-                if (!sp.getBoolean("keep_custom_notify", false)) {
-                    notification.setContentText(text + new SimpleDateFormat("时间：H:mm:ss", Locale.getDefault()).format(Calendar.getInstance().getTime())).setContentTitle("已保活以下无障碍服务：");
-                    systemService.notify(1, notification.build());
-                }
-            });
             LogUtil.log(daemonService.this, "[保活] 已重新开启被关闭的服务：" + add1.toString().replace("\n", " "));
         } else {
             tmpSettingValue = s;
@@ -578,14 +572,7 @@ public class daemonService extends Service {
             try { Thread.sleep(300); } catch (InterruptedException ignored) { }
         }
 
-        mHandler.post(() -> {
-            if (!sp.getBoolean("keep_custom_notify", false)) {
-                notification.setContentText("已重启崩溃服务：" + packageLabel + "\n"
-                                + new SimpleDateFormat("时间：H:mm:ss", Locale.getDefault()).format(Calendar.getInstance().getTime()))
-                        .setContentTitle("无障碍保活");
-                systemService.notify(1, notification.build());
-            }
-        });
+        // 不再显示崩溃重启通知
 
         mIsFixing = false;
         // force-stop/putString 会触发 ContentObserver → doDaemonImpl 保活，

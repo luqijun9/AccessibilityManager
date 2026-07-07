@@ -39,7 +39,7 @@ public class SettingsActivity extends Activity {
     // 子项视图引用
     private Switch switchBoot, switchToast, switchUserOnly, switchHide, switchDelayDaemon;
     private Switch switchCrashFix, switchUnlockCrashCheck, switchFixMode;
-    private Switch switchPeriodicCheck, switchIgnoreSystemCrash, switchKeepCustomNotify;
+    private Switch switchPeriodicCheck, switchIgnoreSystemCrash;
     private Switch switchAutoUpdate;
     private TextView intervalLabel, notifyCustomBtn, crashTutorialBtn, aboutBtn, checkUpdateBtn;
 
@@ -170,7 +170,6 @@ public class SettingsActivity extends Activity {
         switchFixMode = findViewById(R.id.fixmode);
         switchPeriodicCheck = findViewById(R.id.periodic_check);
         switchIgnoreSystemCrash = findViewById(R.id.ignore_system_crash);
-        switchKeepCustomNotify = findViewById(R.id.keep_custom_notify);
         switchAutoUpdate = findViewById(R.id.auto_update);
         intervalLabel = findViewById(R.id.periodic_interval_label);
         notifyCustomBtn = findViewById(R.id.notify_custom_btn);
@@ -191,7 +190,6 @@ public class SettingsActivity extends Activity {
         switchFixMode.setChecked(sp.getBoolean("fixmode", false));
         switchPeriodicCheck.setChecked(sp.getBoolean("periodic_check", false));
         switchIgnoreSystemCrash.setChecked(sp.getBoolean("ignore_system_crash_trigger", true));
-        switchKeepCustomNotify.setChecked(sp.getBoolean("keep_custom_notify", false));
         intervalLabel.setText(sp.getInt("periodic_check_interval", 10) + "分钟");
 
         refreshCrashFixDependent();
@@ -383,13 +381,6 @@ public class SettingsActivity extends Activity {
 
         switchIgnoreSystemCrash.setOnCheckedChangeListener((btn, checked) ->
                 sp.edit().putBoolean("ignore_system_crash_trigger", checked).apply());
-
-        switchKeepCustomNotify.setOnCheckedChangeListener((btn, checked) -> {
-            sp.edit().putBoolean("keep_custom_notify", checked).apply();
-            if (checked) {
-                Toast.makeText(SettingsActivity.this, "重启服务生效", Toast.LENGTH_SHORT).show();
-            }
-        });
 
         intervalLabel.setOnClickListener(v -> {
             if (!switchPeriodicCheck.isChecked()) return;
