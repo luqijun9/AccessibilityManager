@@ -365,7 +365,7 @@ public class MainActivity extends Activity {
 
         } else {
             String pkg = getPackageName();
-            String grantCmd = "pm grant " + pkg + " android.permission.WRITE_SECURE_SETTINGS && pm grant " + pkg + " android.permission.DUMP";
+            String grantCmd = "pm grant " + pkg + " android.permission.WRITE_SECURE_SETTINGS; pm grant " + pkg + " android.permission.DUMP";
             String adbCmd = "adb shell \"" + grantCmd + "\"";
             new AlertDialog.Builder(this).setMessage("您的设备尚未启用无障碍服务功能。您可以选择在系统设置-无障碍-打开或关闭任意服务项来激活系统的无障碍服务功能，也可以授权本APP所需权限以解决。\n\n如需授权，请选以下方式之一：\n1.连接电脑USB调试后在电脑CMD执行以下命令：\n" + adbCmd + "\n\n2.root激活。\n\n3.Shizuku激活。")
                     .setTitle("需要授予权限")
@@ -858,7 +858,7 @@ public class MainActivity extends Activity {
         if (checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
                 && checkSelfPermission("android.permission.DUMP") == PackageManager.PERMISSION_GRANTED)
             return;
-        String grantBoth = "pm grant " + getPackageName() + " android.permission.WRITE_SECURE_SETTINGS && pm grant " + getPackageName() + " android.permission.DUMP";
+        String grantBoth = "pm grant " + getPackageName() + " android.permission.WRITE_SECURE_SETTINGS; pm grant " + getPackageName() + " android.permission.DUMP";
         boolean b = true, c = false;
         try {
             if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED)
@@ -1756,7 +1756,7 @@ public class MainActivity extends Activity {
         private void createPermissionDialog() {
             String pkg = getPackageName();
             String cmd = "adb shell \"pm grant " + pkg + " android.permission.WRITE_SECURE_SETTINGS && pm grant " + pkg + " android.permission.DUMP\"";
-            String rootCmd = "pm grant " + pkg + " android.permission.WRITE_SECURE_SETTINGS && pm grant " + pkg + " android.permission.DUMP";
+            String rootCmd = "pm grant " + pkg + " android.permission.WRITE_SECURE_SETTINGS; pm grant " + pkg + " android.permission.DUMP";
             new AlertDialog.Builder(MainActivity.this)
                     .setMessage("安卓5.1和更低版本的设备，需将本APP转换为系统应用。\n\n安卓6.0及更高版本的设备，在下面三个方法中任选一个均可：\n1.连接电脑USB调试后在电脑CMD执行以下命令：\n" + cmd + "\n\n2.root激活。\n\n3.Shizuku激活。")
                     .setTitle("需要授予权限")
