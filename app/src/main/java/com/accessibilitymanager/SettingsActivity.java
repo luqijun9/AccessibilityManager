@@ -78,7 +78,9 @@ public class SettingsActivity extends Activity {
                         LogUtil.log(this, "[权限] Shizuku 已授权，启用强杀模式");
                         enableFixMode();
                     } else {
-                        Toast.makeText(this, "获取Shizuku权限失败", Toast.LENGTH_SHORT).show();
+                        ShellUtil.reset();
+                        LogUtil.log(this, "[权限] Shizuku 授权被拒绝");
+                        Toast.makeText(this, "获取Shizuku权限失败，强杀模式未开启", Toast.LENGTH_SHORT).show();
                     }
                 }
             };
@@ -607,7 +609,8 @@ public class SettingsActivity extends Activity {
     /** 显示强杀模式需要 Root/Shizuku 权限的对话框（卡片样式） */
     private void showFixModePermissionDialog() {
         boolean shizukuRunning = ShellUtil.isShizukuRunning();
-        LogUtil.log(this, "[权限] 显示强杀权限不足对话框 shizukuRunning=" + shizukuRunning);
+        boolean hasRoot = ShellUtil.hasRoot();
+        LogUtil.log(this, "[权限] 显示强杀权限不足对话框 shizukuRunning=" + shizukuRunning + " hasRoot=" + hasRoot);
 
         final android.app.Dialog permDialog = new android.app.Dialog(this);
         permDialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
@@ -638,9 +641,15 @@ public class SettingsActivity extends Activity {
         }
         ((TextView) dv.findViewById(R.id.perm_msg)).setText(msg.toString());
 
+        // 隐藏第二行的取消按钮（放在第一行与申请按钮同行）
+        dv.findViewById(R.id.perm_btn_neutral).setVisibility(View.GONE);
+
         if (shizukuRunning) {
-            // 显示 Shizuku 激活按钮
-            dv.findViewById(R.id.perm_btn_root).setVisibility(View.GONE);
+            // 第一行显示：取消 + 申请Shizuku权限
+            dv.findViewById(R.id.perm_btn_root).setVisibility(View.VISIBLE);
+            ((TextView) dv.findViewById(R.id.perm_btn_root)).setText("取消");
+            dv.findViewById(R.id.perm_btn_root).setOnClickListener(v -> permDialog.dismiss());
+
             dv.findViewById(R.id.perm_btn_shizuku).setVisibility(View.GONE);
             ((TextView) dv.findViewById(R.id.perm_btn_positive)).setText("申请Shizuku权限");
             dv.findViewById(R.id.perm_btn_positive).setOnClickListener(v -> {
@@ -656,10 +665,10 @@ public class SettingsActivity extends Activity {
                 }
                 permDialog.dismiss();
             });
-            dv.findViewById(R.id.perm_btn_neutral).setOnClickListener(v -> {
-                permDialog.dismiss();
-            });
         } else {
+            // 无任何权限时，只显示"知道了"
+            dv.findViewById(R.id.perm_btn_root).setVisibility(View.GONE);
+            dv.findViewById(R.id.perm_btn_shizuku).setVisibility(View.GONE);
             ((TextView) dv.findViewById(R.id.perm_btn_positive)).setText("知道了");
             dv.findViewById(R.id.perm_btn_positive).setOnClickListener(v -> permDialog.dismiss());
         }
