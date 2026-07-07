@@ -181,7 +181,7 @@ public class MainActivity extends Activity {
             }
             if (itemId == R.id.perm_status) {
                 if (sp.getBoolean("crashfix", false) && !ShellUtil.hasDumpPermission(this)) {
-                    showNoPermissionDialog(false);
+                    showDumpPermissionDialog();
                     return true;
                 }
                 boolean hasDump = ShellUtil.hasDumpPermission(this);
@@ -908,6 +908,96 @@ public class MainActivity extends Activity {
         if (!daemon.isEmpty()) {
             StartForeGroundDaemon();
         }
+    }
+
+    /** 显示 DUMP 权限不足的对话框（与设置页打开崩溃检测总开关时一致） */
+    private void showDumpPermissionDialog() {
+        final String pkgName = getPackageName();
+        final String cmd = "pm grant " + pkgName + " android.permission.DUMP";
+
+        final android.app.Dialog permDialog = new android.app.Dialog(this);
+        permDialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        View dv = getLayoutInflater().inflate(R.layout.dialog_permission, null);
+        permDialog.setContentView(dv);
+        android.view.Window w = permDialog.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(
+                    android.graphics.Color.TRANSPARENT));
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            int marginPx = (int) (16 * dm.density + 0.5f);
+            android.view.WindowManager.LayoutParams lp = w.getAttributes();
+            lp.width = dm.widthPixels - marginPx * 2;
+            lp.height = android.view.WindowManager.LayoutParams.WRAP_CONTENT;
+            w.setAttributes(lp);
+        }
+
+        // 设置标题
+        ((TextView) dv.findViewById(R.id.perm_title)).setText("需要授予 DUMP 权限");
+
+        // 设置消息
+        String msg = "崩溃检测需要 DUMP 权限。\n在下面三个方法中任选一个即可：\n\n"
+                + "1. 连接电脑USB调试后在电脑CMD执行以下命令：\n"
+                + "adb shell " + cmd + "\n\n"
+                + "2. Root 激活。\n\n"
+                + "3. Shizuku 激活。";
+        ((TextView) dv.findViewById(R.id.perm_msg)).setText(msg);
+
+        // 复制命令按钮
+        ((TextView) dv.findViewById(R.id.perm_btn_positive)).setText("复制命令");
+        dv.findViewById(R.id.perm_btn_positive).setOnClickListener(v -> {
+            ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE))
+                    .setPrimaryClip(ClipData.newPlainText("c", "adb shell " + cmd));
+            Toast.makeText(this, "命令已复制到剪切板", Toast.LENGTH_SHORT).show();
+            permDialog.dismiss();
+        });
+
+        // Root 激活按钮
+        dv.findViewById(R.id.perm_btn_root).setVisibility(View.VISIBLE);
+        dv.findViewById(R.id.perm_btn_root).setOnClickListener(v -> {
+            permDialog.dismiss();
+            new Thread(() -> {
+                try {
+                    Process p = Runtime.getRuntime().exec("su");
+                    DataOutputStream o = new DataOutputStream(p.getOutputStream());
+                    o.writeBytes(cmd + "\nexit\n");
+                    o.flush();
+                    o.close();
+                    p.waitFor();
+                    runOnUiThread(() -> {
+                        if (p.exitValue() == 0) {
+                            Toast.makeText(this, "成功激活", Toast.LENGTH_SHORT).show();
+                            ShellUtil.reset();
+                            updateToolbarMenu();
+                        } else {
+                            Toast.makeText(this, "激活失败", Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                } catch (Exception e) {
+                    runOnUiThread(() -> Toast.makeText(this, "激活失败", Toast.LENGTH_SHORT).show());
+                }
+            }).start();
+        });
+
+        // Shizuku 激活按钮
+        dv.findViewById(R.id.perm_btn_shizuku).setVisibility(View.VISIBLE);
+        dv.findViewById(R.id.perm_btn_shizuku).setOnClickListener(v -> {
+            permDialog.dismiss();
+            mPendingCrashFixRequest = true;
+            try {
+                Shizuku.requestPermission(0);
+            } catch (Exception e) {
+                mPendingCrashFixRequest = false;
+                Toast.makeText(this, "Shizuku权限申请失败", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        // 取消按钮 - 点击取消不会关闭崩溃修复（仅查看状态）
+        dv.findViewById(R.id.perm_btn_neutral).setOnClickListener(v -> {
+            LogUtil.log(this, "[权限] 对话框取消");
+            permDialog.dismiss();
+        });
+
+        permDialog.show();
     }
 
     private void showNoPermissionDialog(boolean closeCrashFixOnCancel) {
