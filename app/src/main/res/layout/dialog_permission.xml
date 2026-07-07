@@ -8,6 +8,7 @@
 
     <!-- 标题 -->
     <TextView
+        android:id="@+id/perm_title"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="权限不足"
@@ -51,6 +52,34 @@
             android:text="取消"
             android:textColor="@color/bg"
             android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/perm_btn_root"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="?android:attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:padding="10dp"
+            android:layout_marginLeft="8dp"
+            android:text="Root激活"
+            android:textColor="@color/bg"
+            android:textSize="15sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/perm_btn_shizuku"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="?android:attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:padding="10dp"
+            android:layout_marginLeft="8dp"
+            android:text="Shizuku激活"
+            android:textColor="@color/bg"
+            android:textSize="15sp"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/perm_btn_positive"

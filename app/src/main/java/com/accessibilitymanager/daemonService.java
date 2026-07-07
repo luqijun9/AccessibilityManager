@@ -407,6 +407,14 @@ public class daemonService extends Service {
             return;
         }
         LogUtil.log(daemonService.this, "[崩溃检测] 触发来源：" + source);
+
+        // 先检查 DUMP 权限
+        if (!ShellUtil.hasDumpPermission(this)) {
+            LogUtil.log(daemonService.this, "[崩溃检测] 未授予 DUMP 权限，跳过检测（请通过 ADB 授予：adb shell pm grant " + getPackageName() + " android.permission.DUMP）");
+            Log.d("AccMgrDebug", "[TASK-" + taskId + "] DUMP permission not granted, skip");
+            return;
+        }
+
         try {
             Log.d("AccMgrDebug", "[TASK-" + taskId + "] Executing dumpsys accessibility directly (DUMP)...");
             Process p = Runtime.getRuntime().exec("dumpsys accessibility");

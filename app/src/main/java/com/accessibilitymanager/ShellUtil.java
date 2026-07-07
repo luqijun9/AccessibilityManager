@@ -89,6 +89,32 @@ public class ShellUtil {
         return false;
     }
 
+    /** 检查 DUMP 权限是否已授予 */
+    public static boolean hasDumpPermission(android.content.Context context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            return context.checkSelfPermission("android.permission.DUMP")
+                    == PackageManager.PERMISSION_GRANTED;
+        }
+        return false;
+    }
+
+    /** 检查 WRITE_SECURE_SETTINGS 权限是否已授予 */
+    public static boolean hasWriteSecurePermission(android.content.Context context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            return context.checkSelfPermission("android.permission.WRITE_SECURE_SETTINGS")
+                    == PackageManager.PERMISSION_GRANTED;
+        }
+        try {
+            android.content.pm.ApplicationInfo ai = context.getPackageManager()
+                    .getPackageInfo(context.getPackageName(),
+                            android.content.pm.PackageManager.GET_CONFIGURATIONS)
+                    .applicationInfo;
+            return (ai.flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0;
+        } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+            return false;
+        }
+    }
+
     private static boolean checkShizuku() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {

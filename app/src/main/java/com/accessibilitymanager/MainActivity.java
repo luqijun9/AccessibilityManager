@@ -180,15 +180,21 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (itemId == R.id.perm_status) {
-                if (sp.getBoolean("crashfix", false) && !ShellUtil.hasAnyPermission()) {
+                if (sp.getBoolean("crashfix", false) && !ShellUtil.hasAnyPermission() && !ShellUtil.hasDumpPermission(this)) {
                     showNoPermissionDialog(false);
                     return true;
                 }
+                boolean hasDump = ShellUtil.hasDumpPermission(this);
                 int state = ShellUtil.getPermissionState();
-                if (state == ShellUtil.PERM_ROOT) {
-                    Toast.makeText(this, "已获取root权限", Toast.LENGTH_SHORT).show();
-                } else if (state == ShellUtil.PERM_SHIZUKU) {
-                    Toast.makeText(this, "已获取shizuku权限", Toast.LENGTH_SHORT).show();
+                StringBuilder permToast = new StringBuilder();
+                if (hasDump) permToast.append("DUMP");
+                if (hasDump && state != ShellUtil.PERM_NONE) permToast.append("+");
+                if (state == ShellUtil.PERM_ROOT) permToast.append("Root");
+                else if (state == ShellUtil.PERM_SHIZUKU) permToast.append("Shizuku");
+                if (permToast.length() > 0) {
+                    Toast.makeText(this, "已获取" + permToast.toString() + "权限", Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(this, "未获取任何权限", Toast.LENGTH_SHORT).show();
                 }
                 return true;
             }
@@ -353,7 +359,11 @@ public class MainActivity extends Activity {
             }
 
         } else {
-            new AlertDialog.Builder(this).setMessage("您的设备尚未启用无障碍服务功能。您可以选择在系统设置-无障碍-打开或关闭任意服务项来激活系统的无障碍服务功能，也可以授权本APP安全设置写入权限以解决.")
+            String pkg = getPackageName();
+            String grantCmd = "pm grant " + pkg + " android.permission.WRITE_SECURE_SETTINGS && pm grant " + pkg + " android.permission.DUMP";
+            String adbCmd = "adb shell \"" + grantCmd + "\"";
+            new AlertDialog.Builder(this).setMessage("您的设备尚未启用无障碍服务功能。您可以选择在系统设置-无障碍-打开或关闭任意服务项来激活系统的无障碍服务功能，也可以授权本APP所需权限以解决。\n\n如需授权，请选以下方式之一：\n1.连接电脑USB调试后在电脑CMD执行以下命令：\n" + adbCmd + "\n\n2.root激活。\n\n3.Shizuku激活。")
+                    .setTitle("需要授予权限")
                     .setNegativeButton("root激活", new DialogInterface.OnClickListener() {
                         @Override
                         public void onClick(DialogInterface dialogInterface, int i) {
@@ -361,7 +371,7 @@ public class MainActivity extends Activity {
                             try {
                                 p = Runtime.getRuntime().exec("su");
                                 DataOutputStream o = new DataOutputStream(p.getOutputStream());
-                                o.writeBytes("pm grant " + getPackageName() + " android.permission.WRITE_SECURE_SETTINGS\nexit\n");
+                                o.writeBytes(grantCmd + "\nexit\n");
                                 o.flush();
                                 o.close();
                                 p.waitFor();
@@ -376,7 +386,7 @@ public class MainActivity extends Activity {
                     .setPositiveButton("复制命令", new DialogInterface.OnClickListener() {
                         @Override
                         public void onClick(DialogInterface dialogInterface, int i) {
-                            ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("c", "adb shell pm grant " + getPackageName() + " android.permission.WRITE_SECURE_SETTINGS"));
+                            ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("c", adbCmd));
                             Toast.makeText(MainActivity.this, "命令已复制到剪切板", Toast.LENGTH_SHORT).show();
                         }
                     })
@@ -811,22 +821,26 @@ public class MainActivity extends Activity {
         if (mPendingCrashFixRequest) {
             mPendingCrashFixRequest = false;
             if (grantResult == PackageManager.PERMISSION_GRANTED) {
-                LogUtil.log(MainActivity.this, "[权限] 用户已授权(grantResult=GRANTED)，立即启用崩溃修复");
-                ShellUtil.getPermissionState();
+                LogUtil.log(MainActivity.this, "[权限] 用户已授权(grantResult=GRANTED)，通过 Shizuku 授予权限");
+                // 先通过 check() 使用 Shizuku 授予 WRITE_SECURE_SETTINGS + DUMP，再启用崩溃修复
+                check();
                 enableCrashFix();
             } else {
                 LogUtil.log(MainActivity.this, "[权限] 用户拒绝授权(grantResult=" + grantResult + ")");
                 Toast.makeText(MainActivity.this, "获取shizuku权限失败", Toast.LENGTH_SHORT).show();
             }
+        } else {
+            check();
         }
-        check();
     };
 
     //检查Shizuku权限，申请Shizuku权限的函数
     private void check() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
-        if (checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED)
+        if (checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
+                && checkSelfPermission("android.permission.DUMP") == PackageManager.PERMISSION_GRANTED)
             return;
+        String grantBoth = "pm grant " + getPackageName() + " android.permission.WRITE_SECURE_SETTINGS && pm grant " + getPackageName() + " android.permission.DUMP";
         boolean b = true, c = false;
         try {
             if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED)
@@ -845,7 +859,7 @@ public class MainActivity extends Activity {
             try {
                 Process p = Shizuku.newProcess(new String[]{"sh"}, null, null);
                 OutputStream out = p.getOutputStream();
-                out.write(("pm grant " + getPackageName() + " android.permission.WRITE_SECURE_SETTINGS\nexit\n").getBytes());
+                out.write((grantBoth + "\nexit\n").getBytes());
                 out.flush();
                 out.close();
                 p.waitFor();
@@ -881,10 +895,15 @@ public class MainActivity extends Activity {
         LogUtil.log(this, "[权限] 启用崩溃修复");
         sp.edit().putBoolean("crashfix", true).putBoolean("crashfix_auto_disabled", false).apply();
         updateToolbarMenu();
+        boolean hasDump = ShellUtil.hasDumpPermission(this);
         int state = ShellUtil.getPermissionState();
-        String permName = state == ShellUtil.PERM_ROOT ? "root" : (state == ShellUtil.PERM_SHIZUKU ? "shizuku" : "未知");
-        LogUtil.log(this, "[权限] 当前权限=" + permName + "(" + state + ")");
-        Toast.makeText(this, "已获取" + permName + "权限，崩溃检测已开启", Toast.LENGTH_SHORT).show();
+        StringBuilder permInfo = new StringBuilder();
+        if (hasDump) permInfo.append("DUMP");
+        if (hasDump && state != ShellUtil.PERM_NONE) permInfo.append("+");
+        if (state == ShellUtil.PERM_ROOT) permInfo.append("Root");
+        else if (state == ShellUtil.PERM_SHIZUKU) permInfo.append("Shizuku");
+        LogUtil.log(this, "[权限] 当前权限: " + permInfo.toString());
+        Toast.makeText(this, "已获取" + permInfo.toString() + "权限，崩溃检测已开启", Toast.LENGTH_SHORT).show();
         if (!daemon.isEmpty()) {
             StartForeGroundDaemon();
         }
@@ -892,13 +911,19 @@ public class MainActivity extends Activity {
 
     private void showNoPermissionDialog(boolean closeCrashFixOnCancel) {
         boolean shizukuRunning = ShellUtil.isShizukuRunning();
-        LogUtil.log(this, "[权限] 显示权限不足对话框 shizukuRunning=" + shizukuRunning + " closeCrashFixOnCancel=" + closeCrashFixOnCancel);
+        boolean hasDump = ShellUtil.hasDumpPermission(this);
+        LogUtil.log(this, "[权限] 显示权限不足对话框 shizukuRunning=" + shizukuRunning + " hasDump=" + hasDump + " closeCrashFixOnCancel=" + closeCrashFixOnCancel);
         StringBuilder message = new StringBuilder();
-        message.append("崩溃修复功能需要root或Shizuku权限。\n\n");
-        if (shizukuRunning) {
-            message.append("已检测到Shizuku正在运行，请授权本应用使用Shizuku。");
-        } else {
-            message.append("当前未检测到任何权限。\n请安装Shizuku并授权，或获取root权限后重试。");
+        if (!hasDump) {
+            message.append("崩溃检测需要 DUMP 权限。\n请通过 ADB 授予：adb shell pm grant " + getPackageName() + " android.permission.DUMP\n\n");
+        }
+        if (!ShellUtil.hasAnyPermission()) {
+            message.append("崩溃修复（force-stop）需要 Root 或 Shizuku 权限。\n");
+            if (shizukuRunning) {
+                message.append("已检测到Shizuku正在运行，请授权本应用使用Shizuku。");
+            } else {
+                message.append("当前未检测到任何权限。\n请安装Shizuku并授权，或获取root权限后重试。");
+            }
         }
 
         AlertDialog.Builder builder = new AlertDialog.Builder(this)
@@ -967,12 +992,19 @@ public class MainActivity extends Activity {
         if (permItem != null) {
             int state = ShellUtil.getPermissionState();
             boolean crashFixEnabled = sp.getBoolean("crashfix", false);
+            boolean hasDump = ShellUtil.hasDumpPermission(this);
             String text;
             int color = menuColor;
-            if (state == ShellUtil.PERM_ROOT) {
-                text = "root";
+            if (hasDump && state == ShellUtil.PERM_ROOT) {
+                text = "DUMP+Root";
+            } else if (hasDump && state == ShellUtil.PERM_SHIZUKU) {
+                text = "DUMP+Shizuku";
+            } else if (hasDump) {
+                text = "DUMP";
+            } else if (state == ShellUtil.PERM_ROOT) {
+                text = "Root";
             } else if (state == ShellUtil.PERM_SHIZUKU) {
-                text = "shizuku";
+                text = "Shizuku";
             } else if (crashFixEnabled) {
                 text = "崩溃检测不可用ⓘ";
                 color = Color.rgb(0xFF, 0x00, 0x00);
@@ -1539,14 +1571,16 @@ public class MainActivity extends Activity {
         }
 
         private void createPermissionDialog() {
-            String cmd = "pm grant " + getPackageName() + " android.permission.WRITE_SECURE_SETTINGS";
+            String pkg = getPackageName();
+            String cmd = "adb shell \"pm grant " + pkg + " android.permission.WRITE_SECURE_SETTINGS && pm grant " + pkg + " android.permission.DUMP\"";
+            String rootCmd = "pm grant " + pkg + " android.permission.WRITE_SECURE_SETTINGS && pm grant " + pkg + " android.permission.DUMP";
             new AlertDialog.Builder(MainActivity.this)
-                    .setMessage("安卓5.1和更低版本的设备，需将本APP转换为系统应用。\n\n安卓6.0及更高版本的设备，在下面三个方法中任选一个均可：\n1.连接电脑USB调试后在电脑CMD执行以下命令：\nadb shell " + cmd + "\n\n2.root激活。\n\n3.Shizuku激活。")
-                    .setTitle("需要安全设置写入权限")
+                    .setMessage("安卓5.1和更低版本的设备，需将本APP转换为系统应用。\n\n安卓6.0及更高版本的设备，在下面三个方法中任选一个均可：\n1.连接电脑USB调试后在电脑CMD执行以下命令：\n" + cmd + "\n\n2.root激活。\n\n3.Shizuku激活。")
+                    .setTitle("需要授予权限")
                     .setPositiveButton("复制命令", new DialogInterface.OnClickListener() {
                         @Override
                         public void onClick(DialogInterface dialogInterface, int i) {
-                            ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("c", "adb shell " + cmd));
+                            ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("c", cmd));
                             Toast.makeText(MainActivity.this, "命令已复制到剪切板", Toast.LENGTH_SHORT).show();
                         }
                     })
@@ -1557,7 +1591,7 @@ public class MainActivity extends Activity {
                             try {
                                 p = Runtime.getRuntime().exec("su");
                                 DataOutputStream o = new DataOutputStream(p.getOutputStream());
-                                o.writeBytes(cmd + "\nexit\n");
+                                o.writeBytes(rootCmd + "\nexit\n");
                                 o.flush();
                                 o.close();
                                 p.waitFor();
@@ -1714,19 +1748,23 @@ public class MainActivity extends Activity {
         });
     }
 
-    //查看APP是否可以写入安全设置
+    //查看APP是否可以写入安全设置（同时检查 WRITE_SECURE_SETTINGS 和 DUMP）
     boolean checkPermission() {
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
-            perm = checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED;
-        else {
+        boolean writeSecureOk = false;
+        boolean dumpOk = false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            writeSecureOk = checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED;
+            dumpOk = checkSelfPermission("android.permission.DUMP") == PackageManager.PERMISSION_GRANTED;
+        } else {
             PackageInfo packageInfo = new PackageInfo();
             try {
                 packageInfo = getPackageManager().getPackageInfo(getPackageName(), PackageManager.GET_CONFIGURATIONS);
             } catch (PackageManager.NameNotFoundException ignored) {
             }
-            perm = (packageInfo.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+            writeSecureOk = (packageInfo.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+            dumpOk = writeSecureOk; // 低版本系统应用才有 DUMP
         }
+        perm = writeSecureOk && dumpOk;
         return !perm;
     }
 
