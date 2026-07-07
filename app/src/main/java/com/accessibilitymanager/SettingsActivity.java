@@ -45,12 +45,14 @@ public class SettingsActivity extends Activity {
 
     // Shizuku 权限状态
     private boolean mPendingCrashFixRequest = false;
+    private boolean mPendingFixModeRequest = false;
     private boolean night;
 
     private final Shizuku.OnRequestPermissionResultListener mShizukuListener =
             (requestCode, grantResult) -> {
                 LogUtil.log(this, "[权限] SettingsActivity Shizuku回调, grantResult=" + grantResult
-                        + ", pendingCrashFix=" + mPendingCrashFixRequest);
+                        + ", pendingCrashFix=" + mPendingCrashFixRequest
+                        + ", pendingFixMode=" + mPendingFixModeRequest);
                 if (mPendingCrashFixRequest) {
                     mPendingCrashFixRequest = false;
                     if (grantResult == PackageManager.PERMISSION_GRANTED) {
@@ -66,6 +68,15 @@ public class SettingsActivity extends Activity {
                             LogUtil.log(this, "[权限] Shizuku 授予 DUMP 失败: " + e.getMessage());
                         }
                         enableCrashFix();
+                    } else {
+                        Toast.makeText(this, "获取Shizuku权限失败", Toast.LENGTH_SHORT).show();
+                    }
+                }
+                if (mPendingFixModeRequest) {
+                    mPendingFixModeRequest = false;
+                    if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                        LogUtil.log(this, "[权限] Shizuku 已授权，启用强杀模式");
+                        enableFixMode();
                     } else {
                         Toast.makeText(this, "获取Shizuku权限失败", Toast.LENGTH_SHORT).show();
                     }
@@ -336,8 +347,25 @@ public class SettingsActivity extends Activity {
         };
         switchUnlockCrashCheck.setOnCheckedChangeListener(unlockListenerHolder[0]);
 
-        switchFixMode.setOnCheckedChangeListener((btn, checked) ->
-                sp.edit().putBoolean("fixmode", checked).apply());
+        // 重启时强杀对应APP（需要 Root/Shizuku 权限）
+        final Switch fixModeRef = switchFixMode;
+        final android.widget.CompoundButton.OnCheckedChangeListener[] fixModeListenerHolder =
+                new android.widget.CompoundButton.OnCheckedChangeListener[1];
+        fixModeListenerHolder[0] = (btn, checked) -> {
+            if (checked) {
+                ShellUtil.reset();
+                ShellUtil.getPermissionState();
+                if (!ShellUtil.hasAnyPermission()) {
+                    fixModeRef.setOnCheckedChangeListener(null);
+                    fixModeRef.setChecked(false);
+                    fixModeRef.setOnCheckedChangeListener(fixModeListenerHolder[0]);
+                    showFixModePermissionDialog();
+                    return;
+                }
+            }
+            sp.edit().putBoolean("fixmode", checked).apply();
+        };
+        switchFixMode.setOnCheckedChangeListener(fixModeListenerHolder[0]);
 
         switchPeriodicCheck.setOnCheckedChangeListener((btn, checked) -> {
             sp.edit().putBoolean("periodic_check", checked).apply();
@@ -574,6 +602,79 @@ public class SettingsActivity extends Activity {
         });
 
         permDialog.show();
+    }
+
+    /** 显示强杀模式需要 Root/Shizuku 权限的对话框（卡片样式） */
+    private void showFixModePermissionDialog() {
+        boolean shizukuRunning = ShellUtil.isShizukuRunning();
+        LogUtil.log(this, "[权限] 显示强杀权限不足对话框 shizukuRunning=" + shizukuRunning);
+
+        final android.app.Dialog permDialog = new android.app.Dialog(this);
+        permDialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        View dv = getLayoutInflater().inflate(R.layout.dialog_permission, null);
+        permDialog.setContentView(dv);
+        android.view.Window w = permDialog.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(
+                    android.graphics.Color.TRANSPARENT));
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            int marginPx = (int) (16 * dm.density + 0.5f);
+            android.view.WindowManager.LayoutParams lp = w.getAttributes();
+            lp.width = dm.widthPixels - marginPx * 2;
+            lp.height = android.view.WindowManager.LayoutParams.WRAP_CONTENT;
+            w.setAttributes(lp);
+        }
+
+        // 设置标题
+        ((TextView) dv.findViewById(R.id.perm_title)).setText("权限不足");
+
+        // 设置消息
+        StringBuilder msg = new StringBuilder();
+        msg.append("重启时强杀对应APP需要 Root 或 Shizuku 权限。\n\n");
+        if (shizukuRunning) {
+            msg.append("已检测到Shizuku正在运行，请授权本应用使用Shizuku。");
+        } else {
+            msg.append("当前未检测到任何权限。\n请安装Shizuku并授权，或获取root权限后重试。");
+        }
+        ((TextView) dv.findViewById(R.id.perm_msg)).setText(msg.toString());
+
+        if (shizukuRunning) {
+            // 显示 Shizuku 激活按钮
+            dv.findViewById(R.id.perm_btn_root).setVisibility(View.GONE);
+            dv.findViewById(R.id.perm_btn_shizuku).setVisibility(View.GONE);
+            ((TextView) dv.findViewById(R.id.perm_btn_positive)).setText("申请Shizuku权限");
+            dv.findViewById(R.id.perm_btn_positive).setOnClickListener(v -> {
+                LogUtil.log(SettingsActivity.this, "[权限] 对话框中点击申请Shizuku权限（强杀模式）");
+                mPendingFixModeRequest = true;
+                try {
+                    Shizuku.requestPermission(0);
+                } catch (Exception e) {
+                    LogUtil.log(SettingsActivity.this,
+                            "[权限] 对话框申请异常: " + e.getClass().getSimpleName());
+                    mPendingFixModeRequest = false;
+                    Toast.makeText(this, "Shizuku权限申请失败", Toast.LENGTH_SHORT).show();
+                }
+                permDialog.dismiss();
+            });
+            dv.findViewById(R.id.perm_btn_neutral).setOnClickListener(v -> {
+                permDialog.dismiss();
+            });
+        } else {
+            ((TextView) dv.findViewById(R.id.perm_btn_positive)).setText("知道了");
+            dv.findViewById(R.id.perm_btn_positive).setOnClickListener(v -> permDialog.dismiss());
+        }
+
+        permDialog.show();
+    }
+
+    private void enableFixMode() {
+        LogUtil.log(this, "[权限] 启用强杀模式");
+        sp.edit().putBoolean("fixmode", true).apply();
+        switchFixMode.setChecked(true);
+        ShellUtil.reset();
+        ShellUtil.getPermissionState();
+        String permName = ShellUtil.hasRoot() ? "root" : (ShellUtil.hasShizukuOnly() ? "shizuku" : "未知");
+        Toast.makeText(this, "已获取" + permName + "权限，强杀模式已开启", Toast.LENGTH_SHORT).show();
     }
 
     // ========== 刷新子项状态 ==========
