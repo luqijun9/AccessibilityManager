@@ -167,7 +167,7 @@ public class daemonService extends Service {
         if (systemAppLabel != null && ignoreSystemChange) {
             return;
         }
-        crashCheckExecutor.submit(() -> checkCrashedServicesInternal("服务变化"));
+        checkCrashedServices("服务变化");
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -694,7 +694,7 @@ public class daemonService extends Service {
         });
 
         // crashCheckExecutor 执行首次崩溃检测
-        crashCheckExecutor.submit(() -> checkCrashedServicesInternal("服务启动"));
+        checkCrashedServices("服务启动");
     }
 
     @Override
