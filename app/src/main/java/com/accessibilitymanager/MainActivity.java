@@ -1266,6 +1266,9 @@ public class MainActivity extends Activity {
         }
         mFilteredList = null;
 
+        // 刷新权限菜单显示（退出搜索时恢复的菜单项可能已过期）
+        updateToolbarMenu();
+
         //隐藏键盘
         InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
         if (imm != null) imm.hideSoftInputFromWindow(toolbar.getWindowToken(), 0);
