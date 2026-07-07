@@ -837,8 +837,7 @@ public class MainActivity extends Activity {
     //检查Shizuku权限，申请Shizuku权限的函数
     private void check() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
-        if (checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
-                && checkSelfPermission("android.permission.DUMP") == PackageManager.PERMISSION_GRANTED)
+        if (checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED)
             return;
         String grantBoth = "pm grant " + getPackageName() + " android.permission.WRITE_SECURE_SETTINGS && pm grant " + getPackageName() + " android.permission.DUMP";
         boolean b = true, c = false;
@@ -1751,10 +1750,8 @@ public class MainActivity extends Activity {
     //查看APP是否可以写入安全设置（同时检查 WRITE_SECURE_SETTINGS 和 DUMP）
     boolean checkPermission() {
         boolean writeSecureOk = false;
-        boolean dumpOk = false;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             writeSecureOk = checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED;
-            dumpOk = checkSelfPermission("android.permission.DUMP") == PackageManager.PERMISSION_GRANTED;
         } else {
             PackageInfo packageInfo = new PackageInfo();
             try {
@@ -1762,9 +1759,8 @@ public class MainActivity extends Activity {
             } catch (PackageManager.NameNotFoundException ignored) {
             }
             writeSecureOk = (packageInfo.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
-            dumpOk = writeSecureOk; // 低版本系统应用才有 DUMP
         }
-        perm = writeSecureOk && dumpOk;
+        perm = writeSecureOk;
         return !perm;
     }
 

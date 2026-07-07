@@ -506,11 +506,10 @@ public class SettingsActivity extends Activity {
         }
 
         // 设置标题
-        ((TextView) dv.findViewById(R.id.perm_title)).setText("需要授予权限");
+        ((TextView) dv.findViewById(R.id.perm_title)).setText("需要授予 DUMP 权限");
 
         // 设置消息
-        String msg = "崩溃检测需要 DUMP 权限。\n\n"
-                + "在下面三个方法中任选一个即可：\n\n"
+        String msg = "在下面三个方法中任选一个即可：\n\n"
                 + "1. 连接电脑USB调试后在电脑CMD执行以下命令：\n"
                 + "adb shell " + cmd + "\n\n"
                 + "2. Root 激活。\n\n"
