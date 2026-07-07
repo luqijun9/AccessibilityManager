@@ -882,7 +882,7 @@ public class MainActivity extends Activity {
                 out.close();
                 p.waitFor();
                 if (p.exitValue() == 0) {
-                    Toast.makeText(this, "成功激活", Toast.LENGTH_SHORT).show();
+                    // 后续 enableCrashFix() 会显示"已获取..." toast
                 }
             } catch (IOException | InterruptedException ioException) {
                 Toast.makeText(this, "激活失败", Toast.LENGTH_SHORT).show();
@@ -982,7 +982,6 @@ public class MainActivity extends Activity {
                     p.waitFor();
                     runOnUiThread(() -> {
                         if (p.exitValue() == 0) {
-                            Toast.makeText(this, "成功激活", Toast.LENGTH_SHORT).show();
                             ShellUtil.reset();
                             updateToolbarMenu();
                         } else {
