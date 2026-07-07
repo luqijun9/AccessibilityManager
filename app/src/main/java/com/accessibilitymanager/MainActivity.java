@@ -91,6 +91,7 @@ public class MainActivity extends Activity {
     boolean perm = false;//是否获取了权限
     private boolean listenerAdded = false;//是否添加了内容监视器
     private boolean mPendingCrashFixRequest = false;//是否有待处理的崩溃修复请求
+    private boolean mPendingFixModeRequest = false;//是否有待处理的强杀模式权限请求
     private static final int REQUEST_SETTINGS = 1001;
     private long mLastAutoUpdateCheckTime = 0;
 
@@ -182,6 +183,10 @@ public class MainActivity extends Activity {
             if (itemId == R.id.perm_status) {
                 if (sp.getBoolean("crashfix", false) && !ShellUtil.hasDumpPermission(this)) {
                     showDumpPermissionDialog();
+                    return true;
+                }
+                if (sp.getBoolean("fixmode", false) && !ShellUtil.hasAnyPermission()) {
+                    showFixModePermissionDialog();
                     return true;
                 }
                 boolean hasDump = ShellUtil.hasDumpPermission(this);
@@ -816,7 +821,7 @@ public class MainActivity extends Activity {
     }
 
     private final Shizuku.OnRequestPermissionResultListener RL = (requestCode, grantResult) -> {
-        LogUtil.log(MainActivity.this, "[权限] Shizuku回调, grantResult=" + grantResult + ", pendingCrashFix=" + mPendingCrashFixRequest);
+        LogUtil.log(MainActivity.this, "[权限] Shizuku回调, grantResult=" + grantResult + ", pendingCrashFix=" + mPendingCrashFixRequest + ", pendingFixMode=" + mPendingFixModeRequest);
         ShellUtil.reset();
         if (mPendingCrashFixRequest) {
             mPendingCrashFixRequest = false;
@@ -829,6 +834,17 @@ public class MainActivity extends Activity {
                 LogUtil.log(MainActivity.this, "[权限] 用户拒绝授权(grantResult=" + grantResult + ")");
                 Toast.makeText(MainActivity.this, "获取shizuku权限失败", Toast.LENGTH_SHORT).show();
             }
+        } else if (mPendingFixModeRequest) {
+            mPendingFixModeRequest = false;
+            if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                LogUtil.log(MainActivity.this, "[权限] Shizuku 已授权，启用强杀模式");
+                ShellUtil.reset();
+                updateToolbarMenu();
+                Toast.makeText(MainActivity.this, "已获取Shizuku权限，强杀模式已开启", Toast.LENGTH_SHORT).show();
+            } else {
+                LogUtil.log(MainActivity.this, "[权限] Shizuku 授权被拒绝");
+                Toast.makeText(MainActivity.this, "获取Shizuku权限失败，强杀模式未开启", Toast.LENGTH_SHORT).show();
+            }
         } else if (grantResult == PackageManager.PERMISSION_GRANTED) {
             // 权限被授予时执行 check() 尝试授予 WRITE_SECURE_SETTINGS
             // 注意：拒绝时不能调用 check()，否则 check() 内部会重新 requestPermission 导致无限循环
@@ -839,7 +855,8 @@ public class MainActivity extends Activity {
     //检查Shizuku权限，申请Shizuku权限的函数
     private void check() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
-        if (checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED)
+        if (checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
+                && checkSelfPermission("android.permission.DUMP") == PackageManager.PERMISSION_GRANTED)
             return;
         String grantBoth = "pm grant " + getPackageName() + " android.permission.WRITE_SECURE_SETTINGS && pm grant " + getPackageName() + " android.permission.DUMP";
         boolean b = true, c = false;
@@ -1000,6 +1017,74 @@ public class MainActivity extends Activity {
         permDialog.show();
     }
 
+    /** 显示强杀功能需要 Root/Shizuku 权限的对话框 */
+    private void showFixModePermissionDialog() {
+        boolean shizukuRunning = ShellUtil.isShizukuRunning();
+        LogUtil.log(this, "[权限] 显示强杀权限不足对话框 shizukuRunning=" + shizukuRunning);
+
+        final android.app.Dialog permDialog = new android.app.Dialog(this);
+        permDialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        View dv = getLayoutInflater().inflate(R.layout.dialog_permission, null);
+        permDialog.setContentView(dv);
+        android.view.Window w = permDialog.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(
+                    android.graphics.Color.TRANSPARENT));
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            int marginPx = (int) (16 * dm.density + 0.5f);
+            android.view.WindowManager.LayoutParams lp = w.getAttributes();
+            lp.width = dm.widthPixels - marginPx * 2;
+            lp.height = android.view.WindowManager.LayoutParams.WRAP_CONTENT;
+            w.setAttributes(lp);
+        }
+
+        // 设置标题
+        ((TextView) dv.findViewById(R.id.perm_title)).setText("权限不足");
+
+        // 设置消息
+        StringBuilder msg = new StringBuilder();
+        msg.append("重启时强杀对应APP需要 Root 或 Shizuku 权限。\n\n");
+        if (shizukuRunning) {
+            msg.append("已检测到Shizuku正在运行，请授权本应用使用Shizuku。");
+        } else {
+            msg.append("当前未检测到任何权限。\n请安装Shizuku并授权，或获取root权限后重试。");
+        }
+        ((TextView) dv.findViewById(R.id.perm_msg)).setText(msg.toString());
+
+        // 隐藏取消按钮（第二行）
+        dv.findViewById(R.id.perm_btn_neutral).setVisibility(View.GONE);
+
+        if (shizukuRunning) {
+            // 第一行：取消 + 申请Shizuku权限
+            dv.findViewById(R.id.perm_btn_root).setVisibility(View.VISIBLE);
+            ((TextView) dv.findViewById(R.id.perm_btn_root)).setText("取消");
+            dv.findViewById(R.id.perm_btn_root).setOnClickListener(v -> permDialog.dismiss());
+
+            dv.findViewById(R.id.perm_btn_shizuku).setVisibility(View.GONE);
+            ((TextView) dv.findViewById(R.id.perm_btn_positive)).setText("申请Shizuku权限");
+            dv.findViewById(R.id.perm_btn_positive).setOnClickListener(v -> {
+                LogUtil.log(MainActivity.this, "[权限] 对话框中点击申请Shizuku权限（强杀模式）");
+                mPendingFixModeRequest = true;
+                try {
+                    Shizuku.requestPermission(0);
+                } catch (Exception e) {
+                    LogUtil.log(MainActivity.this, "[权限] 对话框申请异常: " + e.getClass().getSimpleName());
+                    mPendingFixModeRequest = false;
+                    Toast.makeText(this, "Shizuku权限申请失败", Toast.LENGTH_SHORT).show();
+                }
+                permDialog.dismiss();
+            });
+        } else {
+            // 无任何权限时，只显示"知道了"
+            dv.findViewById(R.id.perm_btn_root).setVisibility(View.GONE);
+            dv.findViewById(R.id.perm_btn_shizuku).setVisibility(View.GONE);
+            ((TextView) dv.findViewById(R.id.perm_btn_positive)).setText("知道了");
+            dv.findViewById(R.id.perm_btn_positive).setOnClickListener(v -> permDialog.dismiss());
+        }
+
+        permDialog.show();
+    }
+
     private void showNoPermissionDialog(boolean closeCrashFixOnCancel) {
         boolean shizukuRunning = ShellUtil.isShizukuRunning();
         boolean hasDump = ShellUtil.hasDumpPermission(this);
@@ -1084,6 +1169,7 @@ public class MainActivity extends Activity {
             ShellUtil.reset();
             int state = ShellUtil.getPermissionState();
             boolean crashFixEnabled = sp.getBoolean("crashfix", false);
+            boolean fixModeEnabled = sp.getBoolean("fixmode", false);
             boolean hasDump = ShellUtil.hasDumpPermission(this);
             String text;
             int color = menuColor;
@@ -1094,8 +1180,12 @@ public class MainActivity extends Activity {
             } else if (hasDump) {
                 text = "DUMP";
             } else if (crashFixEnabled) {
-                // 崩溃检测仅依赖 DUMP 权限，没有 DUMP 就显示不可用
+                // 崩溃检测仅依赖 DUMP 权限，没有 DUMP 就显示不可用（优先级最高）
                 text = "崩溃检测不可用ⓘ";
+                color = Color.rgb(0xFF, 0x00, 0x00);
+            } else if (fixModeEnabled && state == ShellUtil.PERM_NONE) {
+                // 强杀功能需要 Root/Shizuku 权限
+                text = "强杀功能不可用ⓘ";
                 color = Color.rgb(0xFF, 0x00, 0x00);
             } else if (state == ShellUtil.PERM_ROOT) {
                 text = "Root";
