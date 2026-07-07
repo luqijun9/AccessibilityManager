@@ -408,22 +408,9 @@ public class daemonService extends Service {
         }
         LogUtil.log(daemonService.this, "[崩溃检测] 触发来源：" + source);
         try {
-            Process p;
-            try {
-                p = ShellUtil.exec();
-                Log.d("AccMgrDebug", "[TASK-" + taskId + "] ShellUtil.exec() OK pid=" + p);
-            } catch (Exception e) {
-                LogUtil.log(daemonService.this, "[崩溃检测] 获取 shell 失败：" + e.getMessage());
-                Log.d("AccMgrDebug", "[TASK-" + taskId + "] ShellUtil.exec() FAILED: " + e.getClass().getName() + ": " + e.getMessage());
-                return;
-            }
-            Log.d("AccMgrDebug", "[TASK-" + taskId + "] Writing dumpsys command...");
-            DataOutputStream os = new DataOutputStream(p.getOutputStream());
-            os.writeBytes("dumpsys accessibility 2>/dev/null\n");
-            os.writeBytes("exit\n");
-            os.flush();
-            os.close();
-            Log.d("AccMgrDebug", "[TASK-" + taskId + "] Commands written, starting read...");
+            Log.d("AccMgrDebug", "[TASK-" + taskId + "] Executing dumpsys accessibility directly (DUMP)...");
+            Process p = Runtime.getRuntime().exec("dumpsys accessibility");
+            Log.d("AccMgrDebug", "[TASK-" + taskId + "] Direct exec() OK pid=" + p);
 
             BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
             StringBuilder allOutput = new StringBuilder();
@@ -436,17 +423,11 @@ public class daemonService extends Service {
             reader.close();
             Log.d("AccMgrDebug", "[TASK-" + taskId + "] Read complete, lines=" + lineCount + ", waiting for process...");
 
-            try {
-                if (!p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
-                    p.destroyForcibly();
-                    LogUtil.log(daemonService.this, "[崩溃检测] dumpsys 超时(10s)，强制终止");
-                    Log.d("AccMgrDebug", "[TASK-" + taskId + "] waitFor TIMEOUT, destroyed");
-                    return;
-                }
-            } catch (IllegalArgumentException e) {
-                // ShizukuRemoteProcess.waitFor() 可能在进程还未完全退出时抛出
-                // "process hasn't exited"，此时输出已读完，无需等待
-                Log.d("AccMgrDebug", "[TASK-" + taskId + "] waitFor threw: " + e.getMessage() + ", skipping wait");
+            if (!p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                LogUtil.log(daemonService.this, "[崩溃检测] dumpsys 超时(10s)，强制终止");
+                Log.d("AccMgrDebug", "[TASK-" + taskId + "] waitFor TIMEOUT, destroyed");
+                return;
             }
             Log.d("AccMgrDebug", "[TASK-" + taskId + "] waitFor OK, parsing output...");
 
