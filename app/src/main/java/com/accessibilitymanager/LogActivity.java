@@ -110,6 +110,7 @@ public class LogActivity extends Activity {
         findViewById(R.id.btn_close).setOnClickListener(v -> finish());
         findViewById(R.id.btn_share).setOnClickListener(v -> shareLog());
         findViewById(R.id.btn_exec).setOnClickListener(v -> executeCommand());
+        findViewById(R.id.btn_dump_exec).setOnClickListener(v -> executeDumpDirect());
         findViewById(R.id.btn_back).setOnClickListener(v -> finish());
 
         // 初次加载已有日志
@@ -263,6 +264,63 @@ public class LogActivity extends Activity {
             sb.append("无法获取 Accessibility 服务信息: ").append(e.getMessage());
         }
         return sb.toString();
+    }
+
+    /** 直接使用 DUMP 权限执行 dumpsys accessibility（不依赖 Root/Shizuku） */
+    private void executeDumpDirect() {
+        // 添加分隔标题
+        entries.add(new LogUtil.LogEntry(
+                LogUtil.LogEntry.TYPE_DATE_SEPARATOR,
+                "────────  dumpsys accessibility (DUMP)  ────────"
+        ));
+
+        StringBuilder sb = new StringBuilder();
+        try {
+            Process process = Runtime.getRuntime().exec("dumpsys accessibility");
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), "UTF-8"));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append("\n");
+            }
+            reader.close();
+
+            // 也读取错误流
+            BufferedReader errReader = new BufferedReader(new InputStreamReader(process.getErrorStream(), "UTF-8"));
+            while ((line = errReader.readLine()) != null) {
+                sb.append("[错误] ").append(line).append("\n");
+            }
+            errReader.close();
+
+            process.waitFor();
+        } catch (Exception e) {
+            sb.append("直接执行 dumpsys 失败: ").append(e.getMessage());
+        }
+
+        String result = sb.toString().trim();
+        if (result.isEmpty()) {
+            result = "（无输出，可能未授予 DUMP 权限）";
+        }
+
+        // 添加结果行
+        for (String line : result.split("\n")) {
+            entries.add(new LogUtil.LogEntry(LogUtil.LogEntry.TYPE_LOG_LINE, line));
+        }
+
+        // 添加结尾分隔
+        entries.add(new LogUtil.LogEntry(
+                LogUtil.LogEntry.TYPE_DATE_SEPARATOR,
+                "────────  执行完毕  ────────"
+        ));
+
+        if (adapter == null) {
+            listView.setVisibility(View.VISIBLE);
+            tvEmpty.setVisibility(View.GONE);
+            adapter = new LogAdapter(entries, night);
+            listView.setAdapter(adapter);
+        } else {
+            adapter.notifyDataSetChanged();
+        }
+        listView.setSelection(entries.size() - 1);
     }
 
     private class LogAdapter extends BaseAdapter {
