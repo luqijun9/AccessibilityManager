@@ -1167,30 +1167,19 @@ public class MainActivity extends Activity {
         MenuItem permItem = menu.findItem(R.id.perm_status);
         if (permItem != null) {
             ShellUtil.reset();
-            int state = ShellUtil.getPermissionState();
             boolean crashFixEnabled = sp.getBoolean("crashfix", false);
             boolean fixModeEnabled = sp.getBoolean("fixmode", false);
             boolean hasDump = ShellUtil.hasDumpPermission(this);
             String text;
             int color = menuColor;
-            if (hasDump && state == ShellUtil.PERM_ROOT) {
-                text = "DUMP+Root";
-            } else if (hasDump && state == ShellUtil.PERM_SHIZUKU) {
-                text = "DUMP+Shizuku";
-            } else if (hasDump) {
-                text = "DUMP";
-            } else if (crashFixEnabled) {
-                // 崩溃检测仅依赖 DUMP 权限，没有 DUMP 就显示不可用（优先级最高）
+            if (crashFixEnabled && !hasDump) {
+                // 崩溃检测仅依赖 DUMP 权限，没有 DUMP 就显示不可用
                 text = "崩溃检测不可用ⓘ";
                 color = Color.rgb(0xFF, 0x00, 0x00);
-            } else if (fixModeEnabled && state == ShellUtil.PERM_NONE) {
+            } else if (fixModeEnabled && !ShellUtil.hasAnyPermission()) {
                 // 强杀功能需要 Root/Shizuku 权限
                 text = "强杀功能不可用ⓘ";
                 color = Color.rgb(0xFF, 0x00, 0x00);
-            } else if (state == ShellUtil.PERM_ROOT) {
-                text = "Root";
-            } else if (state == ShellUtil.PERM_SHIZUKU) {
-                text = "Shizuku";
             } else {
                 text = null;
             }
