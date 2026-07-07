@@ -56,17 +56,20 @@ public class SettingsActivity extends Activity {
                 if (mPendingCrashFixRequest) {
                     mPendingCrashFixRequest = false;
                     if (grantResult == PackageManager.PERMISSION_GRANTED) {
-                        // 通过 Shizuku 授予权限
+                        // 通过 Shizuku 授予权限，等待命令执行完毕再启用崩溃修复
                         try {
-                            java.io.OutputStream out = Shizuku.newProcess(
-                                    new String[]{"sh"}, null, null).getOutputStream();
+                            Process p = Shizuku.newProcess(
+                                    new String[]{"sh"}, null, null);
+                            java.io.OutputStream out = p.getOutputStream();
                             out.write(("pm grant " + getPackageName()
                                     + " android.permission.DUMP\nexit\n").getBytes());
                             out.flush();
                             out.close();
+                            p.waitFor();
                         } catch (Exception e) {
                             LogUtil.log(this, "[权限] Shizuku 授予 DUMP 失败: " + e.getMessage());
                         }
+                        ShellUtil.reset();
                         enableCrashFix();
                     } else {
                         Toast.makeText(this, "获取Shizuku权限失败", Toast.LENGTH_SHORT).show();
