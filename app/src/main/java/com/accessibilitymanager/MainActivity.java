@@ -180,7 +180,7 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (itemId == R.id.perm_status) {
-                if (sp.getBoolean("crashfix", false) && !ShellUtil.hasAnyPermission() && !ShellUtil.hasDumpPermission(this)) {
+                if (sp.getBoolean("crashfix", false) && !ShellUtil.hasDumpPermission(this)) {
                     showNoPermissionDialog(false);
                     return true;
                 }
@@ -988,9 +988,10 @@ public class MainActivity extends Activity {
             logItem.setTitle(logSsb);
         }
 
-        // 权限显示按钮
+        // 权限显示按钮 - 每次更新菜单时重新检测权限状态，防止 Shizuku 停止后仍显示旧状态
         MenuItem permItem = menu.findItem(R.id.perm_status);
         if (permItem != null) {
+            ShellUtil.reset();
             int state = ShellUtil.getPermissionState();
             boolean crashFixEnabled = sp.getBoolean("crashfix", false);
             boolean hasDump = ShellUtil.hasDumpPermission(this);
@@ -1002,13 +1003,14 @@ public class MainActivity extends Activity {
                 text = "DUMP+Shizuku";
             } else if (hasDump) {
                 text = "DUMP";
+            } else if (crashFixEnabled) {
+                // 崩溃检测仅依赖 DUMP 权限，没有 DUMP 就显示不可用
+                text = "崩溃检测不可用ⓘ";
+                color = Color.rgb(0xFF, 0x00, 0x00);
             } else if (state == ShellUtil.PERM_ROOT) {
                 text = "Root";
             } else if (state == ShellUtil.PERM_SHIZUKU) {
                 text = "Shizuku";
-            } else if (crashFixEnabled) {
-                text = "崩溃检测不可用ⓘ";
-                color = Color.rgb(0xFF, 0x00, 0x00);
             } else {
                 text = null;
             }
