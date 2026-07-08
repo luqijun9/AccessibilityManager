@@ -682,18 +682,20 @@ public class MainActivity extends Activity {
         saveFavorites();
     }
 
+    class FavItem {
+        String serviceId;
+        String label;
+        boolean isChecked;
+        FavItem(String id, String l, boolean c) { serviceId = id; label = l; isChecked = c; }
+    }
+
     private void showAddFavoritesDialog() {
         if (tmp == null || tmp.isEmpty()) return;
 
-        final String[] items = new String[tmp.size()];
-        final boolean[] checked = new boolean[tmp.size()];
-        final String[] serviceIds = new String[tmp.size()];
-
+        List<FavItem> allItems = new ArrayList<>();
         for (int i = 0; i < tmp.size(); i++) {
             AccessibilityServiceInfo info = tmp.get(i);
             String rawName = normalizeServiceId(info.getId());
-            serviceIds[i] = rawName;
-
             String[] parts = rawName.split("/");
             String label;
             try {
@@ -712,27 +714,77 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
                 label = parts.length > 1 ? parts[1] : parts[0];
             }
-            items[i] = label;
-            checked[i] = isServiceFavorite(rawName);
+            allItems.add(new FavItem(rawName, label, isServiceFavorite(rawName)));
         }
 
-        new AlertDialog.Builder(this)
-                .setTitle("添加收藏")
-                .setMultiChoiceItems(items, checked, (dialog, which, isChecked) -> {
-                    if (isChecked) {
-                        addToFavorites(serviceIds[which]);
-                    } else {
-                        removeFromFavorites(serviceIds[which]);
+        View dialogView = getLayoutInflater().inflate(R.layout.dialog_add_favorites, null);
+        android.widget.EditText editSearch = dialogView.findViewById(R.id.edit_search);
+        ListView listFavorites = dialogView.findViewById(R.id.list_favorites);
+
+        class FavAdapter extends BaseAdapter {
+            List<FavItem> displayedItems = new ArrayList<>(allItems);
+
+            @Override public int getCount() { return displayedItems.size(); }
+            @Override public FavItem getItem(int position) { return displayedItems.get(position); }
+            @Override public long getItemId(int position) { return position; }
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                if (convertView == null) {
+                    convertView = getLayoutInflater().inflate(android.R.layout.simple_list_item_multiple_choice, parent, false);
+                }
+                android.widget.CheckedTextView ctv = (android.widget.CheckedTextView) convertView;
+                FavItem item = getItem(position);
+                ctv.setText(item.label);
+                ctv.setChecked(item.isChecked);
+                ctv.setOnClickListener(v -> {
+                    item.isChecked = !item.isChecked;
+                    ctv.setChecked(item.isChecked);
+                });
+                return convertView;
+            }
+
+            public void filter(String text) {
+                String filterString = text.toLowerCase();
+                List<FavItem> filtered = new ArrayList<>();
+                for (FavItem item : allItems) {
+                    if (item.label.toLowerCase().contains(filterString)) {
+                        filtered.add(item);
                     }
-                })
+                }
+                displayedItems = filtered;
+                notifyDataSetChanged();
+            }
+        }
+
+        FavAdapter adapter = new FavAdapter();
+        listFavorites.setAdapter(adapter);
+
+        editSearch.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(android.text.Editable s) {
+                adapter.filter(s.toString());
+            }
+        });
+
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+                .setTitle("添加收藏")
+                .setView(dialogView)
                 .setPositiveButton("确定", (dialog, which) -> {
-                    // 如果当前在收藏 Tab，刷新列表
+                    StringBuilder sb = new StringBuilder();
+                    for (FavItem item : allItems) {
+                        if (item.isChecked) {
+                            if (sb.length() > 0) sb.append(",");
+                            sb.append(item.serviceId);
+                        }
+                    }
+                    favorites = sb.toString();
+                    saveFavorites();
+
                     if (mIsFavoritesTab) {
                         switchToTab(true);
                     }
                 })
                 .setNegativeButton("取消", null)
-                .create()
                 .show();
     }
 

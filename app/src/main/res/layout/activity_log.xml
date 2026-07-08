@@ -55,33 +55,37 @@
         android:layout_height="wrap_content"
         android:background="?attr/colorSurfaceContainer"
         android:orientation="horizontal"
-        android:weightSum="3"
-        android:padding="8dp">
-
-
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_dump_exec"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="DUMP执行" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_share"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="分享日志" />
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="12dp"
+        android:gravity="center_vertical">
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_close"
             style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="关闭" />
+
+        <Space
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="关闭" />
+            android:layout_weight="1" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_dump_exec"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:text="DUMP执行" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_share"
+            style="@style/Widget.Material3.Button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="分享日志" />
     </LinearLayout>
 </LinearLayout>
