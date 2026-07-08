@@ -9,4 +9,5 @@
     <color name="text_hint">#999999</color>
     <color name="divider">#E0E0E0</color>
     <color name="popup_bg">#F5F5F5</color>
+    <color name="menu_icon">#000000</color>
 </resources>
