@@ -398,7 +398,7 @@ public class MainActivity extends Activity {
                     .setNeutralButton("Shizuku激活", new DialogInterface.OnClickListener() {
                         @Override
                         public void onClick(DialogInterface dialogInterface, int i) {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) check();
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) check(true);
                         }
                     })
                     .create().show();
@@ -828,7 +828,7 @@ public class MainActivity extends Activity {
             if (grantResult == PackageManager.PERMISSION_GRANTED) {
                 LogUtil.log(MainActivity.this, "[权限] 用户已授权(grantResult=GRANTED)，通过 Shizuku 授予权限");
                 // 先通过 check() 使用 Shizuku 授予 WRITE_SECURE_SETTINGS + DUMP，再启用崩溃修复
-                check();
+                check(false);
                 enableCrashFix();
             } else {
                 LogUtil.log(MainActivity.this, "[权限] 用户拒绝授权(grantResult=" + grantResult + ")");
@@ -848,12 +848,12 @@ public class MainActivity extends Activity {
         } else if (grantResult == PackageManager.PERMISSION_GRANTED) {
             // 权限被授予时执行 check() 尝试授予 WRITE_SECURE_SETTINGS
             // 注意：拒绝时不能调用 check()，否则 check() 内部会重新 requestPermission 导致无限循环
-            check();
+            check(true);
         }
     };
 
     //检查Shizuku权限，申请Shizuku权限的函数
-    private void check() {
+    private void check(boolean showSuccessToast) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
         if (checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
                 && checkSelfPermission("android.permission.DUMP") == PackageManager.PERMISSION_GRANTED)
@@ -881,8 +881,8 @@ public class MainActivity extends Activity {
                 out.flush();
                 out.close();
                 p.waitFor();
-                if (p.exitValue() == 0) {
-                    // 后续 enableCrashFix() 会显示"已获取..." toast
+                if (p.exitValue() == 0 && showSuccessToast) {
+                    Toast.makeText(this, "成功激活", Toast.LENGTH_SHORT).show();
                 }
             } catch (IOException | InterruptedException ioException) {
                 Toast.makeText(this, "激活失败", Toast.LENGTH_SHORT).show();
@@ -1780,7 +1780,7 @@ public class MainActivity extends Activity {
                     .setNeutralButton("Shizuku激活", new DialogInterface.OnClickListener() {
                         @Override
                         public void onClick(DialogInterface dialogInterface, int i) {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) check();
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) check(true);
                         }
                     })
                     .create().show();
