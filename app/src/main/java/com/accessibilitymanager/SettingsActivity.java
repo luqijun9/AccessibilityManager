@@ -711,9 +711,8 @@ public class SettingsActivity extends Activity {
         ((TextView) dv.findViewById(R.id.tutorial_msg)).setText(
                 "1. 崩溃检测：检测无障碍服务是否假死（已开启但显示\"无法运行\"），检测到后关闭服务再打开\n\n"
                 + "2. 解锁检测：设备解锁时进行检测。如果解锁检测无效（无法看到接收USER_PRESENT广播的日志），请开启管理器的无障碍服务或自启动权限\n\n"
-                + "3. 强杀应用后重启：默认重启方式为直接重启服务，勾选后强制停止APP后再重启\n\n"
-                + "4. 定时检测：定时检测服务状态，建议间隔≥10分钟\n\n"
-                + "5. 延迟1秒保活：延迟1秒执行服务重启，某些情况下也许能提高成功率\n\n");
+                + "3. 强杀应用后重启：检测到崩溃的无障碍服务后，将会使服务重启，默认重启方式为直接重启服务，勾选后强制停止APP后再重启（需要shizuku/root权限）\n\n"
+                + "4. 定时检测：定时检测服务状态，建议间隔≥10分钟\n");
 
         final android.app.Dialog dialog = new android.app.Dialog(this);
         dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);

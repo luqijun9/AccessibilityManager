@@ -262,16 +262,16 @@
                         android:id="@+id/notify_custom_btn"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:background="?android:attr/selectableItemBackground"
+                        android:background="@drawable/btn_primary"
                         android:clickable="true"
                         android:focusable="true"
                         android:paddingLeft="12dp"
                         android:paddingTop="6dp"
                         android:paddingBottom="6dp"
-                        android:paddingRight="4dp"
-                        android:text="设置 ›"
-                        android:textColor="@color/bg"
-                        android:textSize="15sp" />
+                        android:paddingRight="12dp"
+                        android:text="设置"
+                        android:textColor="#FFFFFF"
+                        android:textSize="14sp" />
                 </LinearLayout>
 
             </LinearLayout>
@@ -279,15 +279,36 @@
             <!-- ============================================================ -->
             <!-- 分组2：崩溃服务检测设置                                       -->
             <!-- ============================================================ -->
-            <TextView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="崩溃服务检测设置"
-                android:textColor="@color/text_hint"
-                android:textSize="13sp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
                 android:paddingLeft="4dp"
                 android:paddingTop="28dp"
-                android:paddingBottom="10dp" />
+                android:paddingBottom="10dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="崩溃服务检测设置"
+                    android:textColor="@color/text_hint"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/crash_tutorial_btn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:paddingLeft="8dp"
+                    android:paddingRight="8dp"
+                    android:text="说明"
+                    android:textColor="@color/bg"
+                    android:textSize="13sp" />
+            </LinearLayout>
 
             <!-- 卡片2 -->
             <LinearLayout
@@ -309,32 +330,13 @@
                     android:clickable="true"
                     android:focusable="true">
 
-                    <LinearLayout
+                    <TextView
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="崩溃服务检测总开关"
-                            android:textColor="@color/text_primary"
-                            android:textSize="16sp" />
-
-                        <TextView
-                            android:id="@+id/crash_tutorial_btn"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:background="?android:attr/selectableItemBackground"
-                            android:clickable="true"
-                            android:focusable="true"
-                            android:padding="6dp"
-                            android:text="ⓘ"
-                            android:textColor="@color/bg"
-                            android:textSize="16sp" />
-                    </LinearLayout>
+                        android:text="崩溃服务检测总开关"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp" />
 
                     <Switch
                         android:id="@+id/crashfix"
@@ -614,16 +616,16 @@
                         android:id="@+id/check_update_btn"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:background="?android:attr/selectableItemBackground"
+                        android:background="@drawable/btn_primary"
                         android:clickable="true"
                         android:focusable="true"
                         android:paddingLeft="12dp"
                         android:paddingTop="6dp"
                         android:paddingBottom="6dp"
-                        android:paddingRight="4dp"
-                        android:text="检查 ›"
-                        android:textColor="@color/bg"
-                        android:textSize="15sp" />
+                        android:paddingRight="12dp"
+                        android:text="检查"
+                        android:textColor="#FFFFFF"
+                        android:textSize="14sp" />
                 </LinearLayout>
 
                 <View
@@ -658,16 +660,16 @@
                         android:id="@+id/about_btn"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:background="?android:attr/selectableItemBackground"
+                        android:background="@drawable/btn_primary"
                         android:clickable="true"
                         android:focusable="true"
                         android:paddingLeft="12dp"
                         android:paddingTop="6dp"
                         android:paddingBottom="6dp"
-                        android:paddingRight="4dp"
-                        android:text="查看 ›"
-                        android:textColor="@color/bg"
-                        android:textSize="15sp" />
+                        android:paddingRight="12dp"
+                        android:text="查看"
+                        android:textColor="#FFFFFF"
+                        android:textSize="14sp" />
                 </LinearLayout>
             </LinearLayout>
 

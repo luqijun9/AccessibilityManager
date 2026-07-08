@@ -1172,12 +1172,12 @@ public class MainActivity extends Activity {
             String text;
             int color = menuColor;
             if (crashFixEnabled && !hasDump) {
-                // 崩溃检测仅依赖 DUMP 权限，没有 DUMP 就显示不可用
-                text = "崩溃检测不可用ⓘ";
+                // 崩溃检测仅依赖 DUMP 权限，没有 DUMP 就显示失效
+                text = "崩溃检测失效ⓘ";
                 color = Color.rgb(0xFF, 0x00, 0x00);
             } else if (fixModeEnabled && !ShellUtil.hasAnyPermission()) {
                 // 强杀功能需要 Root/Shizuku 权限
-                text = "强杀功能不可用ⓘ";
+                text = "强杀功能失效ⓘ";
                 color = Color.rgb(0xFF, 0x00, 0x00);
             } else {
                 text = null;
