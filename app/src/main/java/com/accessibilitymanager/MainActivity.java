@@ -398,7 +398,7 @@ public class MainActivity extends Activity {
                     .setNeutralButton("Shizuku激活", new DialogInterface.OnClickListener() {
                         @Override
                         public void onClick(DialogInterface dialogInterface, int i) {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) check(true);
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) check();
                         }
                     })
                     .create().show();
@@ -828,8 +828,8 @@ public class MainActivity extends Activity {
             if (grantResult == PackageManager.PERMISSION_GRANTED) {
                 LogUtil.log(MainActivity.this, "[权限] 用户已授权(grantResult=GRANTED)，通过 Shizuku 授予权限");
                 // 先通过 check() 使用 Shizuku 授予 WRITE_SECURE_SETTINGS + DUMP，再启用崩溃修复
-                check(false);
-                enableCrashFix();
+                check();
+                enableCrashFix(false);
             } else {
                 LogUtil.log(MainActivity.this, "[权限] 用户拒绝授权(grantResult=" + grantResult + ")");
                 Toast.makeText(MainActivity.this, "获取shizuku权限失败", Toast.LENGTH_SHORT).show();
@@ -848,12 +848,12 @@ public class MainActivity extends Activity {
         } else if (grantResult == PackageManager.PERMISSION_GRANTED) {
             // 权限被授予时执行 check() 尝试授予 WRITE_SECURE_SETTINGS
             // 注意：拒绝时不能调用 check()，否则 check() 内部会重新 requestPermission 导致无限循环
-            check(true);
+            check();
         }
     };
 
     //检查Shizuku权限，申请Shizuku权限的函数
-    private void check(boolean showSuccessToast) {
+    private void check() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
         if (checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
                 && checkSelfPermission("android.permission.DUMP") == PackageManager.PERMISSION_GRANTED)
@@ -881,7 +881,7 @@ public class MainActivity extends Activity {
                 out.flush();
                 out.close();
                 p.waitFor();
-                if (p.exitValue() == 0 && showSuccessToast) {
+                if (p.exitValue() == 0) {
                     Toast.makeText(this, "成功激活", Toast.LENGTH_SHORT).show();
                 }
             } catch (IOException | InterruptedException ioException) {
@@ -910,6 +910,10 @@ public class MainActivity extends Activity {
     }
 
     private void enableCrashFix() {
+        enableCrashFix(true);
+    }
+
+    private void enableCrashFix(boolean showToast) {
         LogUtil.log(this, "[权限] 启用崩溃修复");
         sp.edit().putBoolean("crashfix", true).putBoolean("crashfix_auto_disabled", false).apply();
         updateToolbarMenu();
@@ -921,7 +925,9 @@ public class MainActivity extends Activity {
         if (state == ShellUtil.PERM_ROOT) permInfo.append("Root");
         else if (state == ShellUtil.PERM_SHIZUKU) permInfo.append("Shizuku");
         LogUtil.log(this, "[权限] 当前权限: " + permInfo.toString());
-        Toast.makeText(this, "已获取" + permInfo.toString() + "权限，崩溃检测已开启", Toast.LENGTH_SHORT).show();
+        if (showToast) {
+            Toast.makeText(this, "已获取" + permInfo.toString() + "权限，崩溃检测已开启", Toast.LENGTH_SHORT).show();
+        }
         if (!daemon.isEmpty()) {
             StartForeGroundDaemon();
         }
@@ -982,6 +988,7 @@ public class MainActivity extends Activity {
                     p.waitFor();
                     runOnUiThread(() -> {
                         if (p.exitValue() == 0) {
+                            Toast.makeText(this, "成功激活", Toast.LENGTH_SHORT).show();
                             ShellUtil.reset();
                             updateToolbarMenu();
                         } else {
@@ -1780,7 +1787,7 @@ public class MainActivity extends Activity {
                     .setNeutralButton("Shizuku激活", new DialogInterface.OnClickListener() {
                         @Override
                         public void onClick(DialogInterface dialogInterface, int i) {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) check(true);
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) check();
                         }
                     })
                     .create().show();

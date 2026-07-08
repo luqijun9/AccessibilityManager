@@ -66,11 +66,14 @@ public class SettingsActivity extends Activity {
                             out.flush();
                             out.close();
                             p.waitFor();
+                            if (p.exitValue() == 0) {
+                                Toast.makeText(SettingsActivity.this, "成功激活", Toast.LENGTH_SHORT).show();
+                            }
                         } catch (Exception e) {
                             LogUtil.log(this, "[权限] Shizuku 授予 DUMP 失败: " + e.getMessage());
                         }
                         ShellUtil.reset();
-                        enableCrashFix();
+                        enableCrashFix(false);
                     } else {
                         Toast.makeText(this, "获取Shizuku权限失败", Toast.LENGTH_SHORT).show();
                     }
@@ -423,6 +426,10 @@ public class SettingsActivity extends Activity {
     }
 
     private void enableCrashFix() {
+        enableCrashFix(true);
+    }
+
+    private void enableCrashFix(boolean showToast) {
         LogUtil.log(this, "[权限] 启用崩溃修复");
         sp.edit().putBoolean("crashfix", true)
                 .putBoolean("crashfix_auto_disabled", false).apply();
@@ -435,7 +442,9 @@ public class SettingsActivity extends Activity {
         if (hasDump && hasShell) permInfo.append("+");
         if (hasShell) permInfo.append(ShellUtil.hasRoot() ? "Root" : "Shizuku");
         LogUtil.log(this, "[权限] 当前权限: " + permInfo.toString());
-        Toast.makeText(this, "已获取" + permInfo.toString() + "权限，崩溃检测已开启", Toast.LENGTH_SHORT).show();
+        if (showToast) {
+            Toast.makeText(this, "已获取" + permInfo.toString() + "权限，崩溃检测已开启", Toast.LENGTH_SHORT).show();
+        }
         String daemon = sp.getString("daemon", "");
         if (!daemon.isEmpty()) {
             startDaemonService();
@@ -563,8 +572,9 @@ public class SettingsActivity extends Activity {
                     p.waitFor();
                     runOnUiThread(() -> {
                         if (p.exitValue() == 0) {
-                            Toast.makeText(this, "成功激活", Toast.LENGTH_SHORT).show();
-                            enableCrashFix();
+                            Toast.makeText(SettingsActivity.this, "成功激活", Toast.LENGTH_SHORT).show();
+                            ShellUtil.reset();
+                            enableCrashFix(false);
                         } else {
                             Toast.makeText(this, "激活失败", Toast.LENGTH_SHORT).show();
                         }
