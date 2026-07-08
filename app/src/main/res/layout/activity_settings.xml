@@ -269,7 +269,7 @@
                         android:paddingTop="6dp"
                         android:paddingBottom="6dp"
                         android:paddingRight="12dp"
-                        android:text="设置"
+                        android:text="设置 ›"
                         android:textColor="#FFFFFF"
                         android:textSize="14sp" />
                 </LinearLayout>
@@ -623,7 +623,7 @@
                         android:paddingTop="6dp"
                         android:paddingBottom="6dp"
                         android:paddingRight="12dp"
-                        android:text="检查"
+                        android:text="检查 ›"
                         android:textColor="#FFFFFF"
                         android:textSize="14sp" />
                 </LinearLayout>
@@ -667,7 +667,7 @@
                         android:paddingTop="6dp"
                         android:paddingBottom="6dp"
                         android:paddingRight="12dp"
-                        android:text="查看"
+                        android:text="查看 ›"
                         android:textColor="#FFFFFF"
                         android:textSize="14sp" />
                 </LinearLayout>

@@ -373,6 +373,26 @@ public class daemonService extends Service {
         crashCheckExecutor.submit(() -> checkCrashedServicesInternal(source));
     }
 
+    private void recordUnlockDuplicate() {
+        String today = new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(new java.util.Date());
+        String savedDate = sp.getString("unlock_duplicate_date", "");
+        int count = sp.getInt("unlock_duplicate_count", 0);
+        
+        if (!today.equals(savedDate)) {
+            count = 0;
+            sp.edit().putString("unlock_duplicate_date", today).apply();
+        }
+        
+        count++;
+        sp.edit().putInt("unlock_duplicate_count", count).apply();
+        LogUtil.log(daemonService.this, "[解锁检测] 记录到一次后台重复触发，今日累计: " + count + " 次");
+        
+        if (count >= 3) {
+            LogUtil.log(daemonService.this, "[解锁检测] 今日累计达到3次，触发提示");
+            sp.edit().putBoolean("unlock_duplicate_detected", true).apply();
+        }
+    }
+
     /** 在 crashCheckExecutor 线程中执行：运行 dumpsys，若发现崩溃则回调 daemonExecutor 修复 */
     //region debug-point crash-detection-internal
     private void checkCrashedServicesInternal(String source) {
@@ -382,14 +402,12 @@ public class daemonService extends Service {
         if ("解锁".equals(source)) {
             mLastUnlockBroadcastTime = now;
             if (isBackground && now - mLastAccessibilityUnlockTime <= 3000) {
-                LogUtil.log(daemonService.this, "[解锁检测] 后台同时触发解锁广播+无障碍检测，记录重复标志");
-                sp.edit().putBoolean("unlock_duplicate_detected", true).apply();
+                recordUnlockDuplicate();
             }
         } else if ("解锁(无障碍检测)".equals(source)) {
             mLastAccessibilityUnlockTime = now;
             if (isBackground && now - mLastUnlockBroadcastTime <= 3000) {
-                LogUtil.log(daemonService.this, "[解锁检测] 后台同时触发无障碍检测+解锁广播，记录重复标志");
-                sp.edit().putBoolean("unlock_duplicate_detected", true).apply();
+                recordUnlockDuplicate();
             }
         }
 
