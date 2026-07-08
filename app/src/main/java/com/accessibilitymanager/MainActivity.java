@@ -1160,14 +1160,7 @@ public class MainActivity extends Activity {
         if (menu == null) return;
         int menuColor = night ? Color.WHITE : Color.BLACK;
 
-        // 日志按钮 - 使用与权限显示一致的样式
-        MenuItem logItem = menu.findItem(R.id.viewlog);
-        if (logItem != null) {
-            SpannableStringBuilder logSsb = new SpannableStringBuilder("日志");
-            logSsb.setSpan(new ForegroundColorSpan(menuColor),
-                    0, 2, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            logItem.setTitle(logSsb);
-        }
+
 
         // 权限显示按钮 - 每次更新菜单时重新检测权限状态，防止 Shizuku 停止后仍显示旧状态
         MenuItem permItem = menu.findItem(R.id.perm_status);

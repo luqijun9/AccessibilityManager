@@ -6,39 +6,19 @@
     android:fitsSystemWindows="true"
     android:orientation="vertical">
 
-    <LinearLayout
+    <!-- ===== Toolbar ===== -->
+    <android.widget.Toolbar
+        android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="?android:attr/actionBarSize"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingStart="4dp"
-        android:paddingEnd="16dp">
-
-        <TextView
-            android:id="@+id/btn_back"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:background="?android:attr/selectableItemBackground"
-            android:clickable="true"
-            android:focusable="true"
-            android:padding="8dp"
-            android:text="←"
-            android:textColor="@color/bg"
-            android:textSize="20sp" />
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="运行日志"
-            android:textColor="@color/text_primary"
-            android:textSize="18sp"
-            android:textStyle="bold" />
-    </LinearLayout>
+        android:background="@color/screen_bg"
+        android:theme="@style/ToolbarOverlay"
+        android:title="运行日志"
+        android:navigationIcon="@android:drawable/ic_menu_revert" />
 
     <View
         android:layout_width="match_parent"
-        android:layout_height="1px"
+        android:layout_height="0.5dp"
         android:background="@color/divider" />
 
     <ListView
@@ -46,6 +26,7 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
+        android:background="@color/card_bg"
         android:paddingStart="16dp"
         android:paddingEnd="16dp"
         android:divider="@null"
@@ -56,6 +37,7 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
+        android:background="@color/card_bg"
         android:gravity="center"
         android:text="暂无日志记录"
         android:textColor="@color/text_hint"
@@ -70,54 +52,51 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="end"
+        android:background="@color/card_bg"
         android:orientation="horizontal"
-        android:padding="12dp">
+        android:weightSum="3"
+        android:padding="8dp">
 
-        <TextView
-            android:id="@+id/btn_exec"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:background="?android:attr/selectableItemBackground"
-            android:clickable="true"
-            android:focusable="true"
-            android:padding="8dp"
-            android:text="执行命令"
-            android:textColor="@color/bg"
-            android:textSize="15sp" />
+
 
         <TextView
             android:id="@+id/btn_dump_exec"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:background="?android:attr/selectableItemBackground"
             android:clickable="true"
             android:focusable="true"
-            android:padding="8dp"
+            android:gravity="center"
+            android:padding="12dp"
             android:text="DUMP执行"
             android:textColor="@color/bg"
             android:textSize="15sp" />
 
         <TextView
             android:id="@+id/btn_share"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:background="?android:attr/selectableItemBackground"
             android:clickable="true"
             android:focusable="true"
-            android:padding="8dp"
-            android:text="分享"
+            android:gravity="center"
+            android:padding="12dp"
+            android:text="分享日志"
             android:textColor="@color/bg"
             android:textSize="15sp" />
 
         <TextView
             android:id="@+id/btn_close"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:background="?android:attr/selectableItemBackground"
             android:clickable="true"
             android:focusable="true"
-            android:padding="8dp"
+            android:gravity="center"
+            android:padding="12dp"
             android:text="关闭"
             android:textColor="@color/bg"
             android:textSize="15sp" />

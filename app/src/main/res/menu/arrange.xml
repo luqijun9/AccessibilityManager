@@ -7,7 +7,8 @@
         android:title="" />
     <item
         android:id="@+id/viewlog"
-        android:showAsAction="always|withText"
+        android:icon="@drawable/ic_log"
+        android:showAsAction="always"
         android:title="日志" />
     <item
         android:id="@+id/search"

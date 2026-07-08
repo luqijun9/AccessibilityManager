@@ -48,36 +48,6 @@ public class LogActivity extends Activity {
     // ── 实时监听 ──
     private LogUtil.LogListener mLogListener;
 
-    private void executeCommand() {
-        String result = getAccessibilityServiceInfo();
-
-        // 添加分隔标题
-        entries.add(new LogUtil.LogEntry(
-                LogUtil.LogEntry.TYPE_DATE_SEPARATOR,
-                "────────  dumpsys accessibility  ────────"
-        ));
-
-        // 添加结果行
-        for (String line : result.split("\n")) {
-            entries.add(new LogUtil.LogEntry(LogUtil.LogEntry.TYPE_LOG_LINE, line));
-        }
-
-        // 添加结尾分隔
-        entries.add(new LogUtil.LogEntry(
-                LogUtil.LogEntry.TYPE_DATE_SEPARATOR,
-                "────────  执行完毕  ────────"
-        ));
-
-        if (adapter == null) {
-            listView.setVisibility(View.VISIBLE);
-            tvEmpty.setVisibility(View.GONE);
-            adapter = new LogAdapter(entries, night);
-            listView.setAdapter(adapter);
-        } else {
-            adapter.notifyDataSetChanged();
-        }
-        listView.setSelection(entries.size() - 1);
-    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -107,11 +77,16 @@ public class LogActivity extends Activity {
 
         listView = findViewById(R.id.recycler_log);
         tvEmpty = findViewById(R.id.tv_empty);
+
+        android.widget.Toolbar toolbar = findViewById(R.id.toolbar);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            toolbar.setNavigationIcon(R.drawable.ic_back_arrow);
+        }
+        toolbar.setNavigationOnClickListener(v -> finish());
+
         findViewById(R.id.btn_close).setOnClickListener(v -> finish());
         findViewById(R.id.btn_share).setOnClickListener(v -> shareLog());
-        findViewById(R.id.btn_exec).setOnClickListener(v -> executeCommand());
         findViewById(R.id.btn_dump_exec).setOnClickListener(v -> executeDumpDirect());
-        findViewById(R.id.btn_back).setOnClickListener(v -> finish());
 
         // 初次加载已有日志
         loadLogs();
@@ -237,6 +212,32 @@ public class LogActivity extends Activity {
     private String getAccessibilityServiceInfo() {
         StringBuilder sb = new StringBuilder();
         try {
+            boolean hasDump = false;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                hasDump = checkSelfPermission(android.Manifest.permission.DUMP) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            } else {
+                hasDump = checkCallingOrSelfPermission(android.Manifest.permission.DUMP) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            }
+
+            if (hasDump) {
+                Process process = Runtime.getRuntime().exec("dumpsys accessibility");
+                BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), "UTF-8"));
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line).append("\n");
+                }
+                reader.close();
+
+                BufferedReader errReader = new BufferedReader(new InputStreamReader(process.getErrorStream(), "UTF-8"));
+                while ((line = errReader.readLine()) != null) {
+                    sb.append("[错误] ").append(line).append("\n");
+                }
+                errReader.close();
+
+                process.waitFor();
+                return sb.toString();
+            }
+
             Process process;
             int permState = ShellUtil.getPermissionState();
 
@@ -249,7 +250,7 @@ public class LogActivity extends Activity {
             } else if (permState == ShellUtil.PERM_SHIZUKU) {
                 process = Shizuku.newProcess(new String[]{"dumpsys", "accessibility"}, null, null);
             } else {
-                sb.append("无 Root 或 Shizuku 权限，无法获取 Accessibility 服务信息");
+                sb.append("无 DUMP、Root 或 Shizuku 权限，无法获取 Accessibility 服务信息");
                 return sb.toString();
             }
 
