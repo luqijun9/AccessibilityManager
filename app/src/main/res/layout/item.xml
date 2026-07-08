@@ -79,6 +79,8 @@
                     android:layout_toStartOf="@+id/s"
                     android:background="@android:color/transparent"
                     android:src="@drawable/lock"
+                    android:tint="?attr/colorPrimary"
+                    app:tint="?attr/colorPrimary"
                     android:visibility="invisible" />
             </RelativeLayout>
 

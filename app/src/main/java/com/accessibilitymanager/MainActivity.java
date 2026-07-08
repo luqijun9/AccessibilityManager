@@ -156,12 +156,17 @@ public class MainActivity extends Activity {
 
 
     private String mCurrentTheme;
+    private int mColorPrimary;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         ThemeUtils.applyTheme(this);
         mCurrentTheme = getSharedPreferences("Main", Context.MODE_PRIVATE).getString(ThemeUtils.PREF_THEME, ThemeUtils.THEME_BLUE);
         super.onCreate(savedInstanceState);
+
+        android.util.TypedValue typedValue = new android.util.TypedValue();
+        getTheme().resolveAttribute(com.google.android.material.R.attr.colorPrimary, typedValue, true);
+        mColorPrimary = typedValue.data;
 
         int nightMode = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
         night = nightMode == Configuration.UI_MODE_NIGHT_YES;
@@ -1507,6 +1512,9 @@ public class MainActivity extends Activity {
                 holder.sw = convertView.findViewById(R.id.s);
                 holder.ib = convertView.findViewById(R.id.ib);
                 holder.pinIndicator = convertView.findViewById(R.id.pin_indicator);
+                
+                holder.ib.setColorFilter(mColorPrimary, android.graphics.PorterDuff.Mode.SRC_IN);
+                
                 convertView.setTag(holder);
             } else {
                 holder = (ViewHolder) convertView.getTag();
