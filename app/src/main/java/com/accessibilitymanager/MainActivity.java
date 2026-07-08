@@ -1621,7 +1621,7 @@ public class MainActivity extends Activity {
             convertView.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View view) {
-                    AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
+                    com.google.android.material.dialog.MaterialAlertDialogBuilder builder = new com.google.android.material.dialog.MaterialAlertDialogBuilder(MainActivity.this);
                     int fb = info.feedbackType;
                     String feedback = "";
                     if ((fb & 32) != 0) feedback += "盲文反馈\n";
