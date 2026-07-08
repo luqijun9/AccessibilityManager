@@ -1,19 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/screen_bg"
+    android:background="?attr/colorSurface"
     android:fitsSystemWindows="true"
     android:orientation="vertical">
 
     <!-- ===== Toolbar ===== -->
-    <android.widget.Toolbar
+    <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="?android:attr/actionBarSize"
-        android:background="@color/screen_bg"
+        android:background="?attr/colorSurface"
         android:theme="@style/ToolbarOverlay"
-        android:title="运行日志"
+        app:title="运行日志"
         android:navigationIcon="@android:drawable/ic_menu_revert" />
 
     <View
@@ -26,7 +27,7 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:background="@color/card_bg"
+        android:background="?attr/colorSurfaceContainer"
         android:paddingStart="16dp"
         android:paddingEnd="16dp"
         android:divider="@null"
@@ -37,7 +38,7 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:background="@color/card_bg"
+        android:background="?attr/colorSurfaceContainer"
         android:gravity="center"
         android:text="暂无日志记录"
         android:textColor="@color/text_hint"
@@ -52,53 +53,35 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/card_bg"
+        android:background="?attr/colorSurfaceContainer"
         android:orientation="horizontal"
         android:weightSum="3"
         android:padding="8dp">
 
 
 
-        <TextView
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_dump_exec"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:background="?android:attr/selectableItemBackground"
-            android:clickable="true"
-            android:focusable="true"
-            android:gravity="center"
-            android:padding="12dp"
-            android:text="DUMP执行"
-            android:textColor="@color/bg"
-            android:textSize="15sp" />
+            android:text="DUMP执行" />
 
-        <TextView
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_share"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:background="?android:attr/selectableItemBackground"
-            android:clickable="true"
-            android:focusable="true"
-            android:gravity="center"
-            android:padding="12dp"
-            android:text="分享日志"
-            android:textColor="@color/bg"
-            android:textSize="15sp" />
+            android:text="分享日志" />
 
-        <TextView
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_close"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:background="?android:attr/selectableItemBackground"
-            android:clickable="true"
-            android:focusable="true"
-            android:gravity="center"
-            android:padding="12dp"
-            android:text="关闭"
-            android:textColor="@color/bg"
-            android:textSize="15sp" />
+            android:text="关闭" />
     </LinearLayout>
 </LinearLayout>

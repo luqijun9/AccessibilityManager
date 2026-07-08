@@ -1,19 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:paddingTop="3dp"
     android:paddingBottom="3dp">
 
-    <LinearLayout
+    <com.google.android.material.card.MaterialCardView
         android:id="@+id/card_layout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginStart="14dp"
         android:layout_marginEnd="14dp"
-        android:background="@drawable/card_bg"
-        android:orientation="horizontal"
-        android:padding="8dp">
+        app:cardCornerRadius="12dp"
+        app:cardElevation="0dp"
+        app:strokeWidth="0dp"
+        app:cardBackgroundColor="?attr/colorSurfaceContainer">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="8dp">
 
         <FrameLayout
             android:layout_width="wrap_content"
@@ -44,23 +52,30 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_alignParentStart="true"
+                    android:layout_centerVertical="true"
                     android:layout_toStartOf="@id/ib"
                     android:textColor="@color/text_primary"
                     android:textSize="16sp"
                     android:textStyle="bold" />
 
-                <Switch
+                <com.google.android.material.materialswitch.MaterialSwitch
                     android:id="@+id/s"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_alignParentEnd="true"
+                    android:layout_centerVertical="true"
+                    android:layout_marginTop="-6dp"
+                    android:layout_marginBottom="-6dp"
+                    android:scaleX="0.75"
+                    android:scaleY="0.75"
+                    android:minHeight="0dp"
                     android:switchMinWidth="0dp" />
 
                 <ImageButton
                     android:id="@+id/ib"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_gravity="center"
+                    android:layout_centerVertical="true"
                     android:layout_toStartOf="@+id/s"
                     android:background="@android:color/transparent"
                     android:src="@drawable/lock"
@@ -72,11 +87,13 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_below="@+id/e"
+                android:layout_marginTop="-2dp"
                 android:maxLines="2"
                 android:textColor="@color/text_secondary"
                 android:textSize="13sp" />
         </RelativeLayout>
     </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
 
     <View
         android:id="@+id/pin_indicator"
@@ -85,6 +102,6 @@
         android:layout_alignTop="@id/card_layout"
         android:layout_alignBottom="@id/card_layout"
         android:layout_marginStart="4dp"
-        android:background="@color/bg"
+        android:background="?attr/colorPrimary"
         android:visibility="gone" />
 </RelativeLayout>

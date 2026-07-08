@@ -1,27 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/screen_bg"
+    android:background="?attr/colorSurface"
     android:fitsSystemWindows="true"
     android:orientation="vertical">
 
-    <!-- ===== Toolbar ===== -->
-    <android.widget.Toolbar
+    <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="?android:attr/actionBarSize"
-        android:background="@android:color/transparent"
+        android:background="?attr/colorSurface"
         android:theme="@style/ToolbarOverlay"
-        android:title="设置"
+        app:title="设置"
         android:navigationIcon="@android:drawable/ic_menu_revert" />
 
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="0.5dp"
-        android:background="@color/divider" />
-
-    <!-- ===== 可滚动内容区 ===== -->
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -36,48 +30,72 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
-            <!-- ============================================================ -->
-            <!-- 分组1：常规设置                                               -->
-            <!-- ============================================================ -->
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="常规设置"
-                android:textColor="@color/text_hint"
-                android:textSize="13sp"
-                android:paddingLeft="4dp"
-                android:paddingBottom="10dp" />
-
-            <!-- 卡片1 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:background="@drawable/dialog_bg"
-                android:paddingTop="0dp">
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingLeft="4dp"
+                android:paddingTop="16dp"
+                android:paddingBottom="8dp">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="常规设置"
+                    android:textColor="@color/text_hint"
+                    android:textSize="13sp" />
+            </LinearLayout>
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="0dp"
+                app:strokeWidth="0dp"
+                app:cardBackgroundColor="?attr/colorSurfaceContainer">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
 
                 <!-- 开机启动保活服务 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
+                    android:minHeight="72dp"
                     android:paddingLeft="20dp"
                     android:paddingRight="16dp"
-                    android:paddingTop="16dp"
-                    android:paddingBottom="16dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
                     android:background="?android:attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="开机启动保活服务"
-                        android:textColor="@color/text_primary"
-                        android:textSize="16sp" />
+                        android:orientation="vertical"
+                        android:paddingRight="16dp">
 
-                    <Switch
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="开机启动保活服务"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="设备重启后自动在后台运行，确保服务不中断"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp"
+                            android:layout_marginTop="2dp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/boot"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
@@ -92,28 +110,45 @@
                     android:layout_marginRight="16dp"
                     android:background="@color/divider" />
 
+
                 <!-- 显示Toast保活提示 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
+                    android:minHeight="72dp"
                     android:paddingLeft="20dp"
                     android:paddingRight="16dp"
-                    android:paddingTop="16dp"
-                    android:paddingBottom="16dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
                     android:background="?android:attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="显示Toast保活提示"
-                        android:textColor="@color/text_primary"
-                        android:textSize="16sp" />
+                        android:orientation="vertical"
+                        android:paddingRight="16dp">
 
-                    <Switch
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="显示Toast保活提示"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="保活执行时在屏幕底部弹出提示信息"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp"
+                            android:layout_marginTop="2dp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/toast"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
@@ -133,23 +168,39 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
+                    android:minHeight="72dp"
                     android:paddingLeft="20dp"
                     android:paddingRight="16dp"
-                    android:paddingTop="16dp"
-                    android:paddingBottom="16dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
                     android:background="?android:attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="不显示后台卡片"
-                        android:textColor="@color/text_primary"
-                        android:textSize="16sp" />
+                        android:orientation="vertical"
+                        android:paddingRight="16dp">
 
-                    <Switch
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="不显示后台卡片"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="将应用从多任务近期任务列表 (Recents) 中隐藏"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp"
+                            android:layout_marginTop="2dp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/hide"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
@@ -164,28 +215,44 @@
                     android:layout_marginRight="16dp"
                     android:background="@color/divider" />
 
-                <!-- 仅显示用户应用 -->
+                <!-- 仅作用于用户安装的应用 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
+                    android:minHeight="72dp"
                     android:paddingLeft="20dp"
                     android:paddingRight="16dp"
-                    android:paddingTop="16dp"
-                    android:paddingBottom="16dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
                     android:background="?android:attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="仅显示用户应用"
-                        android:textColor="@color/text_primary"
-                        android:textSize="16sp" />
+                        android:orientation="vertical"
+                        android:paddingRight="16dp">
 
-                    <Switch
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="仅显示用户应用"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="不显示系统应用的服务"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp"
+                            android:layout_marginTop="2dp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/useronly"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
@@ -200,28 +267,44 @@
                     android:layout_marginRight="16dp"
                     android:background="@color/divider" />
 
-                <!-- 延迟1秒保活 -->
+                <!-- 延迟保活启动 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
+                    android:minHeight="72dp"
                     android:paddingLeft="20dp"
                     android:paddingRight="16dp"
-                    android:paddingTop="16dp"
-                    android:paddingBottom="16dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
                     android:background="?android:attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="延迟1秒保活"
-                        android:textColor="@color/text_primary"
-                        android:textSize="16sp" />
+                        android:orientation="vertical"
+                        android:paddingRight="16dp">
 
-                    <Switch
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="延迟保活启动"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="触发保活后延迟1秒再执行"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp"
+                            android:layout_marginTop="2dp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/delay_daemon"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
@@ -236,66 +319,116 @@
                     android:layout_marginRight="16dp"
                     android:background="@color/divider" />
 
-                <!-- ======== 通知相关 ======== -->
                 <!-- 自定义通知栏文字 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
+                    android:minHeight="72dp"
                     android:paddingLeft="20dp"
                     android:paddingRight="16dp"
-                    android:paddingTop="16dp"
-                    android:paddingBottom="16dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
                     android:background="?android:attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="自定义通知栏文字"
-                        android:textColor="@color/text_primary"
-                        android:textSize="16sp" />
+                        android:orientation="vertical"
+                        android:paddingRight="16dp">
 
-                    <TextView
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="自定义通知栏文字"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="设置通知栏中显示的常驻内容"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp"
+                            android:layout_marginTop="2dp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.button.MaterialButton
                         android:id="@+id/notify_custom_btn"
+                        style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:background="@drawable/btn_primary"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:paddingLeft="12dp"
-                        android:paddingTop="6dp"
-                        android:paddingBottom="6dp"
-                        android:paddingRight="12dp"
-                        android:text="设置 ›"
-                        android:textColor="#FFFFFF"
+                        android:text="设置"
                         android:textSize="14sp" />
                 </LinearLayout>
 
-            </LinearLayout>
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginLeft="20dp"
+                    android:layout_marginRight="16dp"
+                    android:background="@color/divider" />
 
-            <!-- ============================================================ -->
-            <!-- 分组2：崩溃服务检测设置                                       -->
-            <!-- ============================================================ -->
+                <!-- 主题颜色 -->
+                <LinearLayout
+                    android:id="@+id/btn_theme_color"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:minHeight="72dp"
+                    android:paddingLeft="20dp"
+                    android:paddingRight="16dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:paddingRight="16dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="主题颜色"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+
+                        <TextView
+                            android:id="@+id/tv_theme_desc"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="经典蓝"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp"
+                            android:layout_marginTop="2dp" />
+                    </LinearLayout>
+                </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingLeft="4dp"
-                android:paddingTop="28dp"
-                android:paddingBottom="10dp">
-
+                android:paddingTop="16dp"
+                android:paddingBottom="8dp">
                 <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="崩溃服务检测设置"
+                    android:text="崩溃服务检测"
                     android:textColor="@color/text_hint"
                     android:textSize="13sp" />
-
                 <TextView
                     android:id="@+id/crash_tutorial_btn"
                     android:layout_width="wrap_content"
@@ -306,40 +439,118 @@
                     android:paddingLeft="8dp"
                     android:paddingRight="8dp"
                     android:text="说明"
-                    android:textColor="@color/bg"
+                    android:textColor="?attr/colorPrimary"
                     android:textSize="13sp" />
             </LinearLayout>
-
-            <!-- 卡片2 -->
-            <LinearLayout
+            <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:background="@drawable/dialog_bg">
+                app:cardCornerRadius="16dp"
+                app:cardElevation="0dp"
+                app:strokeWidth="0dp"
+                app:cardBackgroundColor="?attr/colorSurfaceContainer">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
 
                 <!-- 崩溃服务检测总开关 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
+                    android:minHeight="72dp"
                     android:paddingLeft="20dp"
                     android:paddingRight="16dp"
-                    android:paddingTop="16dp"
-                    android:paddingBottom="16dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
                     android:background="?android:attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="崩溃服务检测总开关"
-                        android:textColor="@color/text_primary"
-                        android:textSize="16sp" />
+                        android:orientation="vertical"
+                        android:paddingRight="16dp">
 
-                    <Switch
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="崩溃服务检测总开关"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="控制崩溃服务检测是否打开"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp"
+                            android:layout_marginTop="2dp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/crashfix"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:clickable="true"
+                        android:focusable="false" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/crash_dependent_layout"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginLeft="20dp"
+                    android:layout_marginRight="16dp"
+                    android:background="@color/divider" />
+
+                <!-- 先强杀应用再重启服务 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:minHeight="72dp"
+                    android:paddingLeft="20dp"
+                    android:paddingRight="16dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:paddingRight="16dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="先强杀应用再重启服务"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="需 Root/Shizuku 权限，彻底停止目标应用后重启"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp"
+                            android:layout_marginTop="2dp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/fixmode"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:clickable="true"
@@ -353,64 +564,44 @@
                     android:layout_marginRight="16dp"
                     android:background="@color/divider" />
 
-                <!-- 子项：重启服务时强杀对应app -->
+                <!-- 解锁设备时检测 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
-                    android:paddingLeft="40dp"
+                    android:minHeight="72dp"
+                    android:paddingLeft="20dp"
                     android:paddingRight="16dp"
-                    android:paddingTop="16dp"
-                    android:paddingBottom="16dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
                     android:background="?android:attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="先强杀应用再重启服务"
-                        android:textColor="@color/text_primary"
-                        android:textSize="15sp" />
+                        android:orientation="vertical"
+                        android:paddingRight="16dp">
 
-                    <Switch
-                        android:id="@+id/fixmode"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:clickable="true"
-                        android:focusable="false" />
-                </LinearLayout>
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="解锁设备时检测"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
 
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginLeft="40dp"
-                    android:layout_marginRight="16dp"
-                    android:background="@color/divider" />
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="亮屏并解锁后自动执行一次服务状态检查"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp"
+                            android:layout_marginTop="2dp" />
+                    </LinearLayout>
 
-                <!-- 子项：解锁设备时检测 -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:paddingLeft="40dp"
-                    android:paddingRight="16dp"
-                    android:paddingTop="16dp"
-                    android:paddingBottom="16dp"
-                    android:background="?android:attr/selectableItemBackground"
-                    android:clickable="true"
-                    android:focusable="true">
-
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="解锁设备时检测"
-                        android:textColor="@color/text_primary"
-                        android:textSize="15sp" />
-
-                    <Switch
+                    <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/unlock_crash_check"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
@@ -421,32 +612,48 @@
                 <View
                     android:layout_width="match_parent"
                     android:layout_height="1dp"
-                    android:layout_marginLeft="40dp"
+                    android:layout_marginLeft="20dp"
                     android:layout_marginRight="16dp"
                     android:background="@color/divider" />
 
-                <!-- 子项：定时崩溃检测 -->
+                <!-- 定时检测状态 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
-                    android:paddingLeft="40dp"
+                    android:minHeight="72dp"
+                    android:paddingLeft="20dp"
                     android:paddingRight="16dp"
-                    android:paddingTop="16dp"
-                    android:paddingBottom="16dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
                     android:background="?android:attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="定时检测"
-                        android:textColor="@color/text_primary"
-                        android:textSize="15sp" />
+                        android:orientation="vertical"
+                        android:paddingRight="16dp">
 
-                    <Switch
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="定时检测状态"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="在后台每隔一段时间自动轮询检测崩溃服务"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp"
+                            android:layout_marginTop="2dp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/periodic_check"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
@@ -457,126 +664,174 @@
                 <View
                     android:layout_width="match_parent"
                     android:layout_height="1dp"
-                    android:layout_marginLeft="40dp"
+                    android:layout_marginLeft="20dp"
                     android:layout_marginRight="16dp"
                     android:background="@color/divider" />
 
-                <!-- 子项(二级)：设定定时崩溃检测间隔 -->
+                <!-- 设定检测间隔 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
-                    android:paddingLeft="60dp"
+                    android:minHeight="72dp"
+                    android:paddingLeft="20dp"
                     android:paddingRight="16dp"
-                    android:paddingTop="16dp"
-                    android:paddingBottom="16dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
                     android:background="?android:attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="设定检测间隔"
-                        android:textColor="@color/text_primary"
-                        android:textSize="15sp" />
+                        android:orientation="vertical"
+                        android:paddingRight="16dp">
 
-                    <TextView
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="设定检测间隔"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="点击修改定时器的时间间隔"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp"
+                            android:layout_marginTop="2dp" />
+                    </LinearLayout>
+                    <com.google.android.material.button.MaterialButton
                         android:id="@+id/periodic_interval_label"
+                        style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:background="?android:attr/selectableItemBackground"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:paddingLeft="12dp"
-                        android:paddingTop="6dp"
-                        android:paddingBottom="6dp"
-                        android:paddingRight="4dp"
-                        android:text="10分钟"
-                        android:textColor="@color/bg"
-                        android:textSize="15sp" />
+                        android:text="10分钟" />
                 </LinearLayout>
 
                 <View
                     android:layout_width="match_parent"
                     android:layout_height="1dp"
-                    android:layout_marginLeft="40dp"
+                    android:layout_marginLeft="20dp"
                     android:layout_marginRight="16dp"
                     android:background="@color/divider" />
 
-                <!-- 子项：系统应用无障碍变化不触发检测 -->
+                <!-- 系统应用变化不触发检测 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
-                    android:paddingLeft="40dp"
+                    android:minHeight="72dp"
+                    android:paddingLeft="20dp"
                     android:paddingRight="16dp"
-                    android:paddingTop="16dp"
-                    android:paddingBottom="18dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
                     android:background="?android:attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="系统应用变化不触发检测"
-                        android:textColor="@color/text_primary"
-                        android:textSize="15sp" />
+                        android:orientation="vertical"
+                        android:paddingRight="16dp">
 
-                    <Switch
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="系统应用变化不触发检测"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="系统应用的无障碍服务可能会频繁改变，引起多次崩溃检测，从而增加耗电"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp"
+                            android:layout_marginTop="2dp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/ignore_system_crash"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:clickable="true"
                         android:focusable="false" />
                 </LinearLayout>
-            </LinearLayout>
+                </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
-            <!-- ============================================================ -->
-            <!-- 分组3：其他                                                   -->
-            <!-- ============================================================ -->
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="其他"
-                android:textColor="@color/text_hint"
-                android:textSize="13sp"
-                android:paddingLeft="4dp"
-                android:paddingTop="28dp"
-                android:paddingBottom="10dp" />
-
-            <!-- 卡片3 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:background="@drawable/dialog_bg">
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingLeft="4dp"
+                android:paddingTop="16dp"
+                android:paddingBottom="8dp">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="其他"
+                    android:textColor="@color/text_hint"
+                    android:textSize="13sp" />
+            </LinearLayout>
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="0dp"
+                app:strokeWidth="0dp"
+                app:cardBackgroundColor="?attr/colorSurfaceContainer">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
 
                 <!-- 自动检测更新 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
+                    android:minHeight="72dp"
                     android:paddingLeft="20dp"
                     android:paddingRight="16dp"
-                    android:paddingTop="16dp"
-                    android:paddingBottom="16dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
                     android:background="?android:attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="自动检测更新"
-                        android:textColor="@color/text_primary"
-                        android:textSize="16sp" />
+                        android:orientation="vertical"
+                        android:paddingRight="16dp">
 
-                    <Switch
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="自动检测更新"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="每隔24小时自动检测 Github 上的新版本"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp"
+                            android:layout_marginTop="2dp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
                         android:id="@+id/auto_update"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
@@ -591,40 +846,49 @@
                     android:layout_marginRight="16dp"
                     android:background="@color/divider" />
 
-                <!-- 检测更新 -->
+                <!-- 检查更新 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
+                    android:minHeight="72dp"
                     android:paddingLeft="20dp"
                     android:paddingRight="16dp"
-                    android:paddingTop="16dp"
-                    android:paddingBottom="16dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
                     android:background="?android:attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="检测更新"
-                        android:textColor="@color/text_primary"
-                        android:textSize="16sp" />
+                        android:orientation="vertical"
+                        android:paddingRight="16dp">
 
-                    <TextView
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="检查更新"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="手动检查是否有可用新版本"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp"
+                            android:layout_marginTop="2dp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.button.MaterialButton
                         android:id="@+id/check_update_btn"
+                        style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:background="@drawable/btn_primary"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:paddingLeft="12dp"
-                        android:paddingTop="6dp"
-                        android:paddingBottom="6dp"
-                        android:paddingRight="12dp"
-                        android:text="检查 ›"
-                        android:textColor="#FFFFFF"
+                        android:text="检查"
                         android:textSize="14sp" />
                 </LinearLayout>
 
@@ -640,46 +904,53 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
+                    android:minHeight="72dp"
                     android:paddingLeft="20dp"
                     android:paddingRight="16dp"
-                    android:paddingTop="16dp"
-                    android:paddingBottom="18dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
                     android:background="?android:attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="关于"
-                        android:textColor="@color/text_primary"
-                        android:textSize="16sp" />
+                        android:orientation="vertical"
+                        android:paddingRight="16dp">
 
-                    <TextView
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="关于"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="查看应用版本和开发者信息"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp"
+                            android:layout_marginTop="2dp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.button.MaterialButton
                         android:id="@+id/about_btn"
+                        style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:background="@drawable/btn_primary"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:paddingLeft="12dp"
-                        android:paddingTop="6dp"
-                        android:paddingBottom="6dp"
-                        android:paddingRight="12dp"
-                        android:text="查看 ›"
-                        android:textColor="#FFFFFF"
+                        android:text="查看"
                         android:textSize="14sp" />
                 </LinearLayout>
-            </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
-            <!-- 底部留白 -->
             <View
                 android:layout_width="match_parent"
                 android:layout_height="20dp"
-                android:background="@color/screen_bg" />
-
+                android:background="@android:color/transparent" />
         </LinearLayout>
     </ScrollView>
-
 </LinearLayout>

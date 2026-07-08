@@ -4,11 +4,13 @@ import android.app.Activity;
 import android.app.Application;
 import android.os.Bundle;
 import android.os.PowerManager;
+import com.google.android.material.color.DynamicColors;
 
 public class App extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
+        DynamicColors.applyToActivitiesIfAvailable(this);
         registerActivityLifecycleCallbacks(new ForegroundLifecycleCallback());
     }
 

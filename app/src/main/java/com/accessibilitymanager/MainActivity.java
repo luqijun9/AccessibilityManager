@@ -55,7 +55,7 @@ import android.widget.ScrollView;
 import android.widget.Button;
 import android.widget.Switch;
 import android.widget.TextView;
-import android.widget.Toolbar;
+import androidx.appcompat.widget.Toolbar;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.inputmethod.InputMethodManager;
@@ -146,7 +146,7 @@ public class MainActivity extends Activity {
                             boolean isChecked = isServiceEnabled(tmp.get(i).getId(), settingValue);
                             View ib = view.findViewById(R.id.ib);
                             if (ib != null) ib.setVisibility(isChecked ? View.VISIBLE : View.INVISIBLE);
-                            Switch sw = view.findViewById(R.id.s);
+                            com.google.android.material.materialswitch.MaterialSwitch sw = view.findViewById(R.id.s);
                             if (sw != null) sw.setChecked(isChecked);
                         }
                     }
@@ -155,8 +155,12 @@ public class MainActivity extends Activity {
     }
 
 
+    private String mCurrentTheme;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        ThemeUtils.applyTheme(this);
+        mCurrentTheme = getSharedPreferences("Main", Context.MODE_PRIVATE).getString(ThemeUtils.PREF_THEME, ThemeUtils.THEME_BLUE);
         super.onCreate(savedInstanceState);
 
         int nightMode = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
@@ -749,6 +753,13 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        
+        String savedTheme = getSharedPreferences("Main", Context.MODE_PRIVATE).getString(ThemeUtils.PREF_THEME, ThemeUtils.THEME_BLUE);
+        if (mCurrentTheme != null && !mCurrentTheme.equals(savedTheme)) {
+            recreate();
+            return;
+        }
+        
         checkBatteryOptimization();
         if (sp.getBoolean("auto_update", true)) {
             long now = System.currentTimeMillis();
@@ -1791,7 +1802,7 @@ public class MainActivity extends Activity {
             TextView texta;
             TextView textb;
             ImageView imageView;
-            Switch sw;
+            com.google.android.material.materialswitch.MaterialSwitch sw;
             ImageButton ib;
             View pinIndicator;
         }

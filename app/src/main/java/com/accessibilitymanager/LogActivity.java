@@ -1,6 +1,6 @@
 package com.accessibilitymanager;
 
-import android.app.Activity;
+import androidx.appcompat.app.AppCompatActivity;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Color;
@@ -33,7 +33,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
-public class LogActivity extends Activity {
+public class LogActivity extends AppCompatActivity {
 
     private static final int VIEW_TYPE_LOG = 0;
     private static final int VIEW_TYPE_DATE = 1;
@@ -51,6 +51,7 @@ public class LogActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        ThemeUtils.applyTheme(this);
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_log);
 
@@ -78,7 +79,7 @@ public class LogActivity extends Activity {
         listView = findViewById(R.id.recycler_log);
         tvEmpty = findViewById(R.id.tv_empty);
 
-        android.widget.Toolbar toolbar = findViewById(R.id.toolbar);
+        androidx.appcompat.widget.Toolbar toolbar = findViewById(R.id.toolbar);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             toolbar.setNavigationIcon(R.drawable.ic_back_arrow);
         }

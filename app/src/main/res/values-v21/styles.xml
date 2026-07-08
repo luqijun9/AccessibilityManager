@@ -1,11 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:colorPrimary">@color/bg</item>
-        <item name="android:colorPrimaryDark">#354190</item>
-        <item name="android:colorAccent">@color/bg</item>
+    <style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowBackground">@color/screen_bg</item>
     </style>
 </resources>

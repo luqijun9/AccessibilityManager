@@ -2,7 +2,7 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/screen_bg"
+    android:background="?attr/colorSurface"
     android:clipChildren="false"
     android:fitsSystemWindows="true">
 
@@ -11,18 +11,18 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-        <android.widget.Toolbar
+        <com.google.android.material.appbar.MaterialToolbar
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="?android:attr/actionBarSize"
-            android:background="@android:color/transparent"
+            android:background="?attr/colorSurface"
             android:theme="@style/ToolbarOverlay" />
 
         <LinearLayout
             android:id="@+id/battery_warning"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@color/screen_bg"
+            android:background="?attr/colorSurface"
             android:gravity="center_vertical"
             android:orientation="horizontal"
             android:padding="10dp"
@@ -46,7 +46,7 @@
                 android:focusable="true"
                 android:padding="6dp"
                 android:text="去设置"
-                android:textColor="@color/bg"
+                android:textColor="?attr/colorPrimary"
                 android:textSize="13sp" />
 
             <TextView

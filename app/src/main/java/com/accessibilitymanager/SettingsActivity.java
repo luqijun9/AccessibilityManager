@@ -1,7 +1,8 @@
 package com.accessibilitymanager;
 
-import android.app.Activity;
-import android.app.AlertDialog;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import android.app.NotificationManager;
 import android.content.ComponentName;
 import android.content.Context;
@@ -25,23 +26,26 @@ import android.view.WindowManager;
 import android.view.WindowInsetsController;
 import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.Switch;
+import com.google.android.material.materialswitch.MaterialSwitch;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import rikka.shizuku.Shizuku;
 
-public class SettingsActivity extends Activity {
+public class SettingsActivity extends AppCompatActivity {
 
     private SharedPreferences sp;
     private View rootView;
 
     // 子项视图引用
-    private Switch switchBoot, switchToast, switchUserOnly, switchHide, switchDelayDaemon;
-    private Switch switchCrashFix, switchUnlockCrashCheck, switchFixMode;
-    private Switch switchPeriodicCheck, switchIgnoreSystemCrash;
-    private Switch switchAutoUpdate;
+    private MaterialSwitch switchBoot, switchToast, switchUserOnly, switchHide, switchDelayDaemon;
+    private MaterialSwitch switchCrashFix, switchUnlockCrashCheck, switchFixMode;
+    private MaterialSwitch switchPeriodicCheck, switchIgnoreSystemCrash;
+    private MaterialSwitch switchAutoUpdate;
+    private LinearLayout crashDependentLayout;
     private TextView intervalLabel, notifyCustomBtn, crashTutorialBtn, aboutBtn, checkUpdateBtn;
+    private View btnThemeColor;
+    private TextView tvThemeDesc;
 
     // Shizuku 权限状态
     private boolean mPendingCrashFixRequest = false;
@@ -93,6 +97,7 @@ public class SettingsActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        ThemeUtils.applyTheme(this);
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_settings);
 
@@ -140,7 +145,7 @@ public class SettingsActivity extends Activity {
     // ========== 初始化 ==========
 
     private void initToolbar() {
-        android.widget.Toolbar toolbar = findViewById(R.id.toolbar);
+        androidx.appcompat.widget.Toolbar toolbar = findViewById(R.id.toolbar);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             toolbar.setNavigationIcon(R.drawable.ic_back_arrow);
         }
@@ -177,11 +182,14 @@ public class SettingsActivity extends Activity {
         switchPeriodicCheck = findViewById(R.id.periodic_check);
         switchIgnoreSystemCrash = findViewById(R.id.ignore_system_crash);
         switchAutoUpdate = findViewById(R.id.auto_update);
+        crashDependentLayout = findViewById(R.id.crash_dependent_layout);
         intervalLabel = findViewById(R.id.periodic_interval_label);
         notifyCustomBtn = findViewById(R.id.notify_custom_btn);
         crashTutorialBtn = findViewById(R.id.crash_tutorial_btn);
         aboutBtn = findViewById(R.id.about_btn);
         checkUpdateBtn = findViewById(R.id.check_update_btn);
+        btnThemeColor = findViewById(R.id.btn_theme_color);
+        tvThemeDesc = findViewById(R.id.tv_theme_desc);
     }
 
     private void loadValues() {
@@ -198,12 +206,29 @@ public class SettingsActivity extends Activity {
         switchIgnoreSystemCrash.setChecked(sp.getBoolean("ignore_system_crash_trigger", true));
         intervalLabel.setText(sp.getInt("periodic_check_interval", 10) + "分钟");
 
+        SharedPreferences mainSp = getSharedPreferences("Main", Context.MODE_PRIVATE);
+        String theme = mainSp.getString(ThemeUtils.PREF_THEME, ThemeUtils.THEME_BLUE);
+        switch (theme) {
+            case ThemeUtils.THEME_GREEN:
+                tvThemeDesc.setText("护眼绿");
+                break;
+            case ThemeUtils.THEME_PURPLE:
+                tvThemeDesc.setText("优雅紫");
+                break;
+            case ThemeUtils.THEME_BLUE:
+            default:
+                tvThemeDesc.setText("经典蓝");
+                break;
+        }
+
         refreshCrashFixDependent();
     }
 
     // ========== 事件绑定 ==========
 
     private void setupListeners() {
+        btnThemeColor.setOnClickListener(v -> showThemeDialog());
+
         switchBoot.setOnCheckedChangeListener((btn, checked) ->
                 sp.edit().putBoolean("boot", checked).apply());
 
@@ -228,7 +253,7 @@ public class SettingsActivity extends Activity {
                 sp.edit().putBoolean("delay_daemon", checked).apply());
 
         // 崩溃服务检测总开关
-        final Switch crashFixRef = switchCrashFix;
+        final MaterialSwitch crashFixRef = switchCrashFix;
         final android.widget.CompoundButton.OnCheckedChangeListener[] crashFixListenerHolder =
                 new android.widget.CompoundButton.OnCheckedChangeListener[1];
         crashFixListenerHolder[0] = (btn, checked) -> {
@@ -253,7 +278,7 @@ public class SettingsActivity extends Activity {
         switchCrashFix.setOnCheckedChangeListener(crashFixListenerHolder[0]);
 
         // 解锁检测
-        final Switch unlockCrashCheckRef = switchUnlockCrashCheck;
+        final MaterialSwitch unlockCrashCheckRef = switchUnlockCrashCheck;
         final android.widget.CompoundButton.OnCheckedChangeListener[] unlockListenerHolder =
                 new android.widget.CompoundButton.OnCheckedChangeListener[1];
         unlockListenerHolder[0] = (btn, checked) -> {
@@ -354,7 +379,7 @@ public class SettingsActivity extends Activity {
         switchUnlockCrashCheck.setOnCheckedChangeListener(unlockListenerHolder[0]);
 
         // 重启时强杀对应APP（需要 Root/Shizuku 权限）
-        final Switch fixModeRef = switchFixMode;
+        final MaterialSwitch fixModeRef = switchFixMode;
         final android.widget.CompoundButton.OnCheckedChangeListener[] fixModeListenerHolder =
                 new android.widget.CompoundButton.OnCheckedChangeListener[1];
         fixModeListenerHolder[0] = (btn, checked) -> {
@@ -380,9 +405,7 @@ public class SettingsActivity extends Activity {
             } else {
                 TimerReceiver.cancel(SettingsActivity.this, "定时检测已关闭");
             }
-            intervalLabel.setTextColor(checked
-                    ? getColorCompat(R.color.bg)
-                    : getColorCompat(R.color.text_hint));
+            intervalLabel.setEnabled(checked);
         });
 
         switchIgnoreSystemCrash.setOnCheckedChangeListener((btn, checked) ->
@@ -695,13 +718,19 @@ public class SettingsActivity extends Activity {
     private void refreshCrashFixDependent() {
         boolean crashFixEnabled = switchCrashFix.isChecked();
         boolean periodicEnabled = crashFixEnabled && switchPeriodicCheck.isChecked();
+        
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
+            android.transition.TransitionManager.beginDelayedTransition((android.view.ViewGroup) rootView);
+        }
+        if (crashDependentLayout != null) {
+            crashDependentLayout.setVisibility(crashFixEnabled ? View.VISIBLE : View.GONE);
+        }
+        
         switchUnlockCrashCheck.setEnabled(crashFixEnabled);
         switchFixMode.setEnabled(crashFixEnabled);
         switchPeriodicCheck.setEnabled(crashFixEnabled);
         switchIgnoreSystemCrash.setEnabled(crashFixEnabled);
-        intervalLabel.setTextColor(periodicEnabled
-                ? getColorCompat(R.color.bg)
-                : getColorCompat(R.color.text_hint));
+        intervalLabel.setEnabled(periodicEnabled);
     }
 
     // ========== 对话框 ==========
@@ -811,7 +840,7 @@ public class SettingsActivity extends Activity {
         unit.setLayoutParams(unitParams);
         layout.addView(unit);
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle("设置定时检测间隔（非精确时间）")
                 .setView(layout)
                 .setPositiveButton("确定", null)
@@ -844,6 +873,33 @@ public class SettingsActivity extends Activity {
             dialog.dismiss();
             if (onSaved != null) onSaved.run();
         });
+    }
+
+    private void showThemeDialog() {
+        String[] themes = {"经典蓝", "护眼绿", "优雅紫"};
+        String[] themeValues = {ThemeUtils.THEME_BLUE, ThemeUtils.THEME_GREEN, ThemeUtils.THEME_PURPLE};
+        SharedPreferences mainSp = getSharedPreferences("Main", Context.MODE_PRIVATE);
+        String currentTheme = mainSp.getString(ThemeUtils.PREF_THEME, ThemeUtils.THEME_BLUE);
+        int checkedItem = 0;
+        for (int i = 0; i < themeValues.length; i++) {
+            if (themeValues[i].equals(currentTheme)) {
+                checkedItem = i;
+                break;
+            }
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("选择主题颜色")
+                .setSingleChoiceItems(themes, checkedItem, (dialog, which) -> {
+                    String selectedTheme = themeValues[which];
+                    if (!selectedTheme.equals(currentTheme)) {
+                        mainSp.edit().putString(ThemeUtils.PREF_THEME, selectedTheme).apply();
+                        dialog.dismiss();
+                        recreate();
+                    } else {
+                        dialog.dismiss();
+                    }
+                })
+                .show();
     }
 
     private void showAboutDialog() {
@@ -926,7 +982,7 @@ public class SettingsActivity extends Activity {
         version.setText("版本号: " + versionName);
         changelog.setText(releaseNotes.isEmpty() ? "暂无更新说明" : releaseNotes);
 
-        AlertDialog updateDialog = new AlertDialog.Builder(this)
+        AlertDialog updateDialog = new MaterialAlertDialogBuilder(this)
                 .setView(dialogView)
                 .create();
         updateDialog.show();

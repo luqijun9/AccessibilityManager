@@ -45,44 +45,28 @@
         android:orientation="horizontal"
         android:gravity="end">
 
-        <TextView
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/unlock_btn_neutral"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:background="?android:attr/selectableItemBackground"
-            android:clickable="true"
-            android:focusable="true"
-            android:padding="10dp"
-            android:text="不再提示"
-            android:textColor="@color/bg"
-            android:textSize="15sp" />
+            android:text="不再提示" />
 
-        <TextView
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/unlock_btn_negative"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:background="?android:attr/selectableItemBackground"
-            android:clickable="true"
-            android:focusable="true"
-            android:padding="10dp"
             android:layout_marginLeft="8dp"
-            android:text="不开启"
-            android:textColor="@color/bg"
-            android:textSize="15sp" />
+            android:text="不开启" />
 
-        <TextView
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/unlock_btn_positive"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:background="?android:attr/selectableItemBackground"
-            android:clickable="true"
-            android:focusable="true"
-            android:padding="10dp"
             android:layout_marginLeft="8dp"
-            android:text="开启"
-            android:textColor="@color/bg"
-            android:textSize="15sp"
-            android:textStyle="bold" />
+            android:text="开启" />
     </LinearLayout>
 
 </LinearLayout>

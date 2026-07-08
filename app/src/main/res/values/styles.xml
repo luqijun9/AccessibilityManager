@@ -1,10 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:colorPrimary">@color/bg</item>
-        <item name="android:colorPrimaryDark">#354190</item>
-        <item name="android:colorAccent">@color/bg</item>
-        <item name="android:windowBackground">@color/screen_bg</item>
+    <style name="AppTheme" parent="AppTheme.Blue" />
+    
+    <!-- Blue Theme (Default) -->
+    <style name="AppTheme.Blue" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">#4759B8</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorPrimaryContainer">#DCE1FF</item>
+        <item name="colorOnPrimaryContainer">#00164E</item>
+    </style>
+
+    <!-- Green Theme -->
+    <style name="AppTheme.Green" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">#388E3C</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorPrimaryContainer">#B8F3B9</item>
+        <item name="colorOnPrimaryContainer">#002105</item>
+    </style>
+
+    <!-- Purple Theme -->
+    <style name="AppTheme.Purple" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">#7B1FA2</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorPrimaryContainer">#F0DBFF</item>
+        <item name="colorOnPrimaryContainer">#2C0051</item>
     </style>
 
     <!-- 原生 Toolbar 主题覆盖，禁用菜单项 textAllCaps -->

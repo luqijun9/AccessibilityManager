@@ -46,46 +46,30 @@
             android:gravity="end"
             android:orientation="horizontal">
 
-            <TextView
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/perm_btn_root"
+                style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:background="?android:attr/selectableItemBackground"
-                android:clickable="true"
-                android:focusable="true"
-                android:padding="10dp"
                 android:text="Root激活"
-                android:textColor="@color/bg"
-                android:textSize="15sp"
                 android:visibility="gone" />
 
-            <TextView
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/perm_btn_shizuku"
+                style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:background="?android:attr/selectableItemBackground"
-                android:clickable="true"
-                android:focusable="true"
-                android:padding="10dp"
                 android:layout_marginLeft="8dp"
                 android:text="Shizuku激活"
-                android:textColor="@color/bg"
-                android:textSize="15sp"
                 android:visibility="gone" />
 
-            <TextView
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/perm_btn_positive"
+                style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:background="?android:attr/selectableItemBackground"
-                android:clickable="true"
-                android:focusable="true"
-                android:padding="10dp"
                 android:layout_marginLeft="8dp"
-                android:text="申请Shizuku权限"
-                android:textColor="@color/bg"
-                android:textSize="15sp"
-                android:textStyle="bold" />
+                android:text="申请Shizuku权限" />
         </LinearLayout>
 
         <LinearLayout
@@ -95,17 +79,12 @@
             android:orientation="horizontal"
             android:layout_marginTop="8dp">
 
-            <TextView
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/perm_btn_neutral"
+                style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:background="?android:attr/selectableItemBackground"
-                android:clickable="true"
-                android:focusable="true"
-                android:padding="10dp"
-                android:text="取消"
-                android:textColor="@color/bg"
-                android:textSize="15sp" />
+                android:text="取消" />
         </LinearLayout>
 
     </LinearLayout>
