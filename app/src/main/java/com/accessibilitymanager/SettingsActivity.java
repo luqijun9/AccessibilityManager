@@ -197,7 +197,7 @@ public class SettingsActivity extends AppCompatActivity {
         switchAutoUpdate.setChecked(sp.getBoolean("auto_update", true));
         switchToast.setChecked(sp.getBoolean("toast", true));
         switchUserOnly.setChecked(sp.getBoolean("useronly", false));
-        switchHide.setChecked(sp.getBoolean("hide", true));
+        switchHide.setChecked(sp.getBoolean("hide", false));
         switchDelayDaemon.setChecked(sp.getBoolean("delay_daemon", false));
         switchCrashFix.setChecked(sp.getBoolean("crashfix", false));
         switchUnlockCrashCheck.setChecked(sp.getBoolean("unlock_crash_check", false));

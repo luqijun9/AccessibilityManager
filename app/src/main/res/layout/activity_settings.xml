@@ -194,7 +194,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="将应用从多任务近期任务列表 (Recents) 中隐藏"
+                            android:text="将应用从多任务近期任务列表中隐藏，建议在多任务列表加锁后再开启，有助于保留后台"
                             android:textColor="@color/text_secondary"
                             android:textSize="13sp"
                             android:layout_marginTop="2dp" />

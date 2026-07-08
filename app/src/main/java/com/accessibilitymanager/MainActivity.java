@@ -273,7 +273,7 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             List<ActivityManager.AppTask> tasks = ((ActivityManager) getSystemService(Service.ACTIVITY_SERVICE)).getAppTasks();
             if (!tasks.isEmpty())
-                tasks.get(0).setExcludeFromRecents(sp.getBoolean("hide", true));
+                tasks.get(0).setExcludeFromRecents(sp.getBoolean("hide", false));
         }
 
         daemon = sp.getString("daemon", "");
