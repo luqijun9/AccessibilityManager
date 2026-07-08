@@ -216,8 +216,11 @@ public class SettingsActivity extends AppCompatActivity {
                 tvThemeDesc.setText("优雅紫");
                 break;
             case ThemeUtils.THEME_BLUE:
-            default:
                 tvThemeDesc.setText("经典蓝");
+                break;
+            case ThemeUtils.THEME_DYNAMIC:
+            default:
+                tvThemeDesc.setText("跟随系统 (莫奈取色)");
                 break;
         }
 
@@ -876,10 +879,10 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void showThemeDialog() {
-        String[] themes = {"经典蓝", "护眼绿", "优雅紫"};
-        String[] themeValues = {ThemeUtils.THEME_BLUE, ThemeUtils.THEME_GREEN, ThemeUtils.THEME_PURPLE};
+        String[] themes = {"跟随系统 (莫奈取色)", "经典蓝", "护眼绿", "优雅紫"};
+        String[] themeValues = {ThemeUtils.THEME_DYNAMIC, ThemeUtils.THEME_BLUE, ThemeUtils.THEME_GREEN, ThemeUtils.THEME_PURPLE};
         SharedPreferences mainSp = getSharedPreferences("Main", Context.MODE_PRIVATE);
-        String currentTheme = mainSp.getString(ThemeUtils.PREF_THEME, ThemeUtils.THEME_BLUE);
+        String currentTheme = mainSp.getString(ThemeUtils.PREF_THEME, ThemeUtils.THEME_DYNAMIC);
         int checkedItem = 0;
         for (int i = 0; i < themeValues.length; i++) {
             if (themeValues[i].equals(currentTheme)) {
