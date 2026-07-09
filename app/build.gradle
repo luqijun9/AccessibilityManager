@@ -13,6 +13,7 @@ android {
         versionName "18.5.1"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        resConfigs "zh"
     }
     signingConfigs {
         release {
@@ -45,6 +46,9 @@ android {
     lintOptions {
         checkReleaseBuilds false
         abortOnError false
+    }
+    buildFeatures {
+        buildConfig = false
     }
     namespace 'com.accessibilitymanager'
 }
