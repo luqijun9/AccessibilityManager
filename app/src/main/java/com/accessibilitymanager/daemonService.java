@@ -720,6 +720,15 @@ public class daemonService extends Service {
         if (mContentOb != null) {
             try { getContentResolver().unregisterContentObserver(mContentOb); } catch (Exception ignored) { }
         }
+        
+        // 关键修复：防止停止保活时导致内存和线程泄漏
+        if (daemonExecutor != null && !daemonExecutor.isShutdown()) {
+            daemonExecutor.shutdownNow();
+        }
+        if (crashCheckExecutor != null && !crashCheckExecutor.isShutdown()) {
+            crashCheckExecutor.shutdownNow();
+        }
+        
         Toast.makeText(daemonService.this, "停止保活", Toast.LENGTH_SHORT).show();
     }
 
