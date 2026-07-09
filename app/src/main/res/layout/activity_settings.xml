@@ -485,7 +485,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="检测崩溃服务，检测到的崩溃服务将会被重启"
+                            android:text="检测崩溃的服务，检测到的崩溃服务将会被重启"
                             android:textColor="@color/text_secondary"
                             android:textSize="13sp"
                             android:layout_marginTop="2dp" />
@@ -512,57 +512,6 @@
                     android:layout_marginRight="16dp"
                     android:background="@color/divider" />
 
-                <!-- 先强杀应用再重启服务 -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:minHeight="72dp"
-                    android:paddingLeft="20dp"
-                    android:paddingRight="16dp"
-                    android:paddingTop="12dp"
-                    android:paddingBottom="12dp"
-                    android:background="?android:attr/selectableItemBackground"
-                    android:clickable="true"
-                    android:focusable="true">
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:paddingRight="16dp">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="先强杀应用再重启服务"
-                            android:textColor="@color/text_primary"
-                            android:textSize="16sp" />
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="需 Root/Shizuku 权限，彻底停止目标应用后重启"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="13sp"
-                            android:layout_marginTop="2dp" />
-                    </LinearLayout>
-
-                    <com.google.android.material.materialswitch.MaterialSwitch
-                        android:id="@+id/fixmode"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:clickable="true"
-                        android:focusable="false" />
-                </LinearLayout>
-
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginLeft="20dp"
-                    android:layout_marginRight="16dp"
-                    android:background="@color/divider" />
 
                 <!-- 解锁设备时检测 -->
                 <LinearLayout
@@ -709,6 +658,58 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="10分钟" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginLeft="20dp"
+                    android:layout_marginRight="16dp"
+                    android:background="@color/divider" />
+
+                <!-- 先强杀应用再重启服务 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:minHeight="72dp"
+                    android:paddingLeft="20dp"
+                    android:paddingRight="16dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:paddingRight="16dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="先强杀应用再重启服务"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="需 Shizuku/Root 权限，部分服务普通重启仍可能崩溃，彻底停止目标应用后重启可避免此情况"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp"
+                            android:layout_marginTop="2dp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/fixmode"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:clickable="true"
+                        android:focusable="false" />
                 </LinearLayout>
 
                 <View
