@@ -610,23 +610,61 @@
                         android:focusable="false" />
                 </LinearLayout>
 
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginLeft="20dp"
-                    android:layout_marginRight="16dp"
-                    android:background="@color/divider" />
-
-                <!-- 设定检测间隔 -->
+                <!-- 息屏空闲时强制检测 (子开关) -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
-                    android:minHeight="72dp"
-                    android:paddingLeft="20dp"
+                    android:minHeight="64dp"
+                    android:paddingLeft="40dp"
                     android:paddingRight="16dp"
-                    android:paddingTop="12dp"
-                    android:paddingBottom="12dp"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:paddingRight="16dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="深度休眠时检测"
+                            android:textColor="@color/text_primary"
+                            android:textSize="15sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="开启后将可在深度休眠时执行定时检测，可能增加耗电"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp"
+                            android:layout_marginTop="2dp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/periodic_check_wake_idle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:clickable="true"
+                        android:focusable="false" />
+                </LinearLayout>
+
+                <!-- 设定检测间隔 (子设置) -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:minHeight="64dp"
+                    android:paddingLeft="40dp"
+                    android:paddingRight="16dp"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
                     android:background="?android:attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true">
@@ -643,7 +681,7 @@
                             android:layout_height="wrap_content"
                             android:text="设定检测间隔"
                             android:textColor="@color/text_primary"
-                            android:textSize="16sp" />
+                            android:textSize="15sp" />
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"

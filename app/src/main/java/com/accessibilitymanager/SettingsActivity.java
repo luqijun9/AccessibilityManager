@@ -40,7 +40,7 @@ public class SettingsActivity extends AppCompatActivity {
     // 子项视图引用
     private MaterialSwitch switchBoot, switchToast, switchUserOnly, switchHide, switchDelayDaemon;
     private MaterialSwitch switchCrashFix, switchUnlockCrashCheck, switchFixMode;
-    private MaterialSwitch switchPeriodicCheck, switchIgnoreSystemCrash;
+    private MaterialSwitch switchPeriodicCheck, switchWakeIdle, switchIgnoreSystemCrash;
     private MaterialSwitch switchAutoUpdate;
     private LinearLayout crashDependentLayout;
     private TextView intervalLabel, notifyCustomBtn, crashTutorialBtn, aboutBtn, checkUpdateBtn;
@@ -180,6 +180,7 @@ public class SettingsActivity extends AppCompatActivity {
         switchUnlockCrashCheck = findViewById(R.id.unlock_crash_check);
         switchFixMode = findViewById(R.id.fixmode);
         switchPeriodicCheck = findViewById(R.id.periodic_check);
+        switchWakeIdle = findViewById(R.id.periodic_check_wake_idle);
         switchIgnoreSystemCrash = findViewById(R.id.ignore_system_crash);
         switchAutoUpdate = findViewById(R.id.auto_update);
         crashDependentLayout = findViewById(R.id.crash_dependent_layout);
@@ -203,6 +204,7 @@ public class SettingsActivity extends AppCompatActivity {
         switchUnlockCrashCheck.setChecked(sp.getBoolean("unlock_crash_check", false));
         switchFixMode.setChecked(sp.getBoolean("fixmode", false));
         switchPeriodicCheck.setChecked(sp.getBoolean("periodic_check", false));
+        switchWakeIdle.setChecked(sp.getBoolean("periodic_check_wake_idle", true));
         switchIgnoreSystemCrash.setChecked(sp.getBoolean("ignore_system_crash_trigger", true));
         intervalLabel.setText(sp.getInt("periodic_check_interval", 10) + "分钟");
 
@@ -408,7 +410,15 @@ public class SettingsActivity extends AppCompatActivity {
             } else {
                 TimerReceiver.cancel(SettingsActivity.this, "定时检测已关闭");
             }
+            refreshCrashFixDependent();
             intervalLabel.setEnabled(checked);
+        });
+
+        switchWakeIdle.setOnCheckedChangeListener((btn, checked) -> {
+            sp.edit().putBoolean("periodic_check_wake_idle", checked).apply();
+            if (switchPeriodicCheck.isChecked()) {
+                TimerReceiver.scheduleNext(SettingsActivity.this);
+            }
         });
 
         switchIgnoreSystemCrash.setOnCheckedChangeListener((btn, checked) ->
@@ -732,6 +742,7 @@ public class SettingsActivity extends AppCompatActivity {
         switchUnlockCrashCheck.setEnabled(crashFixEnabled);
         switchFixMode.setEnabled(crashFixEnabled);
         switchPeriodicCheck.setEnabled(crashFixEnabled);
+        switchWakeIdle.setEnabled(periodicEnabled);
         switchIgnoreSystemCrash.setEnabled(crashFixEnabled);
         intervalLabel.setEnabled(periodicEnabled);
     }

@@ -76,13 +76,19 @@ public class TimerReceiver extends BroadcastReceiver {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
         long triggerTime = SystemClock.elapsedRealtime() + intervalMinutes * 60 * 1000L;
+        boolean wakeIdle = sp.getBoolean("periodic_check_wake_idle", true);
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerTime, pi);
+        if (wakeIdle) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerTime, pi);
+            } else {
+                am.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerTime, pi);
+            }
+            LogUtil.log(context, "[定时唤醒] 已调度下次强制检测：" + intervalMinutes + "分钟后");
         } else {
-            am.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerTime, pi);
+            am.set(AlarmManager.ELAPSED_REALTIME, triggerTime, pi);
+            LogUtil.log(context, "[定时唤醒] 已调度下次宽松检测：" + intervalMinutes + "分钟后");
         }
-        LogUtil.log(context, "[定时唤醒] 已调度下次检测：" + intervalMinutes + "分钟后");
     }
 
     public static void cancel(Context context, String reason) {
