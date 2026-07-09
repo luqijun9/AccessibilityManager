@@ -194,7 +194,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="将应用从多任务近期任务列表中隐藏，建议在多任务列表加锁后再开启，有助于保留后台"
+                            android:text="将应用从多任务列表中隐藏，建议在多任务列表将管理器加锁后再开启"
                             android:textColor="@color/text_secondary"
                             android:textSize="13sp"
                             android:layout_marginTop="2dp" />
@@ -485,7 +485,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="控制崩溃服务检测是否打开"
+                            android:text="检测崩溃服务，检测到的崩溃服务将会被重启"
                             android:textColor="@color/text_secondary"
                             android:textSize="13sp"
                             android:layout_marginTop="2dp" />
@@ -640,7 +640,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="定时检测状态"
+                            android:text="定时检测"
                             android:textColor="@color/text_primary"
                             android:textSize="16sp" />
 
