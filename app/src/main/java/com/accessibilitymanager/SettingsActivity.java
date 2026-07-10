@@ -42,7 +42,8 @@ public class SettingsActivity extends AppCompatActivity {
     private MaterialSwitch switchCrashFix, switchUnlockCrashCheck, switchFixMode;
     private MaterialSwitch switchPeriodicCheck, switchWakeIdle, switchIgnoreSystemCrash;
     private MaterialSwitch switchAutoUpdate;
-    private LinearLayout crashDependentLayout;
+    private LinearLayout crashDependentLayout, fixmodeServicesLayout;
+    private View fixmodeServicesBtn;
     private TextView intervalLabel, notifyCustomBtn, crashTutorialBtn, aboutBtn, checkUpdateBtn;
     private View btnThemeColor;
     private TextView tvThemeDesc;
@@ -184,6 +185,8 @@ public class SettingsActivity extends AppCompatActivity {
         switchIgnoreSystemCrash = findViewById(R.id.ignore_system_crash);
         switchAutoUpdate = findViewById(R.id.auto_update);
         crashDependentLayout = findViewById(R.id.crash_dependent_layout);
+        fixmodeServicesLayout = findViewById(R.id.fixmode_services_layout);
+        fixmodeServicesBtn = findViewById(R.id.fixmode_services_btn);
         intervalLabel = findViewById(R.id.periodic_interval_label);
         notifyCustomBtn = findViewById(R.id.notify_custom_btn);
         crashTutorialBtn = findViewById(R.id.crash_tutorial_btn);
@@ -400,8 +403,12 @@ public class SettingsActivity extends AppCompatActivity {
                 }
             }
             sp.edit().putBoolean("fixmode", checked).apply();
+            refreshCrashFixDependent();
         };
         switchFixMode.setOnCheckedChangeListener(fixModeListenerHolder[0]);
+        
+        fixmodeServicesLayout.setOnClickListener(v -> showFixmodeServicesDialog());
+        fixmodeServicesBtn.setOnClickListener(v -> showFixmodeServicesDialog());
 
         switchPeriodicCheck.setOnCheckedChangeListener((btn, checked) -> {
             sp.edit().putBoolean("periodic_check", checked).apply();
@@ -745,9 +752,100 @@ public class SettingsActivity extends AppCompatActivity {
         switchWakeIdle.setEnabled(periodicEnabled);
         switchIgnoreSystemCrash.setEnabled(crashFixEnabled);
         intervalLabel.setEnabled(periodicEnabled);
+        
+        boolean fixModeEnabled = crashFixEnabled && switchFixMode.isChecked();
+        if (fixmodeServicesLayout != null) fixmodeServicesLayout.setEnabled(fixModeEnabled);
+        if (fixmodeServicesBtn != null) fixmodeServicesBtn.setEnabled(fixModeEnabled);
     }
 
     // ========== 对话框 ==========
+
+    private void showFixmodeServicesDialog() {
+        if (!switchFixMode.isChecked()) return;
+
+        java.util.List<android.accessibilityservice.AccessibilityServiceInfo> list = new java.util.ArrayList<>(((android.view.accessibility.AccessibilityManager) getApplicationContext()
+                .getSystemService(Context.ACCESSIBILITY_SERVICE)).getInstalledAccessibilityServiceList());
+
+        final PackageManager pm = getPackageManager();
+        java.util.Collections.sort(list, new java.util.Comparator<android.accessibilityservice.AccessibilityServiceInfo>() {
+            @Override
+            public int compare(android.accessibilityservice.AccessibilityServiceInfo o1, android.accessibilityservice.AccessibilityServiceInfo o2) {
+                CharSequence label1 = o1.getResolveInfo().loadLabel(pm);
+                CharSequence label2 = o2.getResolveInfo().loadLabel(pm);
+                String s1 = label1 != null ? label1.toString() : o1.getId();
+                String s2 = label2 != null ? label2.toString() : o2.getId();
+                return java.text.Collator.getInstance(java.util.Locale.CHINA).compare(s1, s2);
+            }
+        });
+
+        java.util.List<String> serviceNames = new java.util.ArrayList<>();
+        java.util.List<String> serviceIds = new java.util.ArrayList<>();
+        for (android.accessibilityservice.AccessibilityServiceInfo info : list) {
+            String id = info.getId();
+            // 排除无障碍管理器自身
+            if (id.startsWith(getPackageName() + "/")) continue;
+
+            // 默认不显示系统应用
+            if (info.getResolveInfo() != null && info.getResolveInfo().serviceInfo != null) {
+                if ((info.getResolveInfo().serviceInfo.applicationInfo.flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0) {
+                    continue;
+                }
+            }
+
+            CharSequence label = info.getResolveInfo().loadLabel(getPackageManager());
+            serviceNames.add(label != null ? label.toString() : id);
+            serviceIds.add(id);
+        }
+
+        if (serviceNames.isEmpty()) {
+            Toast.makeText(this, "未找到其他无障碍服务", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        CharSequence[] items = serviceNames.toArray(new CharSequence[0]);
+        boolean[] checkedItems = new boolean[items.length];
+        
+        String disabledStr = sp.getString("fixmode_disabled_services", "");
+        for (int i = 0; i < items.length; i++) {
+            checkedItems[i] = !disabledStr.contains(serviceIds.get(i));
+        }
+
+        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this);
+        builder.setTitle("选择强杀重启的服务");
+        builder.setMultiChoiceItems(items, checkedItems, (dialog, which, isChecked) -> {
+            checkedItems[which] = isChecked;
+        });
+        builder.setPositiveButton("确定", (dialog, which) -> {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < items.length; i++) {
+                if (!checkedItems[i]) {
+                    if (sb.length() > 0) sb.append(":");
+                    sb.append(serviceIds.get(i));
+                }
+            }
+            sp.edit().putString("fixmode_disabled_services", sb.toString()).apply();
+        });
+        builder.setNegativeButton("取消", null);
+        builder.setNeutralButton("全选/全不选", null);
+
+        androidx.appcompat.app.AlertDialog dialog = builder.create();
+        dialog.show();
+
+        dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+            boolean allChecked = true;
+            for (boolean b : checkedItems) {
+                if (!b) {
+                    allChecked = false;
+                    break;
+                }
+            }
+            boolean targetState = !allChecked;
+            for (int i = 0; i < checkedItems.length; i++) {
+                checkedItems[i] = targetState;
+                dialog.getListView().setItemChecked(i, targetState);
+            }
+        });
+    }
 
     private void showCrashTutorialDialog() {
         View dv = getLayoutInflater().inflate(R.layout.dialog_crash_tutorial, null);

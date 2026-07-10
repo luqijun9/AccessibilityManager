@@ -545,6 +545,11 @@ public class daemonService extends Service {
         boolean useForceStop = sp.getBoolean("fixmode", true);
         if (pkgName.equals(getPackageName())) {
             useForceStop = false;
+        } else if (useForceStop) {
+            String disabledStr = sp.getString("fixmode_disabled_services", "");
+            if (disabledStr.contains(serviceName)) {
+                useForceStop = false;
+            }
         }
 
         ApplicationInfo applicationInfo = new ApplicationInfo();
