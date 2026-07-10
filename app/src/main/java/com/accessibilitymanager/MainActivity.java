@@ -460,17 +460,19 @@ public class MainActivity extends Activity {
             public int compare(AccessibilityServiceInfo info1, AccessibilityServiceInfo info2) {
                 String id1 = info1.getId();
                 String id2 = info2.getId();
+                
                 boolean top1 = containsService(top, id1);
                 boolean top2 = containsService(top, id2);
                 if (top1 && !top2) return -1;
                 if (!top1 && top2) return 1;
-                if (top1 && top2) {
-                    return Integer.compare(top.indexOf(id1), top.indexOf(id2));
+
+                if (!top1 && !top2) {
+                    boolean enabled1 = isServiceEnabled(id1, currentSetting);
+                    boolean enabled2 = isServiceEnabled(id2, currentSetting);
+                    if (enabled1 && !enabled2) return -1;
+                    if (!enabled1 && enabled2) return 1;
                 }
-                boolean enabled1 = isServiceEnabled(id1, currentSetting);
-                boolean enabled2 = isServiceEnabled(id2, currentSetting);
-                if (enabled1 && !enabled2) return -1;
-                if (!enabled1 && enabled2) return 1;
+
                 ComponentName ownCn = ComponentName.unflattenFromString(ownServiceId);
                 ComponentName cn1 = ComponentName.unflattenFromString(id1);
                 ComponentName cn2 = ComponentName.unflattenFromString(id2);
@@ -478,7 +480,19 @@ public class MainActivity extends Activity {
                 boolean own2 = ownCn != null && ownCn.equals(cn2);
                 if (own1 && !own2) return -1;
                 if (!own1 && own2) return 1;
-                return 0;
+
+                ServiceCache cache1 = mServiceCache.get(normalizeServiceId(id1));
+                ServiceCache cache2 = mServiceCache.get(normalizeServiceId(id2));
+                String label1 = cache1 != null && cache1.packageLabel != null ? cache1.packageLabel : "";
+                String label2 = cache2 != null && cache2.packageLabel != null ? cache2.packageLabel : "";
+                int compareName = java.text.Collator.getInstance(java.util.Locale.CHINA).compare(label1, label2);
+                if (compareName == 0) {
+                    String svc1 = cache1 != null && cache1.serviceLabel != null ? cache1.serviceLabel : "";
+                    String svc2 = cache2 != null && cache2.serviceLabel != null ? cache2.serviceLabel : "";
+                    compareName = java.text.Collator.getInstance(java.util.Locale.CHINA).compare(svc1, svc2);
+                }
+                
+                return compareName;
             }
         });
     }
