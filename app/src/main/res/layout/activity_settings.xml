@@ -361,6 +361,9 @@
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:minWidth="0dp"
+                        android:paddingLeft="16dp"
+                        android:paddingRight="16dp"
                         android:text="设置"
                         android:textSize="14sp" />
                 </LinearLayout>
@@ -695,6 +698,9 @@
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:minWidth="0dp"
+                        android:paddingLeft="16dp"
+                        android:paddingRight="16dp"
                         android:text="10分钟" />
                 </LinearLayout>
 
@@ -791,6 +797,9 @@
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:minWidth="0dp"
+                        android:paddingLeft="16dp"
+                        android:paddingRight="16dp"
                         android:text="设置"
                         android:textSize="14sp" />
                 </LinearLayout>
@@ -972,6 +981,9 @@
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:minWidth="0dp"
+                        android:paddingLeft="16dp"
+                        android:paddingRight="16dp"
                         android:text="检查"
                         android:textSize="14sp" />
                 </LinearLayout>
@@ -1025,6 +1037,9 @@
                         style="@style/Widget.Material3.Button.TonalButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:minWidth="0dp"
+                        android:paddingLeft="16dp"
+                        android:paddingRight="16dp"
                         android:text="查看"
                         android:textSize="14sp" />
                 </LinearLayout>
