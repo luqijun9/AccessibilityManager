@@ -50,6 +50,15 @@ public class daemonService extends Service {
     private Handler mHandler;
     private Runnable mPostFixCheckRunnable;
 
+    private void updateNotification() {
+        if (notification == null || systemService == null) return;
+        String notifyTitle = sp.getString("notify_title", "海绵宝宝，猜猜我有几颗糖");
+        String notifyText = sp.getString("notify_text", "猜对了两颗都给你！");
+        notification.setContentTitle(notifyTitle)
+                    .setContentText(notifyText);
+        systemService.notify(1, notification.build());
+    }
+
     // ── 共享状态：仅在 daemonExecutor 线程中读写 ──
     private String tmpSettingValue;
     private List<String> l = new ArrayList<>();
@@ -739,6 +748,11 @@ public class daemonService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null && "UPDATE_NOTIFY".equals(intent.getAction())) {
+            updateNotification();
+            return START_STICKY;
+        }
+
         final String currentSetting = Settings.Secure.getString(getContentResolver(),
                 Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         final String alarmSource = intent != null ? intent.getStringExtra("source") : null;

@@ -917,7 +917,8 @@ public class SettingsActivity extends AppCompatActivity {
             sp.edit().putString("notify_title", newTitle).apply();
             sp.edit().putString("notify_text", newText).apply();
             Toast.makeText(SettingsActivity.this,
-                    "已保存，保活服务重启后生效", Toast.LENGTH_SHORT).show();
+                    "已保存", Toast.LENGTH_SHORT).show();
+            startService(new Intent(SettingsActivity.this, daemonService.class).setAction("UPDATE_NOTIFY"));
             dialog.dismiss();
         });
 
@@ -927,7 +928,8 @@ public class SettingsActivity extends AppCompatActivity {
             titleInput.setText("海绵宝宝，猜猜我有几颗糖");
             textInput.setText("猜对了两颗都给你！");
             Toast.makeText(SettingsActivity.this,
-                    "已恢复默认，保活服务重启后生效", Toast.LENGTH_SHORT).show();
+                    "已恢复默认", Toast.LENGTH_SHORT).show();
+            startService(new Intent(SettingsActivity.this, daemonService.class).setAction("UPDATE_NOTIFY"));
             dialog.dismiss();
         });
     }
