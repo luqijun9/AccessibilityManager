@@ -42,7 +42,7 @@ public class SettingsActivity extends AppCompatActivity {
     private MaterialSwitch switchCrashFix, switchUnlockCrashCheck, switchFixMode;
     private MaterialSwitch switchPeriodicCheck, switchWakeIdle, switchIgnoreSystemCrash;
     private MaterialSwitch switchAutoUpdate;
-    private LinearLayout crashDependentLayout, fixmodeServicesLayout;
+    private LinearLayout crashDependentLayout, fixmodeServicesLayout, periodicSubLayout;
     private View fixmodeServicesBtn;
     private TextView intervalLabel, notifyCustomBtn, crashTutorialBtn, aboutBtn, checkUpdateBtn;
     private View btnThemeColor;
@@ -186,6 +186,7 @@ public class SettingsActivity extends AppCompatActivity {
         switchAutoUpdate = findViewById(R.id.auto_update);
         crashDependentLayout = findViewById(R.id.crash_dependent_layout);
         fixmodeServicesLayout = findViewById(R.id.fixmode_services_layout);
+        periodicSubLayout = findViewById(R.id.periodic_sub_layout);
         fixmodeServicesBtn = findViewById(R.id.fixmode_services_btn);
         intervalLabel = findViewById(R.id.periodic_interval_label);
         notifyCustomBtn = findViewById(R.id.notify_custom_btn);
@@ -745,6 +746,9 @@ public class SettingsActivity extends AppCompatActivity {
         if (crashDependentLayout != null) {
             crashDependentLayout.setVisibility(crashFixEnabled ? View.VISIBLE : View.GONE);
         }
+        if (periodicSubLayout != null) {
+            periodicSubLayout.setVisibility(periodicEnabled ? View.VISIBLE : View.GONE);
+        }
         
         switchUnlockCrashCheck.setEnabled(crashFixEnabled);
         switchFixMode.setEnabled(crashFixEnabled);
@@ -754,7 +758,10 @@ public class SettingsActivity extends AppCompatActivity {
         intervalLabel.setEnabled(periodicEnabled);
         
         boolean fixModeEnabled = crashFixEnabled && switchFixMode.isChecked();
-        if (fixmodeServicesLayout != null) fixmodeServicesLayout.setEnabled(fixModeEnabled);
+        if (fixmodeServicesLayout != null) {
+            fixmodeServicesLayout.setEnabled(fixModeEnabled);
+            fixmodeServicesLayout.setVisibility(fixModeEnabled ? View.VISIBLE : View.GONE);
+        }
         if (fixmodeServicesBtn != null) fixmodeServicesBtn.setEnabled(fixModeEnabled);
     }
 

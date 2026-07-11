@@ -613,15 +613,23 @@
                         android:focusable="false" />
                 </LinearLayout>
 
-                <!-- 息屏空闲时强制检测 (子开关) -->
+                <!-- 定时检测的子项容器 (动态显隐) -->
                 <LinearLayout
+                    android:id="@+id/periodic_sub_layout"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:minHeight="64dp"
-                    android:paddingLeft="40dp"
-                    android:paddingRight="16dp"
-                    android:paddingTop="8dp"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <!-- 息屏空闲时强制检测 (子开关) -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:minHeight="64dp"
+                        android:paddingLeft="40dp"
+                        android:paddingRight="16dp"
+                        android:paddingTop="8dp"
                     android:paddingBottom="8dp"
                     android:background="?android:attr/selectableItemBackground"
                     android:clickable="true"
@@ -703,6 +711,7 @@
                         android:paddingRight="16dp"
                         android:text="10分钟" />
                 </LinearLayout>
+                </LinearLayout>
 
                 <View
                     android:layout_width="match_parent"
@@ -762,6 +771,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
+                    android:visibility="gone"
                     android:minHeight="64dp"
                     android:paddingLeft="40dp"
                     android:paddingRight="16dp"
