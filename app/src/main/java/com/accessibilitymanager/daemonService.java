@@ -244,91 +244,175 @@ public class daemonService extends Service {
     /** 调用者必须在 daemonExecutor 线程中 */
     private void doDaemonImpl(String s) {
         final List<String> localL = l;  // 拍快照，本次执行使用同一份完整列表
-        String list = sp.getString("daemon", "");
-        String[] serviceNames = Pattern.compile(":").split(list);
-        StringBuilder add = new StringBuilder();
-        StringBuilder add1 = new StringBuilder();
+        String daemonStr = sp.getString("daemon", "");
+        String whitelistStr = sp.getString("whitelist_services", "");
+        boolean globalWhitelistEnable = sp.getBoolean("whitelist_global_enable", false);
+        String currentForegroundPkg = sp.getString("current_foreground_pkg", "");
+
+        java.util.Set<String> daemonSet = new java.util.HashSet<>(java.util.Arrays.asList(daemonStr.split(":")));
+        java.util.Set<String> whitelistSet = new java.util.HashSet<>(java.util.Arrays.asList(whitelistStr.split(":")));
+        
+        java.util.Set<String> managedServices = new java.util.HashSet<>();
+        managedServices.addAll(daemonSet);
+        if (globalWhitelistEnable) {
+            managedServices.addAll(whitelistSet);
+        }
+        
+        // Clean empty strings
+        managedServices.remove("");
+        daemonSet.remove("");
+        whitelistSet.remove("");
+
+        // Initialize current state
+        java.util.Set<String> currentServices = new java.util.LinkedHashSet<>();
+        if (s != null && !s.isEmpty()) {
+            currentServices.addAll(java.util.Arrays.asList(s.split(":")));
+        }
+        currentServices.remove("");
+
         StringBuilder cleanedDaemon = null;
-        for (String serviceName : serviceNames) {
-            if (serviceName == null || serviceName.equals("null") || serviceName.length() == 0)
-                continue;
+        StringBuilder cleanedWhitelist = null;
+        
+        StringBuilder logAdded = new StringBuilder();
+        StringBuilder logRemoved = new StringBuilder();
+        StringBuilder add1 = new StringBuilder(); // For crash fix toast label
+
+        for (String serviceName : managedServices) {
             String normalized = normalizeServiceId(serviceName);
             if (!isServiceInList(normalized, localL)) {
                 if (!localL.isEmpty()) {
                     // 已安装列表已就绪且不含该服务，确认已卸载，清理并跳过保活
-                    if (cleanedDaemon == null) cleanedDaemon = new StringBuilder();
-                    else cleanedDaemon.append(":");
-                    cleanedDaemon.append(serviceName);
+                    if (daemonSet.contains(serviceName)) {
+                        if (cleanedDaemon == null) cleanedDaemon = new StringBuilder();
+                        else cleanedDaemon.append(":");
+                        cleanedDaemon.append(serviceName);
+                    }
+                    if (whitelistSet.contains(serviceName)) {
+                        if (cleanedWhitelist == null) cleanedWhitelist = new StringBuilder();
+                        else cleanedWhitelist.append(":");
+                        cleanedWhitelist.append(serviceName);
+                    }
                     continue;
                 }
                 // localL 为空（无已安装服务/异常），跳过清理但尝试保活，宁多勿少
                 LogUtil.log(daemonService.this, "[保活] l 为空，跳过清理并尝试保活: " + normalized);
             }
-            if (isServiceInSettings(normalized, s))
-                continue;
 
-            ApplicationInfo applicationInfo = new ApplicationInfo();
-            int slashIdx = serviceName.indexOf("/");
-            if (slashIdx <= 0) {
-                LogUtil.log(daemonService.this, "[保活] 跳过非法服务名(无'/'): " + serviceName);
-                continue;
-            }
-            try {
-                applicationInfo = packageManager.getApplicationInfo(serviceName.substring(0, slashIdx), PackageManager.GET_META_DATA);
-            } catch (PackageManager.NameNotFoundException ignored) {
-            }
-            CharSequence label = applicationInfo.loadLabel(packageManager);
-            String packageLabel = label != null ? label.toString() : serviceName;
-            LogUtil.log(daemonService.this, "[保活] 检测到服务缺失：" + normalized + " (" + packageLabel + ")");
-            add.append(normalized).append(":");
-            add1.append(packageLabel).append("\n");
-            if (sp.getBoolean("toast", true)) {
-                final String crashedName = mCrashedFixServiceName;
-                final String crashedLabel = mCrashedFixLabel;
-                final boolean isCrashed = crashedName != null && serviceNameMatches(normalized, crashedName);
-                if (isCrashed) {
-                    mCrashedFixServiceName = null;
-                    mCrashedFixLabel = null;
+            // Determine desired state
+            boolean isLocked = daemonSet.contains(serviceName);
+            boolean isWhitelisted = whitelistSet.contains(serviceName);
+            boolean desiredState = false;
+
+            if (isWhitelisted && globalWhitelistEnable) {
+                String whitelist = sp.getString("whitelist_" + normalized, "");
+                if (whitelist.isEmpty()) {
+                    desiredState = true;
+                } else {
+                    desiredState = whitelist.contains(":" + currentForegroundPkg + ":");
                 }
-                final String toastText = isCrashed ? "保活崩溃服务 " + crashedLabel : "保活" + packageLabel;
-                mHandler.post(() -> Toast.makeText(daemonService.this, toastText, Toast.LENGTH_SHORT).show());
+            } else if (isLocked) {
+                desiredState = true;
             }
-        }
-        if (cleanedDaemon != null) {
-            java.util.Set<String> staleSet = new java.util.HashSet<>();
-            for (String stale : cleanedDaemon.toString().split(":")) {
-                if (!stale.isEmpty()) staleSet.add(stale);
-            }
-            String[] entries = list.split(":");
-            StringBuilder newList = new StringBuilder();
-            for (String entry : entries) {
-                if (entry.isEmpty()) continue;
-                boolean isStale = false;
-                ComponentName entryCn = ComponentName.unflattenFromString(entry);
-                for (String stale : staleSet) {
-                    ComponentName staleCn = ComponentName.unflattenFromString(stale);
-                    if (staleCn != null && staleCn.equals(entryCn)) {
-                        isStale = true;
-                        break;
+
+            // apply desired state
+            if (desiredState) {
+                if (!currentServices.contains(normalized)) {
+                    currentServices.add(normalized);
+                    logAdded.append(normalized).append(" ");
+                    
+                    ApplicationInfo applicationInfo = new ApplicationInfo();
+                    int slashIdx = normalized.indexOf("/");
+                    if (slashIdx > 0) {
+                        try {
+                            applicationInfo = packageManager.getApplicationInfo(normalized.substring(0, slashIdx), PackageManager.GET_META_DATA);
+                            CharSequence label = applicationInfo.loadLabel(packageManager);
+                            add1.append(label != null ? label.toString() : normalized).append(" ");
+                        } catch (PackageManager.NameNotFoundException ignored) {}
                     }
                 }
-                if (!isStale) {
-                    if (newList.length() > 0) newList.append(":");
-                    newList.append(entry);
+            } else {
+                if (currentServices.contains(normalized)) {
+                    currentServices.remove(normalized);
+                    logRemoved.append(normalized).append(" ");
                 }
             }
-            sp.edit().putString("daemon", newList.toString()).apply();
         }
-        if (add.length() > 0) {
-            tmpSettingValue = add + s;
+
+        // Cleanup stale services from SharedPreferences
+        if (cleanedDaemon != null) {
+            cleanupStaleServices("daemon", daemonStr, cleanedDaemon.toString());
+        }
+        if (cleanedWhitelist != null) {
+            cleanupStaleServices("whitelist_services", whitelistStr, cleanedWhitelist.toString());
+        }
+
+        // Build new setting string
+        StringBuilder newSettingSb = new StringBuilder();
+        for (String cs : currentServices) {
+            if (newSettingSb.length() > 0) newSettingSb.append(":");
+            newSettingSb.append(cs);
+        }
+        String newSettingValue = newSettingSb.toString();
+
+        if (!newSettingValue.equals(s)) {
+            tmpSettingValue = newSettingValue;
             Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
-            final String text = add1.toString();
-            LogUtil.log(daemonService.this, "[保活] 已重新开启被关闭的服务：" + add1.toString().replace("\n", " "));
+            if (logAdded.length() > 0) {
+                LogUtil.log(daemonService.this, "[状态同步] 开启服务：" + logAdded.toString());
+            }
+            if (logRemoved.length() > 0) {
+                LogUtil.log(daemonService.this, "[状态同步] 关闭服务：" + logRemoved.toString());
+            }
+            
+            if (sp.getBoolean("toast", true) && logAdded.length() > 0) {
+                 final String crashedName = mCrashedFixServiceName;
+                 boolean isCrashed = false;
+                 if (crashedName != null) {
+                     for (String added : logAdded.toString().split(" ")) {
+                         if (added.isEmpty()) continue;
+                         if (serviceNameMatches(added, crashedName)) {
+                             isCrashed = true;
+                             break;
+                         }
+                     }
+                 }
+                 if (isCrashed) {
+                     mCrashedFixServiceName = null;
+                     mCrashedFixLabel = null;
+                     mHandler.post(() -> Toast.makeText(daemonService.this, "保活崩溃服务", Toast.LENGTH_SHORT).show());
+                 }
+            }
         } else {
             tmpSettingValue = s;
         }
         mCrashedFixServiceName = null;
         mCrashedFixLabel = null;
+    }
+
+    private void cleanupStaleServices(String key, String currentListStr, String staleListStr) {
+        java.util.Set<String> staleSet = new java.util.HashSet<>();
+        for (String stale : staleListStr.split(":")) {
+            if (!stale.isEmpty()) staleSet.add(stale);
+        }
+        String[] entries = currentListStr.split(":");
+        StringBuilder newList = new StringBuilder();
+        for (String entry : entries) {
+            if (entry.isEmpty()) continue;
+            boolean isStale = false;
+            ComponentName entryCn = ComponentName.unflattenFromString(entry);
+            for (String stale : staleSet) {
+                ComponentName staleCn = ComponentName.unflattenFromString(stale);
+                if (staleCn != null && staleCn.equals(entryCn)) {
+                    isStale = true;
+                    break;
+                }
+            }
+            if (!isStale) {
+                if (newList.length() > 0) newList.append(":");
+                newList.append(entry);
+            }
+        }
+        sp.edit().putString(key, newList.toString()).apply();
     }
 
     // ════════════════════════════════════════════════════════════════

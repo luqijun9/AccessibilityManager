@@ -7,6 +7,11 @@
         app:showAsAction="always"
         android:title="" />
     <item
+        android:id="@+id/whitelist_mode"
+        android:icon="@drawable/ic_filter"
+        app:showAsAction="always"
+        android:title="白名单模式" />
+    <item
         android:id="@+id/viewlog"
         android:icon="@drawable/ic_log"
         app:showAsAction="always"

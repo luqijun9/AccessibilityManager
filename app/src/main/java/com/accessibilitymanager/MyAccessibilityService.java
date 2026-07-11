@@ -21,6 +21,32 @@ public class MyAccessibilityService extends AccessibilityService {
             return;
         }
 
+        CharSequence packageNameSeq = event.getPackageName();
+        if (packageNameSeq != null) {
+            String packageName = packageNameSeq.toString();
+            // 过滤系统UI，避免下拉通知栏等操作导致包名频繁跳动
+            if (!packageName.equals("com.android.systemui") && !packageName.equals("com.miui.systemui")) {
+                SharedPreferences sp = getSharedPreferences("data", Context.MODE_PRIVATE);
+                String oldPkg = sp.getString("current_foreground_pkg", "");
+                if (!packageName.equals(oldPkg)) {
+                    sp.edit().putString("current_foreground_pkg", packageName).apply();
+                    
+                    if (sp.getBoolean("whitelist_global_enable", false)) {
+                        Intent intent = new Intent(this, daemonService.class);
+                        intent.putExtra("source", "AppSwitch");
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                startForegroundService(intent);
+                            } else {
+                                startService(intent);
+                            }
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
+            }
+        }
+
         KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
         if (km == null) return;
 
