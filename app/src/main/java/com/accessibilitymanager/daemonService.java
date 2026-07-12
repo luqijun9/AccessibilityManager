@@ -77,6 +77,9 @@ public class daemonService extends Service {
     private String mCrashedFixServiceName;
     private String mCrashedFixLabel;
     private boolean mFirstCommandAfterCreate = true;
+    // 标记本次 Settings 变化是由白名单应用切换引起的，ContentObserver 应跳过崩溃检测
+    private boolean mIsWhitelistAppSwitch = false;
+    private SharedPreferences.OnSharedPreferenceChangeListener mForegroundPkgListener;
 
     // ── 解锁检测重复触发追踪（仅在 crashCheckExecutor 线程读写）──
     private long mLastUnlockBroadcastTime = 0;
@@ -176,6 +179,12 @@ public class daemonService extends Service {
         if (settingChanged) {
             refreshInstalledServiceList();
             doDaemon(currentSetting);
+        }
+
+        // 白名单应用切换引起的 Settings 变化，跳过崩溃检测
+        if (mIsWhitelistAppSwitch) {
+            mIsWhitelistAppSwitch = false;
+            return;
         }
 
         if (mIsFixing && System.currentTimeMillis() - mLastFixStartTime <= 5000) {
@@ -826,6 +835,20 @@ public class daemonService extends Service {
             registerReceiver(myReceiver, new IntentFilter("android.intent.action.USER_PRESENT"));
         }
 
+        // 注册前台应用变化监听器，应用切换时直接在进程内触发白名单状态同步，不启动新服务
+        mForegroundPkgListener = (prefs, key) -> {
+            if ("current_foreground_pkg".equals(key) && sp.getBoolean("whitelist_global_enable", false)) {
+                daemonExecutor.submit(() -> {
+                    String setting = Settings.Secure.getString(
+                            getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+                    if (setting == null) setting = "";
+                    mIsWhitelistAppSwitch = true;
+                    doDaemon(setting);
+                });
+            }
+        };
+        sp.registerOnSharedPreferenceChangeListener(mForegroundPkgListener);
+
         // 通过 daemonExecutor 串行执行初始化
         daemonExecutor.submit(() -> {
             tmpSettingValue = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
@@ -848,6 +871,9 @@ public class daemonService extends Service {
         try { unregisterReceiver(myReceiver); } catch (Exception ignored) { }
         if (mContentOb != null) {
             try { getContentResolver().unregisterContentObserver(mContentOb); } catch (Exception ignored) { }
+        }
+        if (mForegroundPkgListener != null) {
+            sp.unregisterOnSharedPreferenceChangeListener(mForegroundPkgListener);
         }
         
         // 关键修复：防止停止保活时导致内存和线程泄漏

@@ -30,19 +30,7 @@ public class MyAccessibilityService extends AccessibilityService {
                 String oldPkg = sp.getString("current_foreground_pkg", "");
                 if (!packageName.equals(oldPkg)) {
                     sp.edit().putString("current_foreground_pkg", packageName).apply();
-                    
-                    if (sp.getBoolean("whitelist_global_enable", false)) {
-                        Intent intent = new Intent(this, daemonService.class);
-                        intent.putExtra("source", "AppSwitch");
-                        try {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                startForegroundService(intent);
-                            } else {
-                                startService(intent);
-                            }
-                        } catch (Exception ignored) {
-                        }
-                    }
+                    // daemonService 已注册监听器，会自动响应 current_foreground_pkg 的变化
                 }
             }
         }
