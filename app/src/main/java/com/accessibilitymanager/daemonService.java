@@ -282,8 +282,10 @@ public class daemonService extends Service {
         StringBuilder cleanedDaemon = null;
         StringBuilder cleanedWhitelist = null;
         
-        StringBuilder logAdded = new StringBuilder();
-        StringBuilder logRemoved = new StringBuilder();
+        StringBuilder logDaemonAdded = new StringBuilder();   // daemon 服务被开启，显示应用名称
+        StringBuilder logWhitelistAdded = new StringBuilder(); // 白名单服务被开启
+        StringBuilder logWhitelistRemoved = new StringBuilder(); // 白名单服务被关闭
+        StringBuilder logAdded = new StringBuilder(); // 用于 Toast 崩溃判断（包含所有开启的）
         StringBuilder add1 = new StringBuilder(); // For crash fix toast label
 
         for (String serviceName : managedServices) {
@@ -328,21 +330,35 @@ public class daemonService extends Service {
                 if (!currentServices.contains(normalized)) {
                     currentServices.add(normalized);
                     logAdded.append(normalized).append(" ");
-                    
+
                     ApplicationInfo applicationInfo = new ApplicationInfo();
                     int slashIdx = normalized.indexOf("/");
                     if (slashIdx > 0) {
                         try {
                             applicationInfo = packageManager.getApplicationInfo(normalized.substring(0, slashIdx), PackageManager.GET_META_DATA);
                             CharSequence label = applicationInfo.loadLabel(packageManager);
-                            add1.append(label != null ? label.toString() : normalized).append(" ");
-                        } catch (PackageManager.NameNotFoundException ignored) {}
+                            String appLabel = label != null ? label.toString() : normalized;
+                            if (isLocked && !isWhitelisted) {
+                                // daemon 服务：保活日志显示应用名称
+                                logDaemonAdded.append(appLabel).append(" ");
+                            } else {
+                                // 白名单服务：状态同步日志显示包名
+                                logWhitelistAdded.append(normalized).append(" ");
+                            }
+                            add1.append(appLabel).append(" ");
+                        } catch (PackageManager.NameNotFoundException ignored) {
+                            if (isLocked && !isWhitelisted) {
+                                logDaemonAdded.append(normalized).append(" ");
+                            } else {
+                                logWhitelistAdded.append(normalized).append(" ");
+                            }
+                        }
                     }
                 }
             } else {
                 if (currentServices.contains(normalized)) {
                     currentServices.remove(normalized);
-                    logRemoved.append(normalized).append(" ");
+                    logWhitelistRemoved.append(normalized).append(" ");
                 }
             }
         }
@@ -366,11 +382,16 @@ public class daemonService extends Service {
         if (!newSettingValue.equals(s)) {
             tmpSettingValue = newSettingValue;
             Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
-            if (logAdded.length() > 0) {
-                LogUtil.log(daemonService.this, "[状态同步] 开启服务：" + logAdded.toString());
+            // daemon 服务被开启：保活日志（显示应用名称，与旧版本保活日志保持一致）
+            if (logDaemonAdded.length() > 0) {
+                LogUtil.log(daemonService.this, "[保活] 已重新开启被关闭的服务：" + logDaemonAdded.toString().trim());
             }
-            if (logRemoved.length() > 0) {
-                LogUtil.log(daemonService.this, "[状态同步] 关闭服务：" + logRemoved.toString());
+            // 白名单服务开启/关闭：状态同步日志
+            if (logWhitelistAdded.length() > 0) {
+                LogUtil.log(daemonService.this, "[状态同步] 开启服务：" + logWhitelistAdded.toString().trim());
+            }
+            if (logWhitelistRemoved.length() > 0) {
+                LogUtil.log(daemonService.this, "[状态同步] 关闭服务：" + logWhitelistRemoved.toString().trim());
             }
             
             if (sp.getBoolean("toast", true) && logAdded.length() > 0) {
