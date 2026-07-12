@@ -275,9 +275,10 @@ public class daemonService extends Service {
         // Initialize current state
         java.util.Set<String> currentServices = new java.util.LinkedHashSet<>();
         if (s != null && !s.isEmpty()) {
-            currentServices.addAll(java.util.Arrays.asList(s.split(":")));
+            for (String entry : s.split(":")) {
+                if (!entry.isEmpty()) currentServices.add(normalizeServiceId(entry));
+            }
         }
-        currentServices.remove("");
 
         StringBuilder cleanedDaemon = null;
         StringBuilder cleanedWhitelist = null;
@@ -289,6 +290,10 @@ public class daemonService extends Service {
         StringBuilder add1 = new StringBuilder(); // For crash fix toast label
 
         for (String serviceName : managedServices) {
+            if (serviceName == null || !serviceName.contains("/")) {
+                LogUtil.log(daemonService.this, "[保活] 跳过非法服务(无'/'): " + serviceName);
+                continue;
+            }
             String normalized = normalizeServiceId(serviceName);
             if (!isServiceInList(normalized, localL)) {
                 if (!localL.isEmpty()) {
@@ -331,29 +336,28 @@ public class daemonService extends Service {
                     currentServices.add(normalized);
                     logAdded.append(normalized).append(" ");
 
-                    ApplicationInfo applicationInfo = new ApplicationInfo();
+                    String appLabel = normalized;
                     int slashIdx = normalized.indexOf("/");
                     if (slashIdx > 0) {
                         try {
-                            applicationInfo = packageManager.getApplicationInfo(normalized.substring(0, slashIdx), PackageManager.GET_META_DATA);
+                            ApplicationInfo applicationInfo = packageManager.getApplicationInfo(normalized.substring(0, slashIdx), PackageManager.GET_META_DATA);
                             CharSequence label = applicationInfo.loadLabel(packageManager);
-                            String appLabel = label != null ? label.toString() : normalized;
-                            if (isLocked && !isWhitelisted) {
-                                // daemon 服务：保活日志显示应用名称
-                                logDaemonAdded.append(appLabel).append(" ");
-                            } else {
-                                // 白名单服务：状态同步日志显示包名
-                                logWhitelistAdded.append(normalized).append(" ");
+                            if (label != null) {
+                                appLabel = label.toString();
                             }
-                            add1.append(appLabel).append(" ");
                         } catch (PackageManager.NameNotFoundException ignored) {
-                            if (isLocked && !isWhitelisted) {
-                                logDaemonAdded.append(normalized).append(" ");
-                            } else {
-                                logWhitelistAdded.append(normalized).append(" ");
-                            }
                         }
                     }
+                    
+                    if (!globalWhitelistEnable || (isLocked && !isWhitelisted)) {
+                        // daemon 服务：保活日志显示应用名称
+                        logDaemonAdded.append(appLabel).append(" ");
+                        LogUtil.log(daemonService.this, "[保活] 检测到服务缺失：" + normalized + " (" + appLabel + ")");
+                    } else {
+                        // 白名单服务：状态同步日志显示包名
+                        logWhitelistAdded.append(normalized).append(" ");
+                    }
+                    add1.append(appLabel).append(" ");
                 }
             } else {
                 if (currentServices.contains(normalized)) {
