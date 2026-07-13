@@ -744,11 +744,22 @@ public class MainActivity extends Activity {
         mGlobalWhitelistSwitch.setLayoutParams(switchParams);
         
         mGlobalWhitelistSwitch.setChecked(sp.getBoolean("whitelist_global_enable", false));
-        mGlobalWhitelistSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+        final CompoundButton.OnCheckedChangeListener[] whitelistSwitchListenerHolder = new CompoundButton.OnCheckedChangeListener[1];
+        whitelistSwitchListenerHolder[0] = (buttonView, isChecked) -> {
+            if (isChecked && !sp.getBoolean("whitelist_global_enable", false)) {
+                // 拦截开启操作，显示弹窗
+                buttonView.setOnCheckedChangeListener(null);
+                buttonView.setChecked(false);
+                buttonView.setOnCheckedChangeListener(whitelistSwitchListenerHolder[0]);
+                
+                showWhitelistEnableDialog(buttonView, whitelistSwitchListenerHolder[0]);
+                return;
+            }
+            
             sp.edit().putBoolean("whitelist_global_enable", isChecked).apply();
             switchToTab(mIsFavoritesTab);
             // 触发一次保活同步
-            Intent intent = new Intent(this, daemonService.class);
+            Intent intent = new Intent(MainActivity.this, daemonService.class);
             intent.putExtra("source", "AppSwitch");
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -758,7 +769,8 @@ public class MainActivity extends Activity {
                 }
             } catch (Exception ignored) {
             }
-        });
+        };
+        mGlobalWhitelistSwitch.setOnCheckedChangeListener(whitelistSwitchListenerHolder[0]);
 
         updateTitleView();
 
@@ -2491,6 +2503,108 @@ public class MainActivity extends Activity {
             sp.edit().remove("skipped_update_version").apply();
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl));
             startActivity(intent);
+        });
+
+        dialog.show();
+    }
+
+    private boolean isOwnAccessibilityServiceEnabled() {
+        String expectedComponentName = new ComponentName(this, MyAccessibilityService.class).flattenToString();
+        String enabledServicesSetting = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        if (enabledServicesSetting == null) return false;
+        android.text.TextUtils.SimpleStringSplitter colonSplitter = new android.text.TextUtils.SimpleStringSplitter(':');
+        colonSplitter.setString(enabledServicesSetting);
+        while (colonSplitter.hasNext()) {
+            String componentNameString = colonSplitter.next();
+            if (componentNameString.equalsIgnoreCase(expectedComponentName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean checkWriteSecurePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            return checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) != PackageManager.PERMISSION_GRANTED;
+        }
+        return false;
+    }
+
+    private void showWhitelistEnableDialog(final CompoundButton switchButton, final CompoundButton.OnCheckedChangeListener listener) {
+        final android.app.Dialog dialog = new android.app.Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        View view = getLayoutInflater().inflate(R.layout.dialog_whitelist_enable, null);
+        dialog.setContentView(view);
+        Window w = dialog.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            int marginPx = (int) (16 * dm.density + 0.5f);
+            android.view.WindowManager.LayoutParams lp = w.getAttributes();
+            lp.width = dm.widthPixels - marginPx * 2;
+            lp.height = android.view.WindowManager.LayoutParams.WRAP_CONTENT;
+            w.setAttributes(lp);
+        }
+
+        final TextView statusText = view.findViewById(R.id.permission_status_text);
+        final Button btnGoSettings = view.findViewById(R.id.btn_go_settings);
+        
+        Runnable updateStatus = () -> {
+            boolean isEnabled = isOwnAccessibilityServiceEnabled();
+            if (isEnabled) {
+                statusText.setText("已开启 ✔");
+                statusText.setTextColor(Color.parseColor("#4CAF50")); // Green
+                btnGoSettings.setVisibility(View.GONE);
+            } else {
+                statusText.setText("未开启 ❌");
+                statusText.setTextColor(Color.parseColor("#F44336")); // Red
+                btnGoSettings.setVisibility(View.VISIBLE);
+            }
+        };
+        
+        updateStatus.run();
+        
+        View.OnClickListener goSettingsAction = v -> {
+            if (checkWriteSecurePermission()) {
+                Toast.makeText(MainActivity.this, "需要授予安全设置写入权限才能开启无障碍服务", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            String ownServiceId = new ComponentName(MainActivity.this, MyAccessibilityService.class).flattenToString();
+            String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (s == null) s = "";
+            if (!isOwnAccessibilityServiceEnabled()) {
+                Settings.Secure.putString(getContentResolver(),
+                        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+                        ownServiceId + ":" + s);
+            }
+            String currentDaemon = sp.getString("daemon", "");
+            if (!currentDaemon.contains(ownServiceId)) {
+                String newDaemon = currentDaemon.isEmpty() ? ownServiceId : ownServiceId + ":" + currentDaemon;
+                sp.edit().putString("daemon", newDaemon).apply();
+                daemon = newDaemon;
+                StartForeGroundDaemon();
+            }
+            updateStatus.run();
+        };
+        
+        view.findViewById(R.id.permission_layout).setOnClickListener(goSettingsAction);
+        btnGoSettings.setOnClickListener(goSettingsAction);
+        
+        view.getViewTreeObserver().addOnWindowFocusChangeListener(hasFocus -> {
+            if (hasFocus) {
+                updateStatus.run();
+            }
+        });
+
+        view.findViewById(R.id.btn_cancel).setOnClickListener(v -> dialog.dismiss());
+        view.findViewById(R.id.btn_continue).setOnClickListener(v -> {
+            if (!isOwnAccessibilityServiceEnabled()) {
+                Toast.makeText(MainActivity.this, "请先开启无障碍服务", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            dialog.dismiss();
+            sp.edit().putBoolean("whitelist_global_enable", true).apply();
+            switchButton.setChecked(true);
         });
 
         dialog.show();
