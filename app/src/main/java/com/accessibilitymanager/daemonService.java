@@ -104,10 +104,11 @@ public class daemonService extends Service {
         @Override
         public void onReceive(Context context, Intent intent) {
             LogUtil.log(daemonService.this, "[解锁广播] 收到 USER_PRESENT 广播");
-            // 主线程读设置（ContentProvider IPC 快），结果提交到 daemonExecutor
-            final String currentSetting = Settings.Secure.getString(getContentResolver(),
-                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-            daemonExecutor.submit(() -> handleUnlockBroadcast(currentSetting));
+            daemonExecutor.submit(() -> {
+                String currentSetting = Settings.Secure.getString(getContentResolver(),
+                        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+                handleUnlockBroadcast(currentSetting);
+            });
         }
     };
 
@@ -158,9 +159,11 @@ public class daemonService extends Service {
         @Override
         public void onChange(boolean selfChange) {
             super.onChange(selfChange);
-            final String currentSetting = Settings.Secure.getString(getContentResolver(),
-                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-            daemonExecutor.submit(() -> handleSettingChange(currentSetting));
+            daemonExecutor.submit(() -> {
+                String currentSetting = Settings.Secure.getString(getContentResolver(),
+                        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+                handleSettingChange(currentSetting);
+            });
         }
     }
 
@@ -781,13 +784,12 @@ public class daemonService extends Service {
             return START_STICKY;
         }
 
-        final String currentSetting = Settings.Secure.getString(getContentResolver(),
-                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         final String alarmSource = intent != null ? intent.getStringExtra("source") : null;
 
         // 保活部分提交到 daemonExecutor 串行执行
         daemonExecutor.submit(() -> {
-            String setting = currentSetting;
+            String setting = Settings.Secure.getString(getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             if (setting == null) setting = "";
             refreshInstalledServiceList();
             doDaemon(setting);
