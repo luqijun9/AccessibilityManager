@@ -48,8 +48,6 @@ public class StartReceiver extends BroadcastReceiver {
             // 中因 daemon 为空而 stopSelf() 导致 ForegroundServiceDidNotStartInTimeException
             if (sp.getString("daemon", "").length() == 0) return;
 
-            TimerReceiver.scheduleNext(context);
-
             Intent i = new Intent(context, daemonService.class);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 context.startForegroundService(i);
