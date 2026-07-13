@@ -349,15 +349,15 @@ public class daemonService extends Service {
                         }
                     }
                     
-                    if (!globalWhitelistEnable || (isLocked && !isWhitelisted)) {
+                    if (!mIsWhitelistAppSwitch || (isLocked && !isWhitelisted)) {
                         // daemon 服务：保活日志显示应用名称
                         logDaemonAdded.append(appLabel).append(" ");
                         LogUtil.log(daemonService.this, "[保活] 检测到服务缺失：" + normalized + " (" + appLabel + ")");
+                        add1.append(appLabel).append(" ");
                     } else {
                         // 白名单服务：状态同步日志显示包名
                         logWhitelistAdded.append(normalized).append(" ");
                     }
-                    add1.append(appLabel).append(" ");
                 }
             } else {
                 if (currentServices.contains(normalized)) {
@@ -424,6 +424,9 @@ public class daemonService extends Service {
             }
         } else {
             tmpSettingValue = s;
+            if (mIsWhitelistAppSwitch) {
+                mIsWhitelistAppSwitch = false;
+            }
         }
         mCrashedFixServiceName = null;
         mCrashedFixLabel = null;
