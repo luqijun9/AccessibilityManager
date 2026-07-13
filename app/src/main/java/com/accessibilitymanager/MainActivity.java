@@ -667,7 +667,7 @@ public class MainActivity extends Activity {
         if (mIsWhitelistMode) {
             mTitleText.setText("应用白名单配置");
             mTitleText.setTextColor(textColor);
-            Drawable icon = getResources().getDrawable(R.drawable.ic_filter).mutate();
+            Drawable icon = getResources().getDrawable(R.drawable.ic_block).mutate();
             icon.setColorFilter(textColor, android.graphics.PorterDuff.Mode.SRC_IN);
             mTitleText.setCompoundDrawablesRelativeWithIntrinsicBounds(icon, null, null, null);
             if (mArrowDown != null) mArrowDown.setVisibility(View.GONE);
@@ -702,7 +702,7 @@ public class MainActivity extends Activity {
                     // 普通模式下，所有菜单图标（包括漏斗、搜索、设置等）都应该可见
                     item.setVisible(true);
                     if (item.getItemId() == R.id.whitelist_mode) {
-                        item.setIcon(R.drawable.ic_filter);
+                        item.setIcon(R.drawable.ic_block);
                     }
                 }
             }

@@ -8,7 +8,7 @@
         android:title="" />
     <item
         android:id="@+id/whitelist_mode"
-        android:icon="@drawable/ic_filter"
+        android:icon="@drawable/ic_block"
         app:showAsAction="always"
         android:title="白名单模式" />
     <item
