@@ -59,6 +59,14 @@ public class daemonService extends Service {
         systemService.notify(1, notification.build());
     }
 
+    private static daemonService sInstance = null;
+
+    public static void notifyUnlockFromAccessibility() {
+        if (sInstance != null) {
+            sInstance.checkCrashedServices("解锁(无障碍检测)");
+        }
+    }
+
     // ── 共享状态：仅在 daemonExecutor 线程中读写 ──
     private String tmpSettingValue;
     private List<String> l = new ArrayList<>();
@@ -649,6 +657,7 @@ public class daemonService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        sInstance = this;
         Log.d("AM_DIAG", "[daemonService] onCreate 开始, pid=" + android.os.Process.myPid());
         mHandler = new Handler();
         sp = getSharedPreferences("data", 0);
@@ -727,6 +736,7 @@ public class daemonService extends Service {
     @Override
     public void onDestroy() {
         Log.d("AM_DIAG", "[daemonService] onDestroy 开始, pid=" + android.os.Process.myPid());
+        sInstance = null;
         super.onDestroy();
         cancelPostFixCheck();
         TimerReceiver.cancel(this, "服务销毁");
