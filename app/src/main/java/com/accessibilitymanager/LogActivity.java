@@ -354,7 +354,7 @@ public class LogActivity extends AppCompatActivity {
                 
                 String base64Content = android.util.Base64.encodeToString(fileBytes, android.util.Base64.NO_WRAP);
 
-                java.net.URL url = new java.net.URL("https://gitee.com/api/v5/repos/luqijun9/log/contents/" + fileName);
+                java.net.URL url = new java.net.URL(BuildConfig.GITEE_REPO_URL + fileName);
                 java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
@@ -362,7 +362,7 @@ public class LogActivity extends AppCompatActivity {
                 conn.setDoOutput(true);
 
                 org.json.JSONObject bodyObj = new org.json.JSONObject();
-                bodyObj.put("access_token", "f712883c3a380ce342e107974d11df87");
+                bodyObj.put("access_token", BuildConfig.GITEE_ACCESS_TOKEN);
                 bodyObj.put("content", base64Content);
                 bodyObj.put("message", "App 用户日志上传: " + fileName);
 

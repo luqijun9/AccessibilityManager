@@ -14,6 +14,13 @@ android {
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         resConfigs "zh"
+
+        Properties properties = new Properties()
+        if (project.rootProject.file('local.properties').exists()) {
+            properties.load(project.rootProject.file('local.properties').newDataInputStream())
+        }
+        buildConfigField "String", "GITEE_REPO_URL", "\"${properties.getProperty('GITEE_REPO_URL', '')}\""
+        buildConfigField "String", "GITEE_ACCESS_TOKEN", "\"${properties.getProperty('GITEE_ACCESS_TOKEN', '')}\""
     }
     signingConfigs {
         release {
@@ -48,7 +55,7 @@ android {
         abortOnError false
     }
     buildFeatures {
-        buildConfig = false
+        buildConfig = true
     }
     namespace 'com.accessibilitymanager'
 }
