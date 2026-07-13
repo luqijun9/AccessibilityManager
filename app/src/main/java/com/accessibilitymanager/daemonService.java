@@ -411,9 +411,15 @@ public class daemonService extends Service {
                      }
                  }
                  if (isCrashed) {
+                     final String crashedLabel = mCrashedFixLabel != null ? mCrashedFixLabel : "";
                      mCrashedFixServiceName = null;
                      mCrashedFixLabel = null;
-                     mHandler.post(() -> Toast.makeText(daemonService.this, "保活崩溃服务", Toast.LENGTH_SHORT).show());
+                     mHandler.post(() -> Toast.makeText(daemonService.this, "保活崩溃服务 " + crashedLabel, Toast.LENGTH_SHORT).show());
+                 } else {
+                     final String label = add1.toString().trim();
+                     if (!label.isEmpty()) {
+                         mHandler.post(() -> Toast.makeText(daemonService.this, "保活" + label, Toast.LENGTH_SHORT).show());
+                     }
                  }
             }
         } else {
