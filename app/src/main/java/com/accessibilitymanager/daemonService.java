@@ -81,6 +81,7 @@ public class daemonService extends Service {
     // ── 解锁检测重复触发追踪（仅在 crashCheckExecutor 线程读写）──
     private long mLastUnlockBroadcastTime = 0;
     private long mLastAccessibilityUnlockTime = 0;
+    private long mLastDumpsysTime = 0;
 
     // ── 执行器 ──
     // daemonExecutor: 串行处理所有共享状态（保活、修复、设置读写）
@@ -430,6 +431,20 @@ public class daemonService extends Service {
             }
         }
 
+        // ── 全局冷却时间拦截 ──
+        if ("解锁".equals(source) || "解锁(无障碍检测)".equals(source)) {
+            boolean cooldownEnabled = sp.getBoolean("global_cooldown_enable", false);
+            if (cooldownEnabled) {
+                long cooldownMinutes = sp.getInt("global_cooldown_time_minutes", 15);
+                long cooldownMs = cooldownMinutes * 60 * 1000;
+                if (now - mLastDumpsysTime < cooldownMs) {
+                    LogUtil.log(daemonService.this, "[崩溃检测] 距离上次检测不到 " + cooldownMinutes + " 分钟，受全局冷却限制已拦截");
+                    Log.d("AccMgrDebug", "[TASK-" + Integer.toHexString(System.identityHashCode(this)) + "] global cooldown intercepted");
+                    return;
+                }
+            }
+        }
+
         String taskId = Integer.toHexString(System.identityHashCode(this)) + "-" + (int)(Math.random() * 0xFFFF);
         Log.d("AccMgrDebug", "[TASK-" + taskId + "] ENTER source=" + source);
         String daemonList = sp.getString("daemon", "");
@@ -447,6 +462,7 @@ public class daemonService extends Service {
         }
 
         try {
+            mLastDumpsysTime = System.currentTimeMillis();
             Log.d("AccMgrDebug", "[TASK-" + taskId + "] Executing dumpsys accessibility directly (DUMP)...");
             Process p = Runtime.getRuntime().exec("dumpsys accessibility");
             Log.d("AccMgrDebug", "[TASK-" + taskId + "] Direct exec() OK pid=" + p);

@@ -39,12 +39,12 @@ public class SettingsActivity extends AppCompatActivity {
 
     // 子项视图引用
     private MaterialSwitch switchBoot, switchToast, switchUserOnly, switchHide, switchDelayDaemon;
-    private MaterialSwitch switchCrashFix, switchUnlockCrashCheck, switchFixMode;
+    private MaterialSwitch switchCrashFix, switchUnlockCrashCheck, switchFixMode, switchGlobalCooldown;
     private MaterialSwitch switchPeriodicCheck, switchWakeIdle, switchIgnoreSystemCrash;
     private MaterialSwitch switchAutoUpdate;
-    private LinearLayout crashDependentLayout, fixmodeServicesLayout, periodicSubLayout;
+    private LinearLayout crashDependentLayout, fixmodeServicesLayout, periodicSubLayout, globalCooldownTimeLayout, globalCooldownEnableLayout, globalCooldownSubLayout;
     private View fixmodeServicesBtn;
-    private TextView intervalLabel, notifyCustomBtn, crashTutorialBtn, aboutBtn, checkUpdateBtn;
+    private TextView intervalLabel, notifyCustomBtn, crashTutorialBtn, aboutBtn, checkUpdateBtn, globalCooldownTimeLabel;
     private View btnThemeColor;
     private TextView tvThemeDesc;
 
@@ -178,6 +178,11 @@ public class SettingsActivity extends AppCompatActivity {
         switchHide = findViewById(R.id.hide);
         switchDelayDaemon = findViewById(R.id.delay_daemon);
         switchCrashFix = findViewById(R.id.crashfix);
+        switchGlobalCooldown = findViewById(R.id.global_cooldown_enable);
+        globalCooldownEnableLayout = findViewById(R.id.global_cooldown_enable_layout);
+        globalCooldownSubLayout = findViewById(R.id.global_cooldown_sub_layout);
+        globalCooldownTimeLayout = findViewById(R.id.global_cooldown_time_layout);
+        globalCooldownTimeLabel = findViewById(R.id.global_cooldown_time);
         switchUnlockCrashCheck = findViewById(R.id.unlock_crash_check);
         switchFixMode = findViewById(R.id.fixmode);
         switchPeriodicCheck = findViewById(R.id.periodic_check);
@@ -205,6 +210,10 @@ public class SettingsActivity extends AppCompatActivity {
         switchHide.setChecked(sp.getBoolean("hide", false));
         switchDelayDaemon.setChecked(sp.getBoolean("delay_daemon", false));
         switchCrashFix.setChecked(sp.getBoolean("crashfix", false));
+        boolean globalCooldownEnabled = sp.getBoolean("global_cooldown_enable", false);
+        switchGlobalCooldown.setChecked(globalCooldownEnabled);
+        globalCooldownSubLayout.setVisibility(globalCooldownEnabled ? View.VISIBLE : View.GONE);
+        globalCooldownTimeLabel.setText(sp.getInt("global_cooldown_time_minutes", 15) + "分钟");
         switchUnlockCrashCheck.setChecked(sp.getBoolean("unlock_crash_check", false));
         switchFixMode.setChecked(sp.getBoolean("fixmode", false));
         switchPeriodicCheck.setChecked(sp.getBoolean("periodic_check", false));
@@ -285,6 +294,17 @@ public class SettingsActivity extends AppCompatActivity {
             refreshCrashFixDependent();
         };
         switchCrashFix.setOnCheckedChangeListener(crashFixListenerHolder[0]);
+        
+        switchGlobalCooldown.setOnCheckedChangeListener((btn, checked) -> {
+            sp.edit().putBoolean("global_cooldown_enable", checked).apply();
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
+                android.transition.TransitionManager.beginDelayedTransition((android.view.ViewGroup) rootView);
+            }
+            globalCooldownSubLayout.setVisibility(checked ? View.VISIBLE : View.GONE);
+        });
+                
+        globalCooldownEnableLayout.setOnClickListener(v -> switchGlobalCooldown.toggle());
+        globalCooldownTimeLabel.setOnClickListener(v -> showCooldownTimeDialog());
 
         // 解锁检测
         final MaterialSwitch unlockCrashCheckRef = switchUnlockCrashCheck;
@@ -993,6 +1013,63 @@ public class SettingsActivity extends AppCompatActivity {
                     "定时检测间隔已设为 " + minutes + " 分钟", Toast.LENGTH_SHORT).show();
             dialog.dismiss();
             if (onSaved != null) onSaved.run();
+        });
+    }
+
+    private void showCooldownTimeDialog() {
+        int currentCooldown = sp.getInt("global_cooldown_time_minutes", 15);
+
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.HORIZONTAL);
+        layout.setPadding(40, 20, 40, 20);
+
+        final EditText input = new EditText(this);
+        input.setHint("15");
+        input.setText(String.valueOf(currentCooldown));
+        input.setInputType(InputType.TYPE_CLASS_NUMBER);
+        LinearLayout.LayoutParams inputParams = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        input.setLayoutParams(inputParams);
+        layout.addView(input);
+
+        TextView unit = new TextView(this);
+        unit.setText("分钟");
+        unit.setTextSize(16f);
+        if (night) unit.setTextColor(Color.WHITE);
+        LinearLayout.LayoutParams unitParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        unitParams.leftMargin = 16;
+        unit.setLayoutParams(unitParams);
+        layout.addView(unit);
+
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+                .setTitle("设置全局冷却时间")
+                .setView(layout)
+                .setPositiveButton("确定", null)
+                .setNegativeButton("取消", null)
+                .create();
+        dialog.show();
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String inputStr = input.getText().toString().trim();
+            int minutes;
+            try {
+                minutes = Integer.parseInt(inputStr);
+            } catch (NumberFormatException e) {
+                Toast.makeText(SettingsActivity.this,
+                        "请输入有效数字", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (minutes < 1 || minutes > 1440) {
+                Toast.makeText(SettingsActivity.this,
+                        "请输入1-1440之间的数字", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            sp.edit().putInt("global_cooldown_time_minutes", minutes).apply();
+            globalCooldownTimeLabel.setText(minutes + "分钟");
+            Toast.makeText(SettingsActivity.this,
+                    "全局冷却时间已设为 " + minutes + " 分钟", Toast.LENGTH_SHORT).show();
+            dialog.dismiss();
         });
     }
 
