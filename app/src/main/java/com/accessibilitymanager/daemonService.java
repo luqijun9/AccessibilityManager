@@ -322,9 +322,9 @@ public class daemonService extends Service {
             if (isWhitelisted && globalWhitelistEnable) {
                 String whitelist = sp.getString("whitelist_" + normalized, "");
                 if (whitelist.isEmpty()) {
-                    desiredState = true;
+                    desiredState = false;
                 } else {
-                    desiredState = whitelist.contains(":" + currentForegroundPkg + ":");
+                    desiredState = !whitelist.contains(":" + currentForegroundPkg + ":");
                 }
             } else if (isLocked) {
                 desiredState = true;

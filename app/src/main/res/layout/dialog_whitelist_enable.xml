@@ -25,7 +25,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="开启白名单总开关后，保活机制将仅对您勾选的应用生效。\n\n由于保活机制需要判断应用前台状态并执行重启等操作，此功能依赖本应用的无障碍服务。"
+        android:text="开启白名单总开关后，当处于您配置的白名单应用中时，将自动关闭对应的服务；即使该服务已开启保活，也会被强制关闭。\n\n由于该机制需要判断应用前台状态并执行操作，此功能依赖本应用的无障碍服务。"
         android:textColor="@color/text_primary"
         android:textSize="14sp"
         android:lineSpacingExtra="4dp"
