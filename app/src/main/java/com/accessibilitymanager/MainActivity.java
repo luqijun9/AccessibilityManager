@@ -1528,13 +1528,23 @@ public class MainActivity extends Activity {
         mSearchInput.requestFocus();
         InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
         if (imm != null) imm.showSoftInput(mSearchInput, 0);
+
+        // Slide-in animation for search bar only (not the list)
+        mSearchView.setAlpha(0f);
+        mSearchView.setTranslationX(80f * getResources().getDisplayMetrics().density);
+        mSearchView.animate().alpha(1f).translationX(0f).setDuration(220).start();
     }
 
     private void exitSearchMode() {
         if (!mIsSearching) return;
         mIsSearching = false;
 
-        //移除搜索视图
+        //移除搜索视图（先触发 Toolbar 过渡动画）
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
+            android.transition.AutoTransition transition = new android.transition.AutoTransition();
+            transition.setDuration(150);
+            android.transition.TransitionManager.beginDelayedTransition(toolbar, transition);
+        }
         toolbar.removeView(mSearchView);
         mSearchView = null;
         mSearchInput = null;
