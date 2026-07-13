@@ -752,7 +752,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="需 Shizuku/Root 权限，部分服务仅关闭重开仍可能崩溃"
+                            android:text="需 Shizuku/Root 权限，若崩溃服务重启仍崩溃，可尝试此功能"
                             android:textColor="@color/text_secondary"
                             android:textSize="13sp"
                             android:layout_marginTop="2dp" />
