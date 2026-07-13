@@ -203,8 +203,19 @@ public class MainActivity extends Activity {
             int itemId = item.getItemId();
             if (itemId == R.id.whitelist_mode) {
                 mIsWhitelistMode = !mIsWhitelistMode;
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
+                    android.transition.TransitionManager.beginDelayedTransition(toolbar);
+                }
                 updateTitleView();
                 switchToTab(mIsFavoritesTab); // Re-render the list
+                
+                // Add slide and fade animation to listView
+                if (listView != null) {
+                    float offset = mIsWhitelistMode ? 100f * getResources().getDisplayMetrics().density : -100f * getResources().getDisplayMetrics().density;
+                    listView.setAlpha(0f);
+                    listView.setTranslationX(offset);
+                    listView.animate().alpha(1f).translationX(0f).setDuration(250).start();
+                }
                 return true;
             }
             if (itemId == R.id.search) {
@@ -676,17 +687,46 @@ public class MainActivity extends Activity {
             if (mMenu != null) {
                 for (int i = 0; i < mMenu.size(); i++) {
                     MenuItem item = mMenu.getItem(i);
-                    if (item.getItemId() != R.id.whitelist_mode) {
-                        item.setVisible(false);
-                    } else {
-                        item.setVisible(true); // 确保在白名单模式下漏斗图标是可见的
-                        item.setIcon(R.drawable.ic_back_arrow);
-                        if (item.getIcon() != null) {
-                            item.getIcon().setColorFilter(textColor, android.graphics.PorterDuff.Mode.SRC_IN);
-                        }
-                    }
+                    item.setVisible(false); // Hide all menu items in whitelist mode
                 }
             }
+
+            if (mTitleView != null) {
+                mTitleView.setClickable(false);
+                Toolbar.LayoutParams layoutParams = (Toolbar.LayoutParams) mTitleView.getLayoutParams();
+                if (layoutParams != null) {
+                    layoutParams.width = Toolbar.LayoutParams.MATCH_PARENT;
+                    mTitleView.setLayoutParams(layoutParams);
+                }
+            }
+            if (mTitleText != null) {
+                LinearLayout.LayoutParams textParams = (LinearLayout.LayoutParams) mTitleText.getLayoutParams();
+                if (textParams != null) {
+                    textParams.width = 0;
+                    textParams.weight = 1;
+                    mTitleText.setLayoutParams(textParams);
+                }
+            }
+
+            toolbar.setNavigationIcon(R.drawable.ic_back_arrow);
+            if (toolbar.getNavigationIcon() != null) {
+                toolbar.getNavigationIcon().setColorFilter(textColor, android.graphics.PorterDuff.Mode.SRC_IN);
+            }
+            toolbar.setNavigationOnClickListener(v -> {
+                mIsWhitelistMode = false;
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
+                    android.transition.TransitionManager.beginDelayedTransition(toolbar);
+                }
+                updateTitleView();
+                switchToTab(mIsFavoritesTab); // Re-render the list
+                
+                if (listView != null) {
+                    float offset = -100f * getResources().getDisplayMetrics().density;
+                    listView.setAlpha(0f);
+                    listView.setTranslationX(offset);
+                    listView.animate().alpha(1f).translationX(0f).setDuration(250).start();
+                }
+            });
         } else {
             mTitleText.setText(mIsFavoritesTab ? "收藏" : "全部");
             mTitleText.setTextColor(textColor);
@@ -706,6 +746,26 @@ public class MainActivity extends Activity {
                     }
                 }
             }
+
+            if (mTitleView != null) {
+                mTitleView.setClickable(true);
+                Toolbar.LayoutParams layoutParams = (Toolbar.LayoutParams) mTitleView.getLayoutParams();
+                if (layoutParams != null) {
+                    layoutParams.width = Toolbar.LayoutParams.WRAP_CONTENT;
+                    mTitleView.setLayoutParams(layoutParams);
+                }
+            }
+            if (mTitleText != null) {
+                LinearLayout.LayoutParams textParams = (LinearLayout.LayoutParams) mTitleText.getLayoutParams();
+                if (textParams != null) {
+                    textParams.width = LinearLayout.LayoutParams.WRAP_CONTENT;
+                    textParams.weight = 0;
+                    mTitleText.setLayoutParams(textParams);
+                }
+            }
+
+            toolbar.setNavigationIcon(null);
+            toolbar.setNavigationOnClickListener(null);
         }
     }
 
@@ -722,6 +782,7 @@ public class MainActivity extends Activity {
 
         mTitleText = new TextView(this);
         mTitleText.setTextSize(18);
+        mTitleText.setGravity(android.view.Gravity.CENTER_VERTICAL);
         mTitleText.setIncludeFontPadding(false);
         mTitleText.setCompoundDrawablePadding((int) (6 * getResources().getDisplayMetrics().density + 0.5f));
         mTitleText.setPaddingRelative(0, 0, (int) (4 * getResources().getDisplayMetrics().density + 0.5f), 0);
