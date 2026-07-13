@@ -418,13 +418,15 @@ public class daemonService extends Service {
         boolean isBackground = !MainActivity.sIsForeground;
         if ("解锁".equals(source)) {
             mLastUnlockBroadcastTime = now;
-            if (isBackground && now - mLastAccessibilityUnlockTime <= 3000) {
+            if (isBackground && now - mLastAccessibilityUnlockTime <= 1000) {
                 recordUnlockDuplicate();
+                return;
             }
         } else if ("解锁(无障碍检测)".equals(source)) {
             mLastAccessibilityUnlockTime = now;
-            if (isBackground && now - mLastUnlockBroadcastTime <= 3000) {
+            if (isBackground && now - mLastUnlockBroadcastTime <= 1000) {
                 recordUnlockDuplicate();
+                return;
             }
         }
 
