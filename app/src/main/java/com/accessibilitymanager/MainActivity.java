@@ -680,6 +680,10 @@ public class MainActivity extends Activity {
                         item.setVisible(false);
                     } else {
                         item.setVisible(true); // 确保在白名单模式下漏斗图标是可见的
+                        item.setIcon(R.drawable.ic_back_arrow);
+                        if (item.getIcon() != null) {
+                            item.getIcon().setColorFilter(textColor, android.graphics.PorterDuff.Mode.SRC_IN);
+                        }
                     }
                 }
             }
@@ -694,8 +698,12 @@ public class MainActivity extends Activity {
             
             if (mMenu != null) {
                 for (int i = 0; i < mMenu.size(); i++) {
+                    MenuItem item = mMenu.getItem(i);
                     // 普通模式下，所有菜单图标（包括漏斗、搜索、设置等）都应该可见
-                    mMenu.getItem(i).setVisible(true);
+                    item.setVisible(true);
+                    if (item.getItemId() == R.id.whitelist_mode) {
+                        item.setIcon(R.drawable.ic_filter);
+                    }
                 }
             }
         }
