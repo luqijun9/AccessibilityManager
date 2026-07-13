@@ -86,7 +86,34 @@ public class LogActivity extends AppCompatActivity {
         toolbar.setNavigationOnClickListener(v -> finish());
 
         findViewById(R.id.btn_close).setOnClickListener(v -> finish());
-        findViewById(R.id.btn_share).setOnClickListener(v -> shareLog());
+        
+        View btnShare = findViewById(R.id.btn_share);
+        btnShare.setOnTouchListener(new View.OnTouchListener() {
+            private android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
+            private boolean isLongPressed = false;
+            private Runnable longPressRunnable = () -> {
+                isLongPressed = true;
+                btnShare.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+                showUploadDialog();
+            };
+            
+            @Override
+            public boolean onTouch(View v, android.view.MotionEvent event) {
+                if (event.getAction() == android.view.MotionEvent.ACTION_DOWN) {
+                    isLongPressed = false;
+                    handler.postDelayed(longPressRunnable, 1000); // 1秒长按
+                } else if (event.getAction() == android.view.MotionEvent.ACTION_UP) {
+                    handler.removeCallbacks(longPressRunnable);
+                    if (!isLongPressed) {
+                        shareLog();
+                    }
+                } else if (event.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
+                    handler.removeCallbacks(longPressRunnable);
+                }
+                return false; // 返回 false，让 Button 能够自己处理涟漪动画和 pressed 状态
+            }
+        });
+
         findViewById(R.id.btn_dump_exec).setOnClickListener(v -> executeDumpDirect());
 
         // 初次加载已有日志
@@ -245,18 +272,15 @@ public class LogActivity extends AppCompatActivity {
         return false;
     }
 
-    private void shareLog() {
+    private String buildCompleteLogContent() {
         String logText = LogUtil.readRecentLogsRaw(this);
-        if (logText.isEmpty()) {
+        if (logText == null || logText.isEmpty()) {
             logText = "暂无日志记录";
         }
 
-        // 获取 dumpsys accessibility 信息
         String accessibilityInfo = getAccessibilityServiceInfo();
 
-        // 组合完整日志内容
         StringBuilder fullLog = new StringBuilder();
-        
         fullLog.append("=============== App Status & Settings ===============\n\n");
         fullLog.append("MyAccessibilityService Enabled: ").append(isAccessibilityServiceEnabled()).append("\n\n");
         fullLog.append(getSharedPreferencesDump());
@@ -266,6 +290,11 @@ public class LogActivity extends AppCompatActivity {
         fullLog.append(accessibilityInfo);
         fullLog.append("\n\n=============== Application Logs ===============\n\n");
         fullLog.append(logText);
+        return fullLog.toString();
+    }
+
+    private void shareLog() {
+        String fullLogStr = buildCompleteLogContent();
 
         try {
             String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(new java.util.Date());
@@ -273,10 +302,9 @@ public class LogActivity extends AppCompatActivity {
             File logFile = new File(cacheDir, "accessibility_log_" + timestamp + ".txt");
 
             try (java.io.FileOutputStream fos = new java.io.FileOutputStream(logFile)) {
-                fos.write(fullLog.toString().getBytes("UTF-8"));
+                fos.write(fullLogStr.getBytes("UTF-8"));
             }
 
-            // 使用 AndroidX FileProvider 生成 content:// URI，APP 关闭后缓存文件自动清理
             Uri contentUri = androidx.core.content.FileProvider.getUriForFile(
                     this, getPackageName() + ".logshare", logFile);
 
@@ -287,12 +315,77 @@ public class LogActivity extends AppCompatActivity {
             intent.setClipData(android.content.ClipData.newRawUri("", contentUri));
             startActivity(Intent.createChooser(intent, "分享日志文件"));
         } catch (Exception e) {
-            // 文件分享失败时降级为纯文本分享
             Intent intent = new Intent(Intent.ACTION_SEND);
             intent.setType("text/plain");
-            intent.putExtra(Intent.EXTRA_TEXT, fullLog.toString());
+            intent.putExtra(Intent.EXTRA_TEXT, fullLogStr);
             startActivity(Intent.createChooser(intent, "分享日志"));
         }
+    }
+
+    private void showUploadDialog() {
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("上传日志")
+                .setMessage("是否将当前日志上传？")
+                .setPositiveButton("上传", (dialog, which) -> uploadLogToGitee())
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void uploadLogToGitee() {
+        android.widget.Toast.makeText(this, "正在上传日志...", android.widget.Toast.LENGTH_SHORT).show();
+
+        final String finalLogContent = buildCompleteLogContent();
+
+        new Thread(() -> {
+            try {
+                String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(new java.util.Date());
+                String fileName = "accessibility_log_" + timestamp + ".txt";
+
+                java.io.File cacheDir = getCacheDir();
+                java.io.File logFile = new java.io.File(cacheDir, fileName);
+                try (java.io.FileOutputStream fos = new java.io.FileOutputStream(logFile)) {
+                    fos.write(finalLogContent.getBytes("UTF-8"));
+                }
+                
+                byte[] fileBytes = new byte[(int) logFile.length()];
+                try (java.io.FileInputStream fis = new java.io.FileInputStream(logFile)) {
+                    fis.read(fileBytes);
+                }
+                
+                String base64Content = android.util.Base64.encodeToString(fileBytes, android.util.Base64.NO_WRAP);
+
+                java.net.URL url = new java.net.URL("https://gitee.com/api/v5/repos/luqijun9/log/contents/" + fileName);
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+                conn.setDoOutput(true);
+
+                org.json.JSONObject bodyObj = new org.json.JSONObject();
+                bodyObj.put("access_token", "f712883c3a380ce342e107974d11df87");
+                bodyObj.put("content", base64Content);
+                bodyObj.put("message", "App 用户日志上传: " + fileName);
+
+                String jsonBodyString = bodyObj.toString();
+                byte[] bodyBytes = jsonBodyString.getBytes("UTF-8");
+                
+                conn.setFixedLengthStreamingMode(bodyBytes.length);
+
+                java.io.OutputStream os = conn.getOutputStream();
+                os.write(bodyBytes);
+                os.flush();
+                os.close();
+
+                int responseCode = conn.getResponseCode();
+                if (responseCode == 201 || responseCode == 200) {
+                    runOnUiThread(() -> android.widget.Toast.makeText(LogActivity.this, "上传成功", android.widget.Toast.LENGTH_SHORT).show());
+                } else {
+                    runOnUiThread(() -> android.widget.Toast.makeText(LogActivity.this, "上传失败", android.widget.Toast.LENGTH_SHORT).show());
+                }
+            } catch (Exception e) {
+                runOnUiThread(() -> android.widget.Toast.makeText(LogActivity.this, "上传失败", android.widget.Toast.LENGTH_SHORT).show());
+            }
+        }).start();
     }
 
     private String getAccessibilityServiceInfo() {
