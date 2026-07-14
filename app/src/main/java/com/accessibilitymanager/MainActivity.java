@@ -103,6 +103,16 @@ public class MainActivity extends Activity {
     private List<AccessibilityServiceInfo> mFavoritesList;
     private TextView mPinHint;
     private final Map<String, ServiceCache> mServiceCache = new HashMap<>();
+
+    static class AppCacheItem {
+        ApplicationInfo info;
+        String label;
+        android.graphics.drawable.Drawable icon;
+        AppCacheItem(ApplicationInfo i, String l, android.graphics.drawable.Drawable d) {
+            info = i; label = l; icon = d;
+        }
+    }
+    private List<AppCacheItem> mCachedAppList = null;
     private View mTitleView;
     private TextView mTitleText;
 
@@ -1816,25 +1826,25 @@ public class MainActivity extends Activity {
                 }
             }
 
-            List<ApplicationInfo> allApps = pm.getInstalledApplications(PackageManager.GET_META_DATA);
-            List<ApplicationInfo> userApps = new java.util.ArrayList<>();
-            
-            for (ApplicationInfo info : allApps) {
-                Intent launchIntent = pm.getLaunchIntentForPackage(info.packageName);
-                if (launchIntent != null) {
-                    userApps.add(info);
+            if (mCachedAppList == null) {
+                List<ApplicationInfo> allApps = pm.getInstalledApplications(PackageManager.GET_META_DATA);
+                mCachedAppList = new java.util.ArrayList<>();
+                for (ApplicationInfo info : allApps) {
+                    Intent launchIntent = pm.getLaunchIntentForPackage(info.packageName);
+                    if (launchIntent != null) {
+                        mCachedAppList.add(new AppCacheItem(info, info.loadLabel(pm).toString(), info.loadIcon(pm)));
+                    }
                 }
             }
+            List<AppCacheItem> userApps = new java.util.ArrayList<>(mCachedAppList);
 
             java.util.Collections.sort(userApps, (a, b) -> {
-                boolean aChecked = checkedPkgs.contains(a.packageName);
-                boolean bChecked = checkedPkgs.contains(b.packageName);
+                boolean aChecked = checkedPkgs.contains(a.info.packageName);
+                boolean bChecked = checkedPkgs.contains(b.info.packageName);
                 if (aChecked != bChecked) {
                     return aChecked ? -1 : 1;
                 }
-                String aName = a.loadLabel(pm).toString();
-                String bName = b.loadLabel(pm).toString();
-                return java.text.Collator.getInstance().compare(aName, bName);
+                return java.text.Collator.getInstance().compare(a.label, b.label);
             });
 
             runOnUiThread(() -> {
@@ -1848,13 +1858,13 @@ public class MainActivity extends Activity {
                 Button btnDeselectAll = dialogView.findViewById(R.id.btn_deselect_all);
 
                 class AppAdapter extends BaseAdapter implements android.widget.Filterable {
-                    private List<ApplicationInfo> originalList = userApps;
-                    private List<ApplicationInfo> filteredList = new java.util.ArrayList<>(userApps);
+                    private List<AppCacheItem> originalList = userApps;
+                    private List<AppCacheItem> filteredList = new java.util.ArrayList<>(userApps);
                     
                     @Override
                     public int getCount() { return filteredList.size(); }
                     @Override
-                    public ApplicationInfo getItem(int position) { return filteredList.get(position); }
+                    public AppCacheItem getItem(int position) { return filteredList.get(position); }
                     @Override
                     public long getItemId(int position) { return position; }
 
@@ -1866,18 +1876,18 @@ public class MainActivity extends Activity {
                         ImageView iconView = convertView.findViewById(R.id.app_icon);
                         android.widget.CheckedTextView nameView = convertView.findViewById(R.id.app_name);
                         
-                        ApplicationInfo info = getItem(position);
-                        iconView.setImageDrawable(info.loadIcon(pm));
-                        nameView.setText(info.loadLabel(pm));
-                        nameView.setChecked(checkedPkgs.contains(info.packageName));
+                        AppCacheItem item = getItem(position);
+                        iconView.setImageDrawable(item.icon);
+                        nameView.setText(item.label);
+                        nameView.setChecked(checkedPkgs.contains(item.info.packageName));
                         
                         convertView.setOnClickListener(v -> {
                             boolean isChecked = !nameView.isChecked();
                             nameView.setChecked(isChecked);
                             if (isChecked) {
-                                checkedPkgs.add(info.packageName);
+                                checkedPkgs.add(item.info.packageName);
                             } else {
-                                checkedPkgs.remove(info.packageName);
+                                checkedPkgs.remove(item.info.packageName);
                             }
                         });
                         
@@ -1890,15 +1900,15 @@ public class MainActivity extends Activity {
                             @Override
                             protected FilterResults performFiltering(CharSequence constraint) {
                                 FilterResults results = new FilterResults();
-                                List<ApplicationInfo> filtered = new java.util.ArrayList<>();
+                                List<AppCacheItem> filtered = new java.util.ArrayList<>();
                                 if (constraint == null || constraint.length() == 0) {
                                     filtered.addAll(originalList);
                                 } else {
                                     String filterPattern = constraint.toString().toLowerCase().trim();
-                                    for (ApplicationInfo info : originalList) {
-                                        if (info.loadLabel(pm).toString().toLowerCase().contains(filterPattern) ||
-                                            info.packageName.toLowerCase().contains(filterPattern)) {
-                                            filtered.add(info);
+                                    for (AppCacheItem item : originalList) {
+                                        if (item.label.toLowerCase().contains(filterPattern) ||
+                                            item.info.packageName.toLowerCase().contains(filterPattern)) {
+                                            filtered.add(item);
                                         }
                                     }
                                 }
@@ -1909,18 +1919,18 @@ public class MainActivity extends Activity {
 
                             @Override
                             protected void publishResults(CharSequence constraint, FilterResults results) {
-                                filteredList = (List<ApplicationInfo>) results.values;
+                                filteredList = (List<AppCacheItem>) results.values;
                                 notifyDataSetChanged();
                             }
                         };
                     }
                     
                     public void selectAllFiltered(boolean select) {
-                        for (ApplicationInfo info : filteredList) {
+                        for (AppCacheItem item : filteredList) {
                             if (select) {
-                                checkedPkgs.add(info.packageName);
+                                checkedPkgs.add(item.info.packageName);
                             } else {
-                                checkedPkgs.remove(info.packageName);
+                                checkedPkgs.remove(item.info.packageName);
                             }
                         }
                         notifyDataSetChanged();
