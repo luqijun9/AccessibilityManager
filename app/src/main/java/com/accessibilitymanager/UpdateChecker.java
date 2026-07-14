@@ -54,16 +54,28 @@ public class UpdateChecker {
 
                         JSONObject json = new JSONObject(response.toString());
                         final String latestVersion = json.getString("tag_name");
-                        final String releaseNotes = json.optString("body", "");
-                        final String rawDownloadUrl = json.getJSONArray("assets").getJSONObject(0).getString("browser_download_url");
+                        String rawReleaseNotes = json.optString("body", "");
+                        final String htmlUrl = json.optString("html_url", "https://github.com/luqijun9/AccessibilityManager/releases/latest");
+                        
+                        final String downloadUrl;
+                        final String releaseNotes;
+                        
+                        // 检查云端跳转指令
+                        if (rawReleaseNotes.contains("[jump_repo]")) {
+                            // 如果包含指令，则跳转链接设置为仓库页面，并从更新说明中移除该指令
+                            downloadUrl = htmlUrl;
+                            releaseNotes = rawReleaseNotes.replace("[jump_repo]", "").trim();
+                        } else {
+                            releaseNotes = rawReleaseNotes;
+                            // 原有的直接下载逻辑
+                            final String rawDownloadUrl = json.getJSONArray("assets").getJSONObject(0).getString("browser_download_url");
+                            
+                            // 构造代理下载URL
+                            final String proxyDownloadUrl = PROXY_DOWNLOAD_PREFIX + rawDownloadUrl;
 
-                        // 构造代理下载URL
-                        final String proxyDownloadUrl = PROXY_DOWNLOAD_PREFIX + rawDownloadUrl;
-
-                        // 测试代理连通性：先试代理，不通则降级直连
-                        String testedUrl = testDownloadUrl(proxyDownloadUrl, rawDownloadUrl);
-
-                        final String downloadUrl = testedUrl;
+                            // 测试代理连通性：先试代理，不通则降级直连
+                            downloadUrl = testDownloadUrl(proxyDownloadUrl, rawDownloadUrl);
+                        }
 
                         // 记录日志供调试
                         android.util.Log.i("UpdateChecker", "最终下载URL: " + downloadUrl);
