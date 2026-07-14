@@ -45,22 +45,10 @@
         android:orientation="horizontal"
         android:padding="8dp">
 
-        <Button
-            android:id="@+id/btn_select_all"
-            style="?android:attr/borderlessButtonStyle"
-            android:layout_width="0dp"
+        <CheckBox
+            android:id="@+id/check_select_all"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="全选"
-            android:textColor="?attr/colorPrimary" />
-
-        <Button
-            android:id="@+id/btn_deselect_all"
-            style="?android:attr/borderlessButtonStyle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="全不选"
-            android:textColor="?attr/colorPrimary" />
+            android:text="全选" />
     </LinearLayout>
 </LinearLayout>

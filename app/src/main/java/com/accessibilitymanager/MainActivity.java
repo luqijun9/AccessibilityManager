@@ -1854,8 +1854,7 @@ public class MainActivity extends Activity {
                 View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_whitelist_apps, null);
                 EditText searchEdit = dialogView.findViewById(R.id.edit_search_app);
                 ListView listViewDialog = dialogView.findViewById(R.id.list_apps);
-                Button btnSelectAll = dialogView.findViewById(R.id.btn_select_all);
-                Button btnDeselectAll = dialogView.findViewById(R.id.btn_deselect_all);
+                android.widget.CheckBox checkSelectAll = dialogView.findViewById(R.id.check_select_all);
 
                 class AppAdapter extends BaseAdapter implements android.widget.Filterable {
                     private List<AppCacheItem> originalList = userApps;
@@ -1948,8 +1947,9 @@ public class MainActivity extends Activity {
                     @Override public void afterTextChanged(android.text.Editable s) {}
                 });
 
-                btnSelectAll.setOnClickListener(v -> adapter.selectAllFiltered(true));
-                btnDeselectAll.setOnClickListener(v -> adapter.selectAllFiltered(false));
+                checkSelectAll.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                    adapter.selectAllFiltered(isChecked);
+                });
 
                 new com.google.android.material.dialog.MaterialAlertDialogBuilder(MainActivity.this)
                         .setTitle("配置应用白名单")
