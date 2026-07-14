@@ -2326,7 +2326,7 @@ public class MainActivity extends Activity {
             String pkg = getPackageName();
             String cmd = "adb shell \"pm grant " + pkg + " android.permission.WRITE_SECURE_SETTINGS; pm grant " + pkg + " android.permission.DUMP\"";
             String rootCmd = "pm grant " + pkg + " android.permission.WRITE_SECURE_SETTINGS; pm grant " + pkg + " android.permission.DUMP";
-            new AlertDialog.Builder(MainActivity.this)
+            new com.google.android.material.dialog.MaterialAlertDialogBuilder(MainActivity.this)
                     .setMessage("安卓5.1和更低版本的设备，需将本APP转换为系统应用。\n\n安卓6.0及更高版本的设备，在下面三个方法中任选一个均可：\n1.连接电脑USB调试后在电脑CMD执行以下命令：\n" + cmd + "\n\n2.root激活。\n\n3.Shizuku激活。")
                     .setTitle("需要授予权限")
                     .setPositiveButton("复制命令", new DialogInterface.OnClickListener() {
