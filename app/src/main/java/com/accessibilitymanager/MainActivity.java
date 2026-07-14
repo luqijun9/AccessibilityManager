@@ -971,6 +971,28 @@ public class MainActivity extends Activity {
                 FavItem item = getItem(position);
                 ctv.setText(item.label);
                 ctv.setChecked(item.isChecked);
+                
+                android.graphics.drawable.Drawable icon = null;
+                ServiceCache cache = mServiceCache.get(item.serviceId);
+                if (cache != null) {
+                    icon = cache.icon;
+                } else {
+                    try {
+                        String packageName = item.serviceId.split("/")[0];
+                        icon = pm.getApplicationIcon(packageName);
+                    } catch (Exception ignored) {}
+                }
+                
+                if (icon != null) {
+                    icon = icon.getConstantState().newDrawable().mutate();
+                    int size = (int) (32 * getResources().getDisplayMetrics().density + 0.5f);
+                    icon.setBounds(0, 0, size, size);
+                    ctv.setCompoundDrawables(icon, null, null, null);
+                    ctv.setCompoundDrawablePadding((int) (12 * getResources().getDisplayMetrics().density + 0.5f));
+                } else {
+                    ctv.setCompoundDrawables(null, null, null, null);
+                }
+                
                 ctv.setOnClickListener(v -> {
                     item.isChecked = !item.isChecked;
                     ctv.setChecked(item.isChecked);
