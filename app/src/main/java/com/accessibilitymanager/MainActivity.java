@@ -204,17 +204,20 @@ public class MainActivity extends Activity {
             if (itemId == R.id.whitelist_mode) {
                 mIsWhitelistMode = !mIsWhitelistMode;
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
-                    android.transition.TransitionManager.beginDelayedTransition(toolbar);
+                    android.transition.AutoTransition transition = new android.transition.AutoTransition();
+                    transition.setDuration(150);
+                    android.transition.TransitionManager.beginDelayedTransition(toolbar, transition);
                 }
                 updateTitleView();
-                switchToTab(mIsFavoritesTab); // Re-render the list
                 
-                // Add slide and fade animation to listView
                 if (listView != null) {
+                    // Just swap data and slide the container smoothly
+                    switchToTab(mIsFavoritesTab);
                     float offset = mIsWhitelistMode ? 100f * getResources().getDisplayMetrics().density : -100f * getResources().getDisplayMetrics().density;
-                    listView.setAlpha(0f);
                     listView.setTranslationX(offset);
-                    listView.animate().alpha(1f).translationX(0f).setDuration(250).start();
+                    listView.animate().translationX(0f).setDuration(250).start();
+                } else {
+                    switchToTab(mIsFavoritesTab);
                 }
                 return true;
             }
@@ -676,7 +679,7 @@ public class MainActivity extends Activity {
     private void updateTitleView() {
         int textColor = night ? Color.WHITE : Color.BLACK;
         if (mIsWhitelistMode) {
-            mTitleText.setText("应用白名单配置");
+            mTitleText.setText("白名单配置");
             mTitleText.setTextColor(textColor);
             Drawable icon = getResources().getDrawable(R.drawable.ic_block).mutate();
             icon.setColorFilter(textColor, android.graphics.PorterDuff.Mode.SRC_IN);
@@ -715,16 +718,19 @@ public class MainActivity extends Activity {
             toolbar.setNavigationOnClickListener(v -> {
                 mIsWhitelistMode = false;
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
-                    android.transition.TransitionManager.beginDelayedTransition(toolbar);
+                    android.transition.AutoTransition transition = new android.transition.AutoTransition();
+                    transition.setDuration(150);
+                    android.transition.TransitionManager.beginDelayedTransition(toolbar, transition);
                 }
                 updateTitleView();
-                switchToTab(mIsFavoritesTab); // Re-render the list
                 
                 if (listView != null) {
+                    switchToTab(mIsFavoritesTab);
                     float offset = -100f * getResources().getDisplayMetrics().density;
-                    listView.setAlpha(0f);
                     listView.setTranslationX(offset);
-                    listView.animate().alpha(1f).translationX(0f).setDuration(250).start();
+                    listView.animate().translationX(0f).setDuration(250).start();
+                } else {
+                    switchToTab(mIsFavoritesTab);
                 }
             });
         } else {
@@ -798,10 +804,12 @@ public class MainActivity extends Activity {
         mGlobalWhitelistSwitch = new com.google.android.material.materialswitch.MaterialSwitch(this);
         mGlobalWhitelistSwitch.setVisibility(View.GONE);
         int switchMargin = (int) (8 * getResources().getDisplayMetrics().density + 0.5f);
+        int switchMarginEnd = (int) (16 * getResources().getDisplayMetrics().density + 0.5f);
         LinearLayout.LayoutParams switchParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         switchParams.setMarginStart(switchMargin);
+        switchParams.setMarginEnd(switchMarginEnd);
         mGlobalWhitelistSwitch.setLayoutParams(switchParams);
         
         mGlobalWhitelistSwitch.setChecked(sp.getBoolean("whitelist_global_enable", false));
