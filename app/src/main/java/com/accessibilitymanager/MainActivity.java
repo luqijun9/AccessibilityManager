@@ -149,12 +149,30 @@ public class MainActivity extends Activity {
             if (!settingValue.equals(tmpSettingValue)) {
                 tmpSettingValue = settingValue; // 同步内部状态，防止状态反复切换时被忽略
                 runOnUiThread(new Runnable() {
-                    @Override
                     public void run() {
                         if (mIsWhitelistMode) return; // 不要覆盖白名单模式的UI状态
+                        if (mAdapter == null) return;
+                        androidx.recyclerview.widget.LinearLayoutManager layoutManager = (androidx.recyclerview.widget.LinearLayoutManager) listView.getLayoutManager();
+                        if (layoutManager == null) return;
+                        int first = layoutManager.findFirstVisibleItemPosition();
+                        int last = layoutManager.findLastVisibleItemPosition();
+                        if (first < 0 || last < 0) return;
                         
-                        if (mAdapter != null) {
-                            mAdapter.notifyDataSetChanged();
+                        List<AccessibilityServiceInfo> source = mIsFavoritesTab ? mFavoritesList : ((mFilteredList != null) ? mFilteredList : tmp);
+                        if (source == null || source.isEmpty()) return;
+                        
+                        for (int i = first; i <= last; i++) {
+                            if (i >= source.size()) continue;
+                            boolean isChecked = isServiceEnabled(source.get(i).getId(), settingValue);
+                            View view = layoutManager.findViewByPosition(i);
+                            if (view != null) {
+                                View ib = view.findViewById(R.id.ib);
+                                if (ib != null) ib.setVisibility(isChecked ? View.VISIBLE : View.INVISIBLE);
+                                com.google.android.material.materialswitch.MaterialSwitch sw = view.findViewById(R.id.s);
+                                if (sw != null && sw.isChecked() != isChecked) {
+                                    sw.setChecked(isChecked);
+                                }
+                            }
                         }
                     }
                 });
@@ -2119,6 +2137,7 @@ public class MainActivity extends Activity {
                     }
                 });
             } else {
+                holder.sw.setEnabled(true); // 正常模式必须恢复可点击状态，防止白名单模式置灰的状态残留
                 holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
                 holder.ib.setOnClickListener(view -> {
                     if (checkPermission()) {
