@@ -597,17 +597,10 @@ public class MainActivity extends Activity {
                 String id1 = info1.getId();
                 String id2 = info2.getId();
                 
-                boolean top1 = containsService(top, id1);
-                boolean top2 = containsService(top, id2);
-                if (top1 && !top2) return -1;
-                if (!top1 && top2) return 1;
-
-                if (!top1 && !top2) {
-                    boolean enabled1 = containsService(whitelistServices, normalizeServiceId(id1));
-                    boolean enabled2 = containsService(whitelistServices, normalizeServiceId(id2));
-                    if (enabled1 && !enabled2) return -1;
-                    if (!enabled1 && enabled2) return 1;
-                }
+                boolean enabled1 = containsService(whitelistServices, normalizeServiceId(id1));
+                boolean enabled2 = containsService(whitelistServices, normalizeServiceId(id2));
+                if (enabled1 && !enabled2) return -1;
+                if (!enabled1 && enabled2) return 1;
 
                 ComponentName ownCn = ComponentName.unflattenFromString(new ComponentName(MainActivity.this, MyAccessibilityService.class).flattenToString());
                 ComponentName cn1 = ComponentName.unflattenFromString(id1);
@@ -652,9 +645,6 @@ public class MainActivity extends Activity {
             listView.setPaddingRelative(listView.getPaddingStart(), listView.getPaddingTop(), listView.getPaddingEnd(), 0);
         }
 
-        // 更新底部提示文本
-        mPinHint.setText(isFavorites ? "长按可取消收藏" : "长按服务项可将其置顶");
-
         if (mIsSearching) {
             exitSearchMode();
         }
@@ -671,6 +661,14 @@ public class MainActivity extends Activity {
             if (mIsWhitelistMode) {
                 sortForWhitelist(mFavoritesList);
             }
+            
+            if (mIsWhitelistMode || mFavoritesList.isEmpty()) {
+                mPinHint.setVisibility(View.GONE);
+            } else {
+                mPinHint.setText("长按可取消收藏");
+                mPinHint.setVisibility(View.VISIBLE);
+            }
+
             if (mFavoritesList.isEmpty()) {
                 ((TextView) findViewById(R.id.empty_view)).setText("还没有收藏的服务\n点击右下角 + 添加");
             } else {
@@ -685,6 +683,10 @@ public class MainActivity extends Activity {
                 List<AccessibilityServiceInfo> whitelistSorted = new ArrayList<>(source);
                 sortForWhitelist(whitelistSorted);
                 source = whitelistSorted;
+                mPinHint.setVisibility(View.GONE);
+            } else {
+                mPinHint.setText("长按服务项可将其置顶");
+                mPinHint.setVisibility(View.VISIBLE);
             }
             updateAdapter(source);
         }
@@ -1045,7 +1047,7 @@ public class MainActivity extends Activity {
                     StringBuilder sb = new StringBuilder();
                     for (FavItem item : allItems) {
                         if (item.isChecked) {
-                            if (sb.length() > 0) sb.append(",");
+                            if (sb.length() > 0) sb.append(":");
                             sb.append(item.serviceId);
                         }
                     }
@@ -2284,8 +2286,7 @@ public class MainActivity extends Activity {
             });
 
             if (mIsFavoritesTab) {
-                if (containsService(favorites, serviceName)) holder.pinIndicator.setVisibility(View.VISIBLE);
-                else holder.pinIndicator.setVisibility(View.GONE);
+                holder.pinIndicator.setVisibility(View.GONE);
 
                 holder.cardView.setOnLongClickListener(v -> {
                     String currentFavs = sp.getString("favorites", "");
@@ -2302,7 +2303,7 @@ public class MainActivity extends Activity {
                     } else {
                         if (!currentFavs.isEmpty()) favorites = serviceName + ":" + currentFavs;
                         else favorites = serviceName;
-                        Toast.makeText(MainActivity.this, "已收藏，将置顶显示", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MainActivity.this, "已收藏", Toast.LENGTH_SHORT).show();
                     }
                     sp.edit().putString("favorites", favorites).apply();
                     
@@ -2314,7 +2315,7 @@ public class MainActivity extends Activity {
                     return true;
                 });
             } else {
-                if (containsService(top, serviceName)) holder.pinIndicator.setVisibility(View.VISIBLE);
+                if (!mIsWhitelistMode && containsService(top, serviceName)) holder.pinIndicator.setVisibility(View.VISIBLE);
                 else holder.pinIndicator.setVisibility(View.GONE);
 
                 holder.cardView.setOnLongClickListener(v -> {
