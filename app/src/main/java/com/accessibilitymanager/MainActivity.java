@@ -211,7 +211,7 @@ public class MainActivity extends Activity {
         toolbar.setOnMenuItemClickListener(item -> {
             int itemId = item.getItemId();
             if (itemId == R.id.whitelist_mode) {
-                startActivity(new Intent(MainActivity.this, WhitelistActivity.class));
+                startActivityForResult(new Intent(MainActivity.this, WhitelistActivity.class), REQUEST_SETTINGS);
                 return true;
             }
             if (itemId == R.id.search) {
@@ -2150,6 +2150,9 @@ public class MainActivity extends Activity {
                     switchToTab(true);
                 } else {
                     updateAdapter(tmp);
+                }
+                if (listView != null) {
+                    listView.scrollToPosition(0);
                 }
             });
         }

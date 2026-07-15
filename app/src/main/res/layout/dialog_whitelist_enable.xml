@@ -45,7 +45,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="• 切换服务可能会造成短暂的触摸卡顿，请自行测试后再编辑白名单。\n• 必须确保本管理器持续在后台运行，否则可能被系统结束进程，导致离开白名单应用后原服务无法重启恢复。"
-        android:textColor="@color/text_secondary"
+        android:textColor="@color/text_primary"
         android:textSize="13sp"
         android:lineSpacingExtra="4dp"
         android:paddingBottom="12dp" />
@@ -63,7 +63,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="由于需要检测应用的前台切换状态，此功能必须依赖本管理器自身的无障碍服务。"
-        android:textColor="@color/text_secondary"
+        android:textColor="@color/text_primary"
         android:textSize="13sp"
         android:lineSpacingExtra="4dp"
         android:paddingBottom="16dp" />
