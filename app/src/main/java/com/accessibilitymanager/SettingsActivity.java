@@ -42,9 +42,11 @@ public class SettingsActivity extends AppCompatActivity {
     private MaterialSwitch switchCrashFix, switchUnlockCrashCheck, switchFixMode, switchGlobalCooldown;
     private MaterialSwitch switchPeriodicCheck, switchWakeIdle, switchIgnoreSystemCrash;
     private MaterialSwitch switchAutoUpdate;
-    private LinearLayout crashDependentLayout, fixmodeServicesLayout, periodicSubLayout, globalCooldownTimeLayout, globalCooldownEnableLayout, globalCooldownSubLayout;
+    private LinearLayout crashDependentLayout, fixmodeServicesLayout, periodicSubLayout, globalCooldownTimeLayout,
+            globalCooldownEnableLayout, globalCooldownSubLayout;
     private View fixmodeServicesBtn;
-    private TextView intervalLabel, notifyCustomBtn, crashTutorialBtn, aboutBtn, checkUpdateBtn, globalCooldownTimeLabel;
+    private TextView intervalLabel, notifyCustomBtn, crashTutorialBtn, aboutBtn, checkUpdateBtn,
+            globalCooldownTimeLabel;
     private View btnThemeColor;
     private TextView tvThemeDesc;
 
@@ -53,48 +55,47 @@ public class SettingsActivity extends AppCompatActivity {
     private boolean mPendingFixModeRequest = false;
     private boolean night;
 
-    private final Shizuku.OnRequestPermissionResultListener mShizukuListener =
-            (requestCode, grantResult) -> {
-                LogUtil.log(this, "[权限] SettingsActivity Shizuku回调, grantResult=" + grantResult
-                        + ", pendingCrashFix=" + mPendingCrashFixRequest
-                        + ", pendingFixMode=" + mPendingFixModeRequest);
-                if (mPendingCrashFixRequest) {
-                    mPendingCrashFixRequest = false;
-                    if (grantResult == PackageManager.PERMISSION_GRANTED) {
-                        // 通过 Shizuku 授予权限，等待命令执行完毕再启用崩溃修复
-                        try {
-                            Process p = Shizuku.newProcess(
-                                    new String[]{"sh"}, null, null);
-                            java.io.OutputStream out = p.getOutputStream();
-                            out.write(("pm grant " + getPackageName()
-                                    + " android.permission.DUMP\nexit\n").getBytes());
-                            out.flush();
-                            out.close();
-                            p.waitFor();
-                            if (p.exitValue() == 0) {
-                                Toast.makeText(SettingsActivity.this, "成功激活", Toast.LENGTH_SHORT).show();
-                            }
-                        } catch (Exception e) {
-                            LogUtil.log(this, "[权限] Shizuku 授予 DUMP 失败: " + e.getMessage());
-                        }
-                        ShellUtil.reset();
-                        enableCrashFix(false);
-                    } else {
-                        Toast.makeText(this, "获取Shizuku权限失败", Toast.LENGTH_SHORT).show();
+    private final Shizuku.OnRequestPermissionResultListener mShizukuListener = (requestCode, grantResult) -> {
+        LogUtil.log(this, "[权限] SettingsActivity Shizuku回调, grantResult=" + grantResult
+                + ", pendingCrashFix=" + mPendingCrashFixRequest
+                + ", pendingFixMode=" + mPendingFixModeRequest);
+        if (mPendingCrashFixRequest) {
+            mPendingCrashFixRequest = false;
+            if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                // 通过 Shizuku 授予权限，等待命令执行完毕再启用崩溃修复
+                try {
+                    Process p = Shizuku.newProcess(
+                            new String[] { "sh" }, null, null);
+                    java.io.OutputStream out = p.getOutputStream();
+                    out.write(("pm grant " + getPackageName()
+                            + " android.permission.DUMP\nexit\n").getBytes());
+                    out.flush();
+                    out.close();
+                    p.waitFor();
+                    if (p.exitValue() == 0) {
+                        Toast.makeText(SettingsActivity.this, "成功激活", Toast.LENGTH_SHORT).show();
                     }
+                } catch (Exception e) {
+                    LogUtil.log(this, "[权限] Shizuku 授予 DUMP 失败: " + e.getMessage());
                 }
-                if (mPendingFixModeRequest) {
-                    mPendingFixModeRequest = false;
-                    if (grantResult == PackageManager.PERMISSION_GRANTED) {
-                        LogUtil.log(this, "[权限] Shizuku 已授权，启用强杀模式");
-                        enableFixMode();
-                    } else {
-                        ShellUtil.reset();
-                        LogUtil.log(this, "[权限] Shizuku 授权被拒绝");
-                        Toast.makeText(this, "获取Shizuku权限失败，强杀模式未开启", Toast.LENGTH_SHORT).show();
-                    }
-                }
-            };
+                ShellUtil.reset();
+                enableCrashFix(false);
+            } else {
+                Toast.makeText(this, "获取Shizuku权限失败", Toast.LENGTH_SHORT).show();
+            }
+        }
+        if (mPendingFixModeRequest) {
+            mPendingFixModeRequest = false;
+            if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                LogUtil.log(this, "[权限] Shizuku 已授权，启用强杀模式");
+                enableFixMode();
+            } else {
+                ShellUtil.reset();
+                LogUtil.log(this, "[权限] Shizuku 授权被拒绝");
+                Toast.makeText(this, "获取Shizuku权限失败，强杀模式未开启", Toast.LENGTH_SHORT).show();
+            }
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -156,8 +157,7 @@ public class SettingsActivity extends AppCompatActivity {
                 toolbar.getPaddingStart(),
                 toolbar.getPaddingTop(),
                 (int) (8 * getResources().getDisplayMetrics().density + 0.5f),
-                toolbar.getPaddingBottom()
-        );
+                toolbar.getPaddingBottom());
 
         toolbar.inflateMenu(R.menu.settings_menu);
         toolbar.setOnMenuItemClickListener(item -> {
@@ -264,33 +264,29 @@ public class SettingsActivity extends AppCompatActivity {
     private void setupListeners() {
         btnThemeColor.setOnClickListener(v -> showThemeDialog());
 
-        switchBoot.setOnCheckedChangeListener((btn, checked) ->
-                sp.edit().putBoolean("boot", checked).apply());
+        switchBoot.setOnCheckedChangeListener((btn, checked) -> sp.edit().putBoolean("boot", checked).apply());
 
-        switchToast.setOnCheckedChangeListener((btn, checked) ->
-                sp.edit().putBoolean("toast", checked).apply());
+        switchToast.setOnCheckedChangeListener((btn, checked) -> sp.edit().putBoolean("toast", checked).apply());
 
-        switchUserOnly.setOnCheckedChangeListener((btn, checked) ->
-                sp.edit().putBoolean("useronly", checked).apply());
+        switchUserOnly.setOnCheckedChangeListener((btn, checked) -> sp.edit().putBoolean("useronly", checked).apply());
 
         switchHide.setOnCheckedChangeListener((btn, checked) -> {
             sp.edit().putBoolean("hide", checked).apply();
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                java.util.List<android.app.ActivityManager.AppTask> tasks =
-                        ((android.app.ActivityManager) getSystemService(Context.ACTIVITY_SERVICE))
-                                .getAppTasks();
+                java.util.List<android.app.ActivityManager.AppTask> tasks = ((android.app.ActivityManager) getSystemService(
+                        Context.ACTIVITY_SERVICE))
+                        .getAppTasks();
                 if (!tasks.isEmpty())
                     tasks.get(0).setExcludeFromRecents(checked);
             }
         });
 
-        switchDelayDaemon.setOnCheckedChangeListener((btn, checked) ->
-                sp.edit().putBoolean("delay_daemon", checked).apply());
+        switchDelayDaemon
+                .setOnCheckedChangeListener((btn, checked) -> sp.edit().putBoolean("delay_daemon", checked).apply());
 
         // 崩溃服务检测总开关
         final MaterialSwitch crashFixRef = switchCrashFix;
-        final android.widget.CompoundButton.OnCheckedChangeListener[] crashFixListenerHolder =
-                new android.widget.CompoundButton.OnCheckedChangeListener[1];
+        final android.widget.CompoundButton.OnCheckedChangeListener[] crashFixListenerHolder = new android.widget.CompoundButton.OnCheckedChangeListener[1];
         crashFixListenerHolder[0] = (btn, checked) -> {
             if (checked) {
                 if (!ShellUtil.hasDumpPermission(SettingsActivity.this)) {
@@ -311,7 +307,7 @@ public class SettingsActivity extends AppCompatActivity {
             refreshCrashFixDependent();
         };
         switchCrashFix.setOnCheckedChangeListener(crashFixListenerHolder[0]);
-        
+
         switchGlobalCooldown.setOnCheckedChangeListener((btn, checked) -> {
             sp.edit().putBoolean("global_cooldown_enable", checked).apply();
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
@@ -319,21 +315,21 @@ public class SettingsActivity extends AppCompatActivity {
             }
             globalCooldownSubLayout.setVisibility(checked ? View.VISIBLE : View.GONE);
         });
-                
+
         globalCooldownEnableLayout.setOnClickListener(v -> switchGlobalCooldown.toggle());
         globalCooldownTimeLabel.setOnClickListener(v -> showCooldownTimeDialog());
 
         // 解锁检测
         final MaterialSwitch unlockCrashCheckRef = switchUnlockCrashCheck;
-        final android.widget.CompoundButton.OnCheckedChangeListener[] unlockListenerHolder =
-                new android.widget.CompoundButton.OnCheckedChangeListener[1];
+        final android.widget.CompoundButton.OnCheckedChangeListener[] unlockListenerHolder = new android.widget.CompoundButton.OnCheckedChangeListener[1];
         unlockListenerHolder[0] = (btn, checked) -> {
             if (checked && !sp.getBoolean("unlock_crash_dialog_dismissed", false)) {
                 String ownServiceId = new ComponentName(SettingsActivity.this,
                         MyAccessibilityService.class).flattenToString();
                 String sv = Settings.Secure.getString(getContentResolver(),
                         Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-                if (sv == null) sv = "";
+                if (sv == null)
+                    sv = "";
                 String daemon = sp.getString("daemon", "");
                 if (isServiceEnabled(ownServiceId, sv) && containsService(daemon, ownServiceId)) {
                     sp.edit().putBoolean("unlock_crash_check", true).apply();
@@ -367,12 +363,15 @@ public class SettingsActivity extends AppCompatActivity {
                 int idx1 = rawMsg.indexOf("回到主界面");
                 int idx2 = rawMsg.indexOf("锁屏和解锁");
                 int idx3 = rawMsg.indexOf("收到USER_PRESENT广播");
-                if (idx1 >= 0) msg.setSpan(new StyleSpan(Typeface.BOLD), idx1, idx1 + 5,
-                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                if (idx2 >= 0) msg.setSpan(new StyleSpan(Typeface.BOLD), idx2, idx2 + 5,
-                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                if (idx3 >= 0) msg.setSpan(new StyleSpan(Typeface.BOLD), idx3, idx3 + 17,
-                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                if (idx1 >= 0)
+                    msg.setSpan(new StyleSpan(Typeface.BOLD), idx1, idx1 + 5,
+                            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                if (idx2 >= 0)
+                    msg.setSpan(new StyleSpan(Typeface.BOLD), idx2, idx2 + 5,
+                            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                if (idx3 >= 0)
+                    msg.setSpan(new StyleSpan(Typeface.BOLD), idx3, idx3 + 17,
+                            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
 
                 ((TextView) dv.findViewById(R.id.unlock_msg)).setText(msg);
 
@@ -404,7 +403,8 @@ public class SettingsActivity extends AppCompatActivity {
                     }
                     String s = Settings.Secure.getString(getContentResolver(),
                             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-                    if (s == null) s = "";
+                    if (s == null)
+                        s = "";
                     if (!isServiceEnabled(ownServiceId, s)) {
                         Settings.Secure.putString(getContentResolver(),
                                 Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
@@ -426,8 +426,7 @@ public class SettingsActivity extends AppCompatActivity {
 
         // 重启时强杀对应APP（需要 Root/Shizuku 权限）
         final MaterialSwitch fixModeRef = switchFixMode;
-        final android.widget.CompoundButton.OnCheckedChangeListener[] fixModeListenerHolder =
-                new android.widget.CompoundButton.OnCheckedChangeListener[1];
+        final android.widget.CompoundButton.OnCheckedChangeListener[] fixModeListenerHolder = new android.widget.CompoundButton.OnCheckedChangeListener[1];
         fixModeListenerHolder[0] = (btn, checked) -> {
             if (checked) {
                 ShellUtil.reset();
@@ -444,7 +443,7 @@ public class SettingsActivity extends AppCompatActivity {
             refreshCrashFixDependent();
         };
         switchFixMode.setOnCheckedChangeListener(fixModeListenerHolder[0]);
-        
+
         fixmodeServicesLayout.setOnClickListener(v -> showFixmodeServicesDialog());
         fixmodeServicesBtn.setOnClickListener(v -> showFixmodeServicesDialog());
 
@@ -466,13 +465,13 @@ public class SettingsActivity extends AppCompatActivity {
             }
         });
 
-        switchIgnoreSystemCrash.setOnCheckedChangeListener((btn, checked) ->
-                sp.edit().putBoolean("ignore_system_crash_trigger", checked).apply());
+        switchIgnoreSystemCrash.setOnCheckedChangeListener(
+                (btn, checked) -> sp.edit().putBoolean("ignore_system_crash_trigger", checked).apply());
 
         intervalLabel.setOnClickListener(v -> {
-            if (!switchPeriodicCheck.isChecked()) return;
-            showIntervalDialog(() ->
-                    intervalLabel.setText(sp.getInt("periodic_check_interval", 10) + "分钟"));
+            if (!switchPeriodicCheck.isChecked())
+                return;
+            showIntervalDialog(() -> intervalLabel.setText(sp.getInt("periodic_check_interval", 10) + "分钟"));
         });
 
         // 自定义通知栏文字 - 整行触发
@@ -481,8 +480,8 @@ public class SettingsActivity extends AppCompatActivity {
 
         crashTutorialBtn.setOnClickListener(v -> showCrashTutorialDialog());
 
-        switchAutoUpdate.setOnCheckedChangeListener((btn, checked) ->
-                sp.edit().putBoolean("auto_update", checked).apply());
+        switchAutoUpdate
+                .setOnCheckedChangeListener((btn, checked) -> sp.edit().putBoolean("auto_update", checked).apply());
 
         // 检测更新 - 整行触发
         ((View) checkUpdateBtn.getParent()).setOnClickListener(v -> checkForUpdate());
@@ -519,9 +518,12 @@ public class SettingsActivity extends AppCompatActivity {
         boolean hasDump = ShellUtil.hasDumpPermission(this);
         boolean hasShell = ShellUtil.hasAnyPermission();
         StringBuilder permInfo = new StringBuilder();
-        if (hasDump) permInfo.append("DUMP");
-        if (hasDump && hasShell) permInfo.append("+");
-        if (hasShell) permInfo.append(ShellUtil.hasRoot() ? "Root" : "Shizuku");
+        if (hasDump)
+            permInfo.append("DUMP");
+        if (hasDump && hasShell)
+            permInfo.append("+");
+        if (hasShell)
+            permInfo.append(ShellUtil.hasRoot() ? "Root" : "Shizuku");
         LogUtil.log(this, "[权限] 当前权限: " + permInfo.toString());
         if (showToast) {
             Toast.makeText(this, "已获取" + permInfo.toString() + "权限，崩溃检测已开启", Toast.LENGTH_SHORT).show();
@@ -776,7 +778,7 @@ public class SettingsActivity extends AppCompatActivity {
     private void refreshCrashFixDependent() {
         boolean crashFixEnabled = switchCrashFix.isChecked();
         boolean periodicEnabled = crashFixEnabled && switchPeriodicCheck.isChecked();
-        
+
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
             android.transition.TransitionManager.beginDelayedTransition((android.view.ViewGroup) rootView);
         }
@@ -786,52 +788,59 @@ public class SettingsActivity extends AppCompatActivity {
         if (periodicSubLayout != null) {
             periodicSubLayout.setVisibility(periodicEnabled ? View.VISIBLE : View.GONE);
         }
-        
+
         switchUnlockCrashCheck.setEnabled(crashFixEnabled);
         switchFixMode.setEnabled(crashFixEnabled);
         switchPeriodicCheck.setEnabled(crashFixEnabled);
         switchWakeIdle.setEnabled(periodicEnabled);
         switchIgnoreSystemCrash.setEnabled(crashFixEnabled);
         intervalLabel.setEnabled(periodicEnabled);
-        
+
         boolean fixModeEnabled = crashFixEnabled && switchFixMode.isChecked();
         if (fixmodeServicesLayout != null) {
             fixmodeServicesLayout.setEnabled(fixModeEnabled);
             fixmodeServicesLayout.setVisibility(fixModeEnabled ? View.VISIBLE : View.GONE);
         }
-        if (fixmodeServicesBtn != null) fixmodeServicesBtn.setEnabled(fixModeEnabled);
+        if (fixmodeServicesBtn != null)
+            fixmodeServicesBtn.setEnabled(fixModeEnabled);
     }
 
     // ========== 对话框 ==========
 
     private void showFixmodeServicesDialog() {
-        if (!switchFixMode.isChecked()) return;
+        if (!switchFixMode.isChecked())
+            return;
 
-        java.util.List<android.accessibilityservice.AccessibilityServiceInfo> list = new java.util.ArrayList<>(((android.view.accessibility.AccessibilityManager) getApplicationContext()
-                .getSystemService(Context.ACCESSIBILITY_SERVICE)).getInstalledAccessibilityServiceList());
+        java.util.List<android.accessibilityservice.AccessibilityServiceInfo> list = new java.util.ArrayList<>(
+                ((android.view.accessibility.AccessibilityManager) getApplicationContext()
+                        .getSystemService(Context.ACCESSIBILITY_SERVICE)).getInstalledAccessibilityServiceList());
 
         final PackageManager pm = getPackageManager();
-        java.util.Collections.sort(list, new java.util.Comparator<android.accessibilityservice.AccessibilityServiceInfo>() {
-            @Override
-            public int compare(android.accessibilityservice.AccessibilityServiceInfo o1, android.accessibilityservice.AccessibilityServiceInfo o2) {
-                CharSequence label1 = o1.getResolveInfo().loadLabel(pm);
-                CharSequence label2 = o2.getResolveInfo().loadLabel(pm);
-                String s1 = label1 != null ? label1.toString() : o1.getId();
-                String s2 = label2 != null ? label2.toString() : o2.getId();
-                return java.text.Collator.getInstance(java.util.Locale.CHINA).compare(s1, s2);
-            }
-        });
+        java.util.Collections.sort(list,
+                new java.util.Comparator<android.accessibilityservice.AccessibilityServiceInfo>() {
+                    @Override
+                    public int compare(android.accessibilityservice.AccessibilityServiceInfo o1,
+                            android.accessibilityservice.AccessibilityServiceInfo o2) {
+                        CharSequence label1 = o1.getResolveInfo().loadLabel(pm);
+                        CharSequence label2 = o2.getResolveInfo().loadLabel(pm);
+                        String s1 = label1 != null ? label1.toString() : o1.getId();
+                        String s2 = label2 != null ? label2.toString() : o2.getId();
+                        return java.text.Collator.getInstance(java.util.Locale.CHINA).compare(s1, s2);
+                    }
+                });
 
         java.util.List<String> serviceNames = new java.util.ArrayList<>();
         java.util.List<String> serviceIds = new java.util.ArrayList<>();
         for (android.accessibilityservice.AccessibilityServiceInfo info : list) {
             String id = info.getId();
             // 排除无障碍管理器自身
-            if (id.startsWith(getPackageName() + "/")) continue;
+            if (id.startsWith(getPackageName() + "/"))
+                continue;
 
             // 默认不显示系统应用
             if (info.getResolveInfo() != null && info.getResolveInfo().serviceInfo != null) {
-                if ((info.getResolveInfo().serviceInfo.applicationInfo.flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0) {
+                if ((info.getResolveInfo().serviceInfo.applicationInfo.flags
+                        & android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0) {
                     continue;
                 }
             }
@@ -848,7 +857,7 @@ public class SettingsActivity extends AppCompatActivity {
 
         CharSequence[] items = serviceNames.toArray(new CharSequence[0]);
         boolean[] checkedItems = new boolean[items.length];
-        
+
         String disabledStr = sp.getString("fixmode_disabled_services", "");
         for (int i = 0; i < items.length; i++) {
             checkedItems[i] = !disabledStr.contains(serviceIds.get(i));
@@ -863,7 +872,8 @@ public class SettingsActivity extends AppCompatActivity {
             StringBuilder sb = new StringBuilder();
             for (int i = 0; i < items.length; i++) {
                 if (!checkedItems[i]) {
-                    if (sb.length() > 0) sb.append(":");
+                    if (sb.length() > 0)
+                        sb.append(":");
                     sb.append(serviceIds.get(i));
                 }
             }
@@ -895,9 +905,9 @@ public class SettingsActivity extends AppCompatActivity {
         View dv = getLayoutInflater().inflate(R.layout.dialog_crash_tutorial, null);
         ((TextView) dv.findViewById(R.id.tutorial_msg)).setText(
                 "1. 崩溃检测：检测无障碍服务是否假死（已开启但显示\"无法运行\"），检测到后关闭服务再打开\n\n"
-                + "2. 解锁检测：设备解锁时进行检测。如果解锁检测无效，即日志中看不到[解锁广播]相关的日志，请开启管理器的无障碍服务或自启动权限\n\n"
-                + "3. 强杀应用后重启：检测到崩溃的无障碍服务后，将会使服务重启，默认重启方式为直接重启服务，勾选后强制停止APP后再重启（需要shizuku/root权限）\n\n"
-                + "4. 定时检测：定时检测服务状态，建议间隔≥10分钟\n");
+                        + "2. 解锁检测：设备解锁时进行检测。如果解锁检测无效，即日志中看不到[解锁广播]相关的日志，请开启管理器的无障碍服务或自启动权限\n\n"
+                        + "3. 强杀应用后重启：检测到崩溃的无障碍服务后，将会使服务重启，默认重启方式为直接重启服务，勾选后强制停止APP后再重启（需要shizuku/root权限）\n\n"
+                        + "4. 定时检测：定时检测服务状态，建议间隔≥10分钟\n");
 
         final android.app.Dialog dialog = new android.app.Dialog(this);
         dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
@@ -949,8 +959,10 @@ public class SettingsActivity extends AppCompatActivity {
         dialogView.findViewById(R.id.notify_save_btn).setOnClickListener(v -> {
             String newTitle = titleInput.getText().toString().trim();
             String newText = textInput.getText().toString().trim();
-            if (newTitle.isEmpty()) newTitle = "海绵宝宝，猜猜我有几颗糖";
-            if (newText.isEmpty()) newText = "猜对了两颗都给你！";
+            if (newTitle.isEmpty())
+                newTitle = "海绵宝宝，猜猜我有几颗糖";
+            if (newText.isEmpty())
+                newText = "猜对了两颗都给你！";
             sp.edit().putString("notify_title", newTitle).apply();
             sp.edit().putString("notify_text", newText).apply();
             Toast.makeText(SettingsActivity.this,
@@ -990,7 +1002,8 @@ public class SettingsActivity extends AppCompatActivity {
         TextView unit = new TextView(this);
         unit.setText("分钟");
         unit.setTextSize(16f);
-        if (night) unit.setTextColor(Color.WHITE);
+        if (night)
+            unit.setTextColor(Color.WHITE);
         LinearLayout.LayoutParams unitParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -1029,7 +1042,8 @@ public class SettingsActivity extends AppCompatActivity {
             Toast.makeText(SettingsActivity.this,
                     "定时检测间隔已设为 " + minutes + " 分钟", Toast.LENGTH_SHORT).show();
             dialog.dismiss();
-            if (onSaved != null) onSaved.run();
+            if (onSaved != null)
+                onSaved.run();
         });
     }
 
@@ -1052,7 +1066,8 @@ public class SettingsActivity extends AppCompatActivity {
         TextView unit = new TextView(this);
         unit.setText("分钟");
         unit.setTextSize(16f);
-        if (night) unit.setTextColor(Color.WHITE);
+        if (night)
+            unit.setTextColor(Color.WHITE);
         LinearLayout.LayoutParams unitParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -1091,8 +1106,9 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void showThemeDialog() {
-        String[] themes = {"跟随系统 (莫奈取色)", "经典蓝", "护眼绿", "优雅紫"};
-        String[] themeValues = {ThemeUtils.THEME_DYNAMIC, ThemeUtils.THEME_BLUE, ThemeUtils.THEME_GREEN, ThemeUtils.THEME_PURPLE};
+        String[] themes = { "跟随系统 (莫奈取色)", "经典蓝", "护眼绿", "优雅紫" };
+        String[] themeValues = { ThemeUtils.THEME_DYNAMIC, ThemeUtils.THEME_BLUE, ThemeUtils.THEME_GREEN,
+                ThemeUtils.THEME_PURPLE };
         SharedPreferences mainSp = getSharedPreferences("Main", Context.MODE_PRIVATE);
         String currentTheme = mainSp.getString(ThemeUtils.PREF_THEME, ThemeUtils.THEME_DYNAMIC);
         int checkedItem = 0;
@@ -1149,7 +1165,8 @@ public class SettingsActivity extends AppCompatActivity {
         dialogView.findViewById(R.id.about_copy_btn).setOnClickListener(v -> {
             try {
                 Intent intent = new Intent(Intent.ACTION_VIEW);
-                intent.setData(Uri.parse("mqqapi://card/show_pslcard?src_type=internal&card_type=group&uin=1079270847&version=1"));
+                intent.setData(Uri.parse(
+                        "mqqapi://card/show_pslcard?src_type=internal&card_type=group&uin=1079270847&version=1"));
                 startActivity(intent);
             } catch (Exception e) {
                 Toast.makeText(SettingsActivity.this, "未检测到QQ客户端", Toast.LENGTH_SHORT).show();
@@ -1166,7 +1183,7 @@ public class SettingsActivity extends AppCompatActivity {
         UpdateChecker.checkForUpdate(this, new UpdateChecker.UpdateListener() {
             @Override
             public void onUpdateAvailable(String versionName, String downloadUrl,
-                                          String releaseNotes) {
+                    String releaseNotes) {
                 showUpdateDialog(versionName, downloadUrl, releaseNotes);
             }
 
@@ -1219,12 +1236,14 @@ public class SettingsActivity extends AppCompatActivity {
 
     private void startDaemonService() {
         String daemon = sp.getString("daemon", "");
-        if (daemon.isEmpty()) return;
-        if (checkWriteSecurePermission()) return;
+        if (daemon.isEmpty())
+            return;
+        if (checkWriteSecurePermission())
+            return;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
                 && !((NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE))
-                .areNotificationsEnabled()) {
-            requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 0);
+                        .areNotificationsEnabled()) {
+            requestPermissions(new String[] { android.Manifest.permission.POST_NOTIFICATIONS }, 0);
             Toast.makeText(this, "请授予通知权限", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -1236,13 +1255,12 @@ public class SettingsActivity extends AppCompatActivity {
 
     private boolean checkWriteSecurePermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
-            return checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS)
-                    != PackageManager.PERMISSION_GRANTED;
+            return checkSelfPermission(
+                    android.Manifest.permission.WRITE_SECURE_SETTINGS) != PackageManager.PERMISSION_GRANTED;
         // 低于M时，系统应用才有权限
         try {
             android.content.pm.ApplicationInfo ai = getPackageManager()
-                    .getPackageInfo(getPackageName(), PackageManager.GET_CONFIGURATIONS)
-                    .applicationInfo;
+                    .getPackageInfo(getPackageName(), PackageManager.GET_CONFIGURATIONS).applicationInfo;
             return (ai.flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0;
         } catch (PackageManager.NameNotFoundException e) {
             return true;
@@ -1259,19 +1277,23 @@ public class SettingsActivity extends AppCompatActivity {
     // 以下方法从MainActivity复制，因为它们是package-private级别的工具方法
 
     private boolean isServiceEnabled(String serviceName, String settingValue) {
-        if (settingValue == null || settingValue.isEmpty()) return false;
+        if (settingValue == null || settingValue.isEmpty())
+            return false;
         String[] services = settingValue.split(":");
         for (String s : services) {
-            if (s != null && s.equals(serviceName)) return true;
+            if (s != null && s.equals(serviceName))
+                return true;
         }
         return false;
     }
 
     private static boolean containsService(String daemon, String serviceName) {
-        if (daemon == null || daemon.isEmpty()) return false;
+        if (daemon == null || daemon.isEmpty())
+            return false;
         String[] entries = daemon.split(":");
         for (String entry : entries) {
-            if (entry != null && entry.equals(serviceName)) return true;
+            if (entry != null && entry.equals(serviceName))
+                return true;
         }
         return false;
     }
@@ -1287,7 +1309,7 @@ public class SettingsActivity extends AppCompatActivity {
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions,
-                                           int[] grantResults) {
+            int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == 0 && grantResults.length > 0
                 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {

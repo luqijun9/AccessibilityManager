@@ -61,10 +61,14 @@ public class UpdateChecker {
                         final String releaseNotes;
                         
                         // 检查云端跳转指令
-                        if (rawReleaseNotes.contains("[jump_repo]")) {
-                            // 如果包含指令，则跳转链接设置为仓库页面，并从更新说明中移除该指令
+                        if (rawReleaseNotes.contains("[jump_repo]") || rawReleaseNotes.contains("★") || rawReleaseNotes.contains("⭐")) {
+                            // 如果包含指令，则跳转链接设置为仓库页面，并从更新说明中移除所有指令
                             downloadUrl = htmlUrl;
-                            releaseNotes = rawReleaseNotes.replace("[jump_repo]", "").trim();
+                            releaseNotes = rawReleaseNotes
+                                    .replace("[jump_repo]", "")
+                                    .replace("★", "")
+                                    .replace("⭐", "")
+                                    .trim();
                         } else {
                             releaseNotes = rawReleaseNotes;
                             // 原有的直接下载逻辑
