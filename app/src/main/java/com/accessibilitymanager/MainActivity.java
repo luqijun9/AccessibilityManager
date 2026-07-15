@@ -225,7 +225,7 @@ public class MainActivity extends Activity {
                 if (listView != null) {
                     // Just swap data and slide the container smoothly
                     switchToTab(mIsFavoritesTab);
-                    listView.scrollToPosition(0); // 切换模式时回到顶部
+                    listView.post(() -> listView.scrollToPosition(0)); // 切换模式时回到顶部
                     float offset = mIsWhitelistMode ? 100f * getResources().getDisplayMetrics().density : -100f * getResources().getDisplayMetrics().density;
                     listView.setTranslationX(offset);
                     listView.animate().translationX(0f).setDuration(250).start();
@@ -2278,11 +2278,6 @@ public class MainActivity extends Activity {
                             .setIcon(pm.getApplicationIcon(packageName[0]))
                             .setView(scrollView).setTitle("服务详细信息")
                             .setPositiveButton("知道了", null)
-                            .setNeutralButton("复制类名", (dialog, which) -> {
-                                android.content.ClipboardManager clipboardManager = (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                                clipboardManager.setPrimaryClip(android.content.ClipData.newPlainText("label", finalPackageLabel));
-                                Toast.makeText(MainActivity.this, "已复制：" + finalPackageLabel, Toast.LENGTH_SHORT).show();
-                            })
                             .create().show();
                 } catch (Exception ignored) {
                 }
