@@ -225,6 +225,7 @@ public class MainActivity extends Activity {
                 if (listView != null) {
                     // Just swap data and slide the container smoothly
                     switchToTab(mIsFavoritesTab);
+                    listView.scrollToPosition(0); // 切换模式时回到顶部
                     float offset = mIsWhitelistMode ? 100f * getResources().getDisplayMetrics().density : -100f * getResources().getDisplayMetrics().density;
                     listView.setTranslationX(offset);
                     listView.animate().translationX(0f).setDuration(250).start();
