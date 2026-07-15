@@ -131,8 +131,6 @@ public class MainActivity extends Activity {
     private List<AccessibilityServiceInfo> mFilteredList;
 
     // 白名单模式相关
-    private boolean mIsWhitelistMode = false;
-    private com.google.android.material.materialswitch.MaterialSwitch mGlobalWhitelistSwitch;
     private ImageView mArrowDown;
 
     //自定义一个内容监视器
@@ -150,7 +148,6 @@ public class MainActivity extends Activity {
                 tmpSettingValue = settingValue; // 同步内部状态，防止状态反复切换时被忽略
                 runOnUiThread(new Runnable() {
                     public void run() {
-                        if (mIsWhitelistMode) return; // 不要覆盖白名单模式的UI状态
                         if (mAdapter == null) return;
                         androidx.recyclerview.widget.LinearLayoutManager layoutManager = (androidx.recyclerview.widget.LinearLayoutManager) listView.getLayoutManager();
                         if (layoutManager == null) return;
@@ -214,24 +211,7 @@ public class MainActivity extends Activity {
         toolbar.setOnMenuItemClickListener(item -> {
             int itemId = item.getItemId();
             if (itemId == R.id.whitelist_mode) {
-                mIsWhitelistMode = !mIsWhitelistMode;
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
-                    android.transition.AutoTransition transition = new android.transition.AutoTransition();
-                    transition.setDuration(150);
-                    android.transition.TransitionManager.beginDelayedTransition(toolbar, transition);
-                }
-                updateTitleView();
-                
-                if (listView != null) {
-                    // Just swap data and slide the container smoothly
-                    switchToTab(mIsFavoritesTab);
-                    listView.post(() -> listView.scrollToPosition(0)); // 切换模式时回到顶部
-                    float offset = mIsWhitelistMode ? 100f * getResources().getDisplayMetrics().density : -100f * getResources().getDisplayMetrics().density;
-                    listView.setTranslationX(offset);
-                    listView.animate().translationX(0f).setDuration(250).start();
-                } else {
-                    switchToTab(mIsFavoritesTab);
-                }
+                startActivity(new Intent(MainActivity.this, WhitelistActivity.class));
                 return true;
             }
             if (itemId == R.id.search) {
@@ -591,49 +571,12 @@ public class MainActivity extends Activity {
 
     // ==================== 底栏 Tab & 收藏 ====================
 
-    private void sortForWhitelist(List<AccessibilityServiceInfo> list) {
-        String whitelistServices = sp.getString("whitelist_services", "");
-        final java.text.Collator collator = java.text.Collator.getInstance(java.util.Locale.CHINA);
-        final ComponentName ownCn = ComponentName.unflattenFromString(new ComponentName(MainActivity.this, MyAccessibilityService.class).flattenToString());
-        
-        Collections.sort(list, new Comparator<AccessibilityServiceInfo>() {
-            @Override
-            public int compare(AccessibilityServiceInfo info1, AccessibilityServiceInfo info2) {
-                String id1 = info1.getId();
-                String id2 = info2.getId();
-                
-                boolean enabled1 = containsService(whitelistServices, normalizeServiceId(id1));
-                boolean enabled2 = containsService(whitelistServices, normalizeServiceId(id2));
-                if (enabled1 && !enabled2) return -1;
-                if (!enabled1 && enabled2) return 1;
-
-                ComponentName cn1 = ComponentName.unflattenFromString(id1);
-                ComponentName cn2 = ComponentName.unflattenFromString(id2);
-                boolean own1 = ownCn != null && ownCn.equals(cn1);
-                boolean own2 = ownCn != null && ownCn.equals(cn2);
-                if (own1 && !own2) return -1;
-                if (!own1 && own2) return 1;
-
-                ServiceCache cache1 = mServiceCache.get(normalizeServiceId(id1));
-                ServiceCache cache2 = mServiceCache.get(normalizeServiceId(id2));
-                String label1 = cache1 != null && cache1.packageLabel != null ? cache1.packageLabel : "";
-                String label2 = cache2 != null && cache2.packageLabel != null ? cache2.packageLabel : "";
-                int compareName = collator.compare(label1, label2);
-                if (compareName == 0) {
-                    String svc1 = cache1 != null && cache1.serviceLabel != null ? cache1.serviceLabel : "";
-                    String svc2 = cache2 != null && cache2.serviceLabel != null ? cache2.serviceLabel : "";
-                    compareName = collator.compare(svc1, svc2);
-                }
-                return compareName;
-            }
-        });
-    }
 
     private void switchToTab(boolean isFavorites) {
         mIsFavoritesTab = isFavorites;
         updateTitleView();
         
-        boolean effectivelyFavorites = isFavorites && !mIsWhitelistMode;
+        boolean effectivelyFavorites = isFavorites;
 
         // 重置 FAB 状态
         if (effectivelyFavorites) {
@@ -675,120 +618,50 @@ public class MainActivity extends Activity {
             }
             updateAdapter(mFavoritesList);
         } else {
-            // 切换到全部 Tab 或者白名单配置模式
+            // 切换到全部 Tab
             ((TextView) findViewById(R.id.empty_view)).setText("未找到结果");
             List<AccessibilityServiceInfo> source = (mFilteredList != null) ? mFilteredList : tmp;
-            if (mIsWhitelistMode) {
-                List<AccessibilityServiceInfo> whitelistSorted = new ArrayList<>(source);
-                sortForWhitelist(whitelistSorted);
-                source = whitelistSorted;
-                mPinHint.setVisibility(View.GONE);
-            } else {
-                mPinHint.setText("长按服务项可将其置顶");
-                mPinHint.setVisibility(View.VISIBLE);
-            }
+            mPinHint.setText("长按服务项可将其置顶");
+            mPinHint.setVisibility(View.VISIBLE);
             updateAdapter(source);
         }
     }
 
     private void updateTitleView() {
-        int textColor = night ? Color.WHITE : Color.BLACK;
-        if (mIsWhitelistMode) {
-            mTitleText.setText("白名单配置");
-            mTitleText.setTextColor(textColor);
-            Drawable icon = getResources().getDrawable(R.drawable.ic_block).mutate();
-            icon.setColorFilter(textColor, android.graphics.PorterDuff.Mode.SRC_IN);
-            mTitleText.setCompoundDrawablesRelativeWithIntrinsicBounds(icon, null, null, null);
-            if (mArrowDown != null) mArrowDown.setVisibility(View.GONE);
-            if (mGlobalWhitelistSwitch != null) mGlobalWhitelistSwitch.setVisibility(View.VISIBLE);
-            
-            if (mMenu != null) {
-                for (int i = 0; i < mMenu.size(); i++) {
-                    MenuItem item = mMenu.getItem(i);
-                    item.setVisible(false); // Hide all menu items in whitelist mode
-                }
+        int textColor = night ? android.graphics.Color.WHITE : android.graphics.Color.BLACK;
+        mTitleText.setText(mIsFavoritesTab ? "收藏" : "全部");
+        mTitleText.setTextColor(textColor);
+        android.graphics.drawable.Drawable icon = getResources().getDrawable(mIsFavoritesTab ? R.drawable.ic_star : R.drawable.ic_grid).mutate();
+        icon.setColorFilter(textColor, android.graphics.PorterDuff.Mode.SRC_IN);
+        mTitleText.setCompoundDrawablesRelativeWithIntrinsicBounds(icon, null, null, null);
+        if (mArrowDown != null) mArrowDown.setVisibility(android.view.View.VISIBLE);
+        
+        if (mMenu != null) {
+            for (int i = 0; i < mMenu.size(); i++) {
+                android.view.MenuItem item = mMenu.getItem(i);
+                item.setVisible(true);
             }
-
-            if (mTitleView != null) {
-                mTitleView.setClickable(false);
-                Toolbar.LayoutParams layoutParams = (Toolbar.LayoutParams) mTitleView.getLayoutParams();
-                if (layoutParams != null) {
-                    layoutParams.width = Toolbar.LayoutParams.MATCH_PARENT;
-                    mTitleView.setLayoutParams(layoutParams);
-                }
-            }
-            if (mTitleText != null) {
-                LinearLayout.LayoutParams textParams = (LinearLayout.LayoutParams) mTitleText.getLayoutParams();
-                if (textParams != null) {
-                    textParams.width = 0;
-                    textParams.weight = 1;
-                    mTitleText.setLayoutParams(textParams);
-                }
-            }
-
-            toolbar.setNavigationIcon(R.drawable.ic_back_arrow);
-            if (toolbar.getNavigationIcon() != null) {
-                toolbar.getNavigationIcon().setColorFilter(textColor, android.graphics.PorterDuff.Mode.SRC_IN);
-            }
-            toolbar.setNavigationOnClickListener(v -> {
-                mIsWhitelistMode = false;
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
-                    android.transition.AutoTransition transition = new android.transition.AutoTransition();
-                    transition.setDuration(150);
-                    android.transition.TransitionManager.beginDelayedTransition(toolbar, transition);
-                }
-                updateTitleView();
-                
-                if (listView != null) {
-                    switchToTab(mIsFavoritesTab);
-                    listView.post(() -> listView.scrollToPosition(0));
-                    float offset = -100f * getResources().getDisplayMetrics().density;
-                    listView.setTranslationX(offset);
-                    listView.animate().translationX(0f).setDuration(250).start();
-                } else {
-                    switchToTab(mIsFavoritesTab);
-                }
-            });
-        } else {
-            mTitleText.setText(mIsFavoritesTab ? "收藏" : "全部");
-            mTitleText.setTextColor(textColor);
-            Drawable icon = getResources().getDrawable(mIsFavoritesTab ? R.drawable.ic_star : R.drawable.ic_grid).mutate();
-            icon.setColorFilter(textColor, android.graphics.PorterDuff.Mode.SRC_IN);
-            mTitleText.setCompoundDrawablesRelativeWithIntrinsicBounds(icon, null, null, null);
-            if (mArrowDown != null) mArrowDown.setVisibility(View.VISIBLE);
-            if (mGlobalWhitelistSwitch != null) mGlobalWhitelistSwitch.setVisibility(View.GONE);
-            
-            if (mMenu != null) {
-                for (int i = 0; i < mMenu.size(); i++) {
-                    MenuItem item = mMenu.getItem(i);
-                    // 普通模式下，所有菜单图标（包括漏斗、搜索、设置等）都应该可见
-                    item.setVisible(true);
-                    if (item.getItemId() == R.id.whitelist_mode) {
-                        item.setIcon(R.drawable.ic_block);
-                    }
-                }
-            }
-
-            if (mTitleView != null) {
-                mTitleView.setClickable(true);
-                Toolbar.LayoutParams layoutParams = (Toolbar.LayoutParams) mTitleView.getLayoutParams();
-                if (layoutParams != null) {
-                    layoutParams.width = Toolbar.LayoutParams.WRAP_CONTENT;
-                    mTitleView.setLayoutParams(layoutParams);
-                }
-            }
-            if (mTitleText != null) {
-                LinearLayout.LayoutParams textParams = (LinearLayout.LayoutParams) mTitleText.getLayoutParams();
-                if (textParams != null) {
-                    textParams.width = LinearLayout.LayoutParams.WRAP_CONTENT;
-                    textParams.weight = 0;
-                    mTitleText.setLayoutParams(textParams);
-                }
-            }
-
-            toolbar.setNavigationIcon(null);
-            toolbar.setNavigationOnClickListener(null);
         }
+
+        if (mTitleView != null) {
+            mTitleView.setClickable(true);
+            androidx.appcompat.widget.Toolbar.LayoutParams layoutParams = (androidx.appcompat.widget.Toolbar.LayoutParams) mTitleView.getLayoutParams();
+            if (layoutParams != null) {
+                layoutParams.width = androidx.appcompat.widget.Toolbar.LayoutParams.WRAP_CONTENT;
+                mTitleView.setLayoutParams(layoutParams);
+            }
+        }
+        if (mTitleText != null) {
+            android.widget.LinearLayout.LayoutParams textParams = (android.widget.LinearLayout.LayoutParams) mTitleText.getLayoutParams();
+            if (textParams != null) {
+                textParams.width = android.widget.LinearLayout.LayoutParams.WRAP_CONTENT;
+                textParams.weight = 0;
+                mTitleText.setLayoutParams(textParams);
+            }
+        }
+        
+        toolbar.setNavigationIcon(null);
+        toolbar.setNavigationOnClickListener(null);
     }
 
     private void setupToolbarTitle() {
@@ -817,56 +690,9 @@ public class MainActivity extends Activity {
         int arrowMargin = (int) (2 * getResources().getDisplayMetrics().density + 0.5f);
         ((LinearLayout.LayoutParams) mArrowDown.getLayoutParams()).setMarginStart(arrowMargin);
 
-        mGlobalWhitelistSwitch = new com.google.android.material.materialswitch.MaterialSwitch(this);
-        mGlobalWhitelistSwitch.setVisibility(View.GONE);
-        int switchMargin = (int) (8 * getResources().getDisplayMetrics().density + 0.5f);
-        int switchMarginEnd = (int) (16 * getResources().getDisplayMetrics().density + 0.5f);
-        LinearLayout.LayoutParams switchParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        switchParams.setMarginStart(switchMargin);
-        switchParams.setMarginEnd(switchMarginEnd);
-        mGlobalWhitelistSwitch.setLayoutParams(switchParams);
-        
-        mGlobalWhitelistSwitch.setChecked(sp.getBoolean("whitelist_global_enable", false));
-        final CompoundButton.OnCheckedChangeListener[] whitelistSwitchListenerHolder = new CompoundButton.OnCheckedChangeListener[1];
-        whitelistSwitchListenerHolder[0] = (buttonView, isChecked) -> {
-            if (isChecked && !sp.getBoolean("whitelist_global_enable", false)) {
-                // 拦截开启操作，显示弹窗
-                buttonView.setOnCheckedChangeListener(null);
-                buttonView.setChecked(false);
-                buttonView.setOnCheckedChangeListener(whitelistSwitchListenerHolder[0]);
-                
-                showWhitelistEnableDialog(buttonView, whitelistSwitchListenerHolder[0]);
-                return;
-            }
-            
-            sp.edit().putBoolean("whitelist_global_enable", isChecked).apply();
-            switchToTab(mIsFavoritesTab);
-            // 触发一次保活同步
-            Intent intent = new Intent(MainActivity.this, daemonService.class);
-            intent.putExtra("source", "AppSwitch");
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    startForegroundService(intent);
-                } else {
-                    startService(intent);
-                }
-            } catch (Exception ignored) {
-            }
-        };
-        mGlobalWhitelistSwitch.setOnCheckedChangeListener(whitelistSwitchListenerHolder[0]);
-
-        updateTitleView();
-
-        layout.addView(mTitleText);
-        layout.addView(mArrowDown);
-        layout.addView(mGlobalWhitelistSwitch);
 
         layout.setOnClickListener(v -> {
-            if (!mIsWhitelistMode) {
-                showTabSwitcherPopup(v);
-            }
+            showTabSwitcherPopup(v);
         });
 
         toolbar.addView(layout, new Toolbar.LayoutParams(
@@ -1826,176 +1652,6 @@ public class MainActivity extends Activity {
         dialog.show();
     }
 
-    private void showWhitelistAppPickerDialog(String serviceId) {
-        android.app.ProgressDialog progressDialog = new android.app.ProgressDialog(this);
-        progressDialog.setMessage("正在加载应用列表，请稍候...");
-        progressDialog.setCancelable(false);
-        progressDialog.show();
-
-        new Thread(() -> {
-            String whitelistKey = "whitelist_" + serviceId;
-            String currentWhitelist = sp.getString(whitelistKey, "");
-            java.util.Set<String> checkedPkgs = new java.util.HashSet<>();
-            if (!currentWhitelist.isEmpty()) {
-                for (String pkg : currentWhitelist.split(":")) {
-                    if (!pkg.isEmpty()) checkedPkgs.add(pkg);
-                }
-            }
-
-            if (mCachedAppList == null) {
-                List<ApplicationInfo> allApps = pm.getInstalledApplications(PackageManager.GET_META_DATA);
-                mCachedAppList = new java.util.ArrayList<>();
-                for (ApplicationInfo info : allApps) {
-                    Intent launchIntent = pm.getLaunchIntentForPackage(info.packageName);
-                    if (launchIntent != null) {
-                        mCachedAppList.add(new AppCacheItem(info, info.loadLabel(pm).toString(), info.loadIcon(pm)));
-                    }
-                }
-            }
-            List<AppCacheItem> userApps = new java.util.ArrayList<>(mCachedAppList);
-
-            java.util.Collections.sort(userApps, (a, b) -> {
-                boolean aChecked = checkedPkgs.contains(a.info.packageName);
-                boolean bChecked = checkedPkgs.contains(b.info.packageName);
-                if (aChecked != bChecked) {
-                    return aChecked ? -1 : 1;
-                }
-                return java.text.Collator.getInstance().compare(a.label, b.label);
-            });
-
-            runOnUiThread(() -> {
-                progressDialog.dismiss();
-                if (isDestroyed() || isFinishing()) return;
-
-                View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_whitelist_apps, null);
-                EditText searchEdit = dialogView.findViewById(R.id.edit_search_app);
-                ListView listViewDialog = dialogView.findViewById(R.id.list_apps);
-                android.widget.CheckBox checkSelectAll = dialogView.findViewById(R.id.check_select_all);
-
-                class AppAdapter extends BaseAdapter implements android.widget.Filterable {
-                    private List<AppCacheItem> originalList = userApps;
-                    private List<AppCacheItem> filteredList = new java.util.ArrayList<>(userApps);
-                    
-                    @Override
-                    public int getCount() { return filteredList.size(); }
-                    @Override
-                    public AppCacheItem getItem(int position) { return filteredList.get(position); }
-                    @Override
-                    public long getItemId(int position) { return position; }
-
-                    @Override
-                    public View getView(int position, View convertView, ViewGroup parent) {
-                        if (convertView == null) {
-                            convertView = LayoutInflater.from(MainActivity.this).inflate(R.layout.item_app_picker, parent, false);
-                        }
-                        ImageView iconView = convertView.findViewById(R.id.app_icon);
-                        android.widget.CheckedTextView nameView = convertView.findViewById(R.id.app_name);
-                        
-                        AppCacheItem item = getItem(position);
-                        iconView.setImageDrawable(item.icon);
-                        nameView.setText(item.label);
-                        nameView.setChecked(checkedPkgs.contains(item.info.packageName));
-                        
-                        convertView.setOnClickListener(v -> {
-                            boolean isChecked = !nameView.isChecked();
-                            nameView.setChecked(isChecked);
-                            if (isChecked) {
-                                checkedPkgs.add(item.info.packageName);
-                            } else {
-                                checkedPkgs.remove(item.info.packageName);
-                            }
-                        });
-                        
-                        return convertView;
-                    }
-
-                    @Override
-                    public android.widget.Filter getFilter() {
-                        return new android.widget.Filter() {
-                            @Override
-                            protected FilterResults performFiltering(CharSequence constraint) {
-                                FilterResults results = new FilterResults();
-                                List<AppCacheItem> filtered = new java.util.ArrayList<>();
-                                if (constraint == null || constraint.length() == 0) {
-                                    filtered.addAll(originalList);
-                                } else {
-                                    String filterPattern = constraint.toString().toLowerCase().trim();
-                                    for (AppCacheItem item : originalList) {
-                                        if (item.label.toLowerCase().contains(filterPattern) ||
-                                            item.info.packageName.toLowerCase().contains(filterPattern)) {
-                                            filtered.add(item);
-                                        }
-                                    }
-                                }
-                                results.values = filtered;
-                                results.count = filtered.size();
-                                return results;
-                            }
-
-                            @Override
-                            protected void publishResults(CharSequence constraint, FilterResults results) {
-                                filteredList = (List<AppCacheItem>) results.values;
-                                notifyDataSetChanged();
-                            }
-                        };
-                    }
-                    
-                    public void selectAllFiltered(boolean select) {
-                        for (AppCacheItem item : filteredList) {
-                            if (select) {
-                                checkedPkgs.add(item.info.packageName);
-                            } else {
-                                checkedPkgs.remove(item.info.packageName);
-                            }
-                        }
-                        notifyDataSetChanged();
-                    }
-                }
-                
-                AppAdapter adapter = new AppAdapter();
-                listViewDialog.setAdapter(adapter);
-
-                searchEdit.addTextChangedListener(new android.text.TextWatcher() {
-                    @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-                    @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
-                        adapter.getFilter().filter(s);
-                    }
-                    @Override public void afterTextChanged(android.text.Editable s) {}
-                });
-
-                checkSelectAll.setOnCheckedChangeListener((buttonView, isChecked) -> {
-                    adapter.selectAllFiltered(isChecked);
-                });
-
-                new com.google.android.material.dialog.MaterialAlertDialogBuilder(MainActivity.this)
-                        .setTitle("配置应用白名单")
-                        .setView(dialogView)
-                        .setPositiveButton("保存", (dialog, which) -> {
-                            StringBuilder sb = new StringBuilder();
-                            sb.append(":");
-                            for (String pkg : checkedPkgs) {
-                                sb.append(pkg).append(":");
-                            }
-                            if (checkedPkgs.isEmpty()) {
-                                sb.setLength(0);
-                            }
-                            sp.edit().putString(whitelistKey, sb.toString()).apply();
-                            
-                            Intent intent = new Intent(MainActivity.this, daemonService.class);
-                            intent.putExtra("source", "AppSwitch");
-                            try {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                    startForegroundService(intent);
-                                } else {
-                                    startService(intent);
-                                }
-                            } catch (Exception ignored) {}
-                        })
-                        .setNegativeButton("取消", null)
-                        .show();
-            });
-        }).start();
-    }
 
     //这个是用于适配列表中的每一项设置项的显示
     public class ServiceListAdapter extends androidx.recyclerview.widget.RecyclerView.Adapter<androidx.recyclerview.widget.RecyclerView.ViewHolder> {
@@ -2085,111 +1741,6 @@ public class MainActivity extends Activity {
             holder.ib.setOnClickListener(null);
             holder.itemView.setOnClickListener(null);
             holder.itemView.setOnLongClickListener(null);
-
-            if (mIsWhitelistMode) {
-                String whitelistServices = sp.getString("whitelist_services", "");
-                boolean isWhitelisted = containsService(whitelistServices, serviceName);
-                boolean globalWhitelistEnable = sp.getBoolean("whitelist_global_enable", false);
-                
-                holder.sw.setChecked(isWhitelisted);
-                holder.sw.setEnabled(globalWhitelistEnable);
-
-                if (isWhitelisted) {
-                    holder.ib.setImageResource(R.drawable.ic_settings);
-                    holder.ib.setVisibility(View.VISIBLE);
-                    if (globalWhitelistEnable) {
-                        holder.ib.setAlpha(1.0f);
-                        holder.ib.setOnClickListener(v -> showWhitelistAppPickerDialog(serviceName));
-                    } else {
-                        holder.ib.setAlpha(0.5f);
-                    }
-                } else {
-                    holder.ib.setVisibility(View.INVISIBLE);
-                    holder.ib.setAlpha(1.0f);
-                }
-
-                holder.sw.setOnClickListener(view -> {
-                    String ws = sp.getString("whitelist_services", "");
-                    if (holder.sw.isChecked()) {
-                        if (!containsService(ws, serviceName)) {
-                            ws = serviceName + ":" + ws;
-                        }
-                    } else {
-                        StringBuilder sb = new StringBuilder();
-                        for (String entry : ws.split(":")) {
-                            if (entry.isEmpty() || serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
-                            if (sb.length() > 0) sb.append(":");
-                            sb.append(entry);
-                        }
-                        ws = sb.toString();
-                    }
-                    sp.edit().putString("whitelist_services", ws).apply();
-                    
-                    if (holder.sw.isChecked()) {
-                        holder.ib.setImageResource(R.drawable.ic_settings);
-                        holder.ib.setVisibility(View.VISIBLE);
-                        if (sp.getBoolean("whitelist_global_enable", false)) {
-                            holder.ib.setAlpha(1.0f);
-                            holder.ib.setOnClickListener(v -> showWhitelistAppPickerDialog(serviceName));
-                        } else {
-                            holder.ib.setAlpha(0.5f);
-                        }
-                    } else {
-                        holder.ib.setVisibility(View.INVISIBLE);
-                        holder.ib.setAlpha(1.0f);
-                    }
-                });
-            } else {
-                holder.sw.setEnabled(true); // 正常模式必须恢复可点击状态，防止白名单模式置灰的状态残留
-                holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
-                holder.ib.setOnClickListener(view -> {
-                    if (checkPermission()) {
-                        showNoPermissionDialog(true);
-                        return;
-                    }
-                    if (containsService(daemon, serviceName)) {
-                        String[] entries = daemon.split(":");
-                        StringBuilder newList = new StringBuilder();
-                        for (String entry : entries) {
-                            if (entry.isEmpty() || serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
-                            if (newList.length() > 0) newList.append(":");
-                            newList.append(entry);
-                        }
-                        daemon = newList.toString();
-                    } else {
-                        daemon = serviceName + ":" + daemon;
-                    }
-                    sp.edit().putString("daemon", daemon).apply();
-                    holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
-                    StartForeGroundDaemon();
-                });
-                holder.sw.setChecked(isServiceEnabled(serviceName, settingValue));
-                holder.ib.setVisibility(holder.sw.isChecked() ? View.VISIBLE : View.INVISIBLE);
-                holder.sw.setOnClickListener(view -> {
-                    if (checkPermission()) {
-                        showNoPermissionDialog(true);
-                        holder.sw.setChecked(!holder.sw.isChecked());
-                    } else {
-                        String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-                        if (s == null) s = "";
-
-                        if (holder.sw.isChecked()) {
-                            if (!isServiceEnabled(serviceName, s)) tmpSettingValue = serviceName + ":" + s;
-                            else tmpSettingValue = s;
-                        } else {
-                            StringBuilder sb = new StringBuilder();
-                            for (String entry : s.split(":")) {
-                                if (entry.isEmpty() || serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
-                                if (sb.length() > 0) sb.append(":");
-                                sb.append(entry);
-                            }
-                            tmpSettingValue = sb.toString();
-                        }
-                        Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
-                        holder.ib.setVisibility(holder.sw.isChecked() ? View.VISIBLE : View.INVISIBLE);
-                    }
-                });
-            }
 
             holder.cardView.setOnClickListener(view -> {
                 com.google.android.material.dialog.MaterialAlertDialogBuilder builder = new com.google.android.material.dialog.MaterialAlertDialogBuilder(MainActivity.this);
@@ -2315,7 +1866,7 @@ public class MainActivity extends Activity {
                     return true;
                 });
             } else {
-                if (!mIsWhitelistMode && containsService(top, serviceName)) holder.pinIndicator.setVisibility(View.VISIBLE);
+                if (containsService(top, serviceName)) holder.pinIndicator.setVisibility(View.VISIBLE);
                 else holder.pinIndicator.setVisibility(View.GONE);
 
                 holder.cardView.setOnLongClickListener(v -> {
@@ -2646,84 +2197,5 @@ public class MainActivity extends Activity {
         return false;
     }
 
-    private void showWhitelistEnableDialog(final CompoundButton switchButton, final CompoundButton.OnCheckedChangeListener listener) {
-        final android.app.Dialog dialog = new android.app.Dialog(this);
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        View view = getLayoutInflater().inflate(R.layout.dialog_whitelist_enable, null);
-        dialog.setContentView(view);
-        Window w = dialog.getWindow();
-        if (w != null) {
-            w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
-            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
-            int marginPx = (int) (16 * dm.density + 0.5f);
-            android.view.WindowManager.LayoutParams lp = w.getAttributes();
-            lp.width = dm.widthPixels - marginPx * 2;
-            lp.height = android.view.WindowManager.LayoutParams.WRAP_CONTENT;
-            w.setAttributes(lp);
-        }
-
-        final TextView statusText = view.findViewById(R.id.permission_status_text);
-        final Button btnGoSettings = view.findViewById(R.id.btn_go_settings);
-        
-        Runnable updateStatus = () -> {
-            boolean isEnabled = isOwnAccessibilityServiceEnabled();
-            if (isEnabled) {
-                statusText.setText("已开启 ✔");
-                statusText.setTextColor(Color.parseColor("#4CAF50")); // Green
-                btnGoSettings.setVisibility(View.GONE);
-            } else {
-                statusText.setText("未开启 ❌");
-                statusText.setTextColor(Color.parseColor("#F44336")); // Red
-                btnGoSettings.setVisibility(View.VISIBLE);
-            }
-        };
-        
-        updateStatus.run();
-        
-        View.OnClickListener goSettingsAction = v -> {
-            if (checkWriteSecurePermission()) {
-                Toast.makeText(MainActivity.this, "需要授予安全设置写入权限才能开启无障碍服务", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            String ownServiceId = new ComponentName(MainActivity.this, MyAccessibilityService.class).flattenToString();
-            String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-            if (s == null) s = "";
-            if (!isOwnAccessibilityServiceEnabled()) {
-                Settings.Secure.putString(getContentResolver(),
-                        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
-                        ownServiceId + ":" + s);
-            }
-            String currentDaemon = sp.getString("daemon", "");
-            if (!currentDaemon.contains(ownServiceId)) {
-                String newDaemon = currentDaemon.isEmpty() ? ownServiceId : ownServiceId + ":" + currentDaemon;
-                sp.edit().putString("daemon", newDaemon).apply();
-                daemon = newDaemon;
-                StartForeGroundDaemon();
-            }
-            updateStatus.run();
-        };
-        
-        view.findViewById(R.id.permission_layout).setOnClickListener(goSettingsAction);
-        btnGoSettings.setOnClickListener(goSettingsAction);
-        
-        view.getViewTreeObserver().addOnWindowFocusChangeListener(hasFocus -> {
-            if (hasFocus) {
-                updateStatus.run();
-            }
-        });
-
-        view.findViewById(R.id.btn_cancel).setOnClickListener(v -> dialog.dismiss());
-        view.findViewById(R.id.btn_continue).setOnClickListener(v -> {
-            if (!isOwnAccessibilityServiceEnabled()) {
-                Toast.makeText(MainActivity.this, "请先开启无障碍服务", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            dialog.dismiss();
-            sp.edit().putBoolean("whitelist_global_enable", true).apply();
-            switchButton.setChecked(true);
-        });
-
-        dialog.show();
-    }
 
 }
