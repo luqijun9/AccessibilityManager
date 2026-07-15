@@ -126,16 +126,6 @@ public class WhitelistActivity extends AppCompatActivity {
         setupToolbarTitle();
 
 
-        // Actually, just add search icon to toolbar programmatically to avoid creating new xml.
-        toolbar.getMenu().add(0, R.id.search, 0, "搜索").setIcon(R.drawable.ic_search).setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS);
-        toolbar.setOnMenuItemClickListener(item -> {
-            if (item.getItemId() == R.id.search) {
-                enterSearchMode();
-                return true;
-            }
-            return false;
-        });
-
         listView = findViewById(R.id.list);
         listView.setLayoutManager(new LinearLayoutManager(this));
 
@@ -174,10 +164,6 @@ public class WhitelistActivity extends AppCompatActivity {
         mTitleText.setTextColor(textColor);
         mTitleText.setTextSize(20);
         mTitleText.setTypeface(null, android.graphics.Typeface.BOLD);
-        Drawable icon = getResources().getDrawable(R.drawable.ic_block).mutate();
-        icon.setColorFilter(textColor, android.graphics.PorterDuff.Mode.SRC_IN);
-        mTitleText.setCompoundDrawablesRelativeWithIntrinsicBounds(icon, null, null, null);
-        mTitleText.setCompoundDrawablePadding(16);
 
         LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         mTitleText.setLayoutParams(textParams);
@@ -213,7 +199,24 @@ public class WhitelistActivity extends AppCompatActivity {
         };
         mGlobalWhitelistSwitch.setOnCheckedChangeListener(whitelistSwitchListenerHolder[0]);
 
+        ImageView mSearchBtn = new ImageView(this);
+        mSearchBtn.setImageResource(R.drawable.ic_search);
+        mSearchBtn.setColorFilter(textColor, android.graphics.PorterDuff.Mode.SRC_IN);
+        android.util.TypedValue outValue = new android.util.TypedValue();
+        getTheme().resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, outValue, true);
+        mSearchBtn.setBackgroundResource(outValue.resourceId);
+        int padding = (int) (12 * getResources().getDisplayMetrics().density);
+        mSearchBtn.setPadding(padding, padding, padding, padding);
+        mSearchBtn.setOnClickListener(v -> enterSearchMode());
+
+        LinearLayout.LayoutParams searchParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        searchParams.setMarginEnd((int) (8 * getResources().getDisplayMetrics().density));
+        mSearchBtn.setLayoutParams(searchParams);
+
         layout.addView(mTitleText);
+        layout.addView(mSearchBtn);
         layout.addView(mGlobalWhitelistSwitch);
 
         toolbar.addView(layout, new Toolbar.LayoutParams(
@@ -226,8 +229,6 @@ public class WhitelistActivity extends AppCompatActivity {
     private void enterSearchMode() {
         if (mIsSearching) return;
         mIsSearching = true;
-
-        toolbar.getMenu().clear();
         for(int i=0; i<toolbar.getChildCount(); i++) {
             View child = toolbar.getChildAt(i);
             if (child instanceof LinearLayout) {
@@ -270,7 +271,6 @@ public class WhitelistActivity extends AppCompatActivity {
                 child.setVisibility(View.VISIBLE);
             }
         }
-        toolbar.getMenu().add(0, R.id.search, 0, "搜索").setIcon(R.drawable.ic_search).setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS);
 
         sortForWhitelist(tmp);
         updateAdapter(tmp);
