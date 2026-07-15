@@ -628,9 +628,11 @@ public class MainActivity extends Activity {
     private void switchToTab(boolean isFavorites) {
         mIsFavoritesTab = isFavorites;
         updateTitleView();
+        
+        boolean effectivelyFavorites = isFavorites && !mIsWhitelistMode;
 
         // 重置 FAB 状态
-        if (isFavorites) {
+        if (effectivelyFavorites) {
             fabAdd.setVisibility(View.VISIBLE);
             fabAdd.animate().cancel();
             fabAdd.setTranslationY(0);
@@ -649,7 +651,7 @@ public class MainActivity extends Activity {
             exitSearchMode();
         }
 
-        if (isFavorites) {
+        if (effectivelyFavorites) {
             // 切换到收藏 Tab
             List<AccessibilityServiceInfo> source = (mFilteredList != null) ? mFilteredList : tmp;
             mFavoritesList = new ArrayList<>();
@@ -658,25 +660,18 @@ public class MainActivity extends Activity {
                     mFavoritesList.add(info);
                 }
             }
-            if (mIsWhitelistMode) {
-                sortForWhitelist(mFavoritesList);
-            }
             
-            if (mIsWhitelistMode || mFavoritesList.isEmpty()) {
+            if (mFavoritesList.isEmpty()) {
                 mPinHint.setVisibility(View.GONE);
+                ((TextView) findViewById(R.id.empty_view)).setText("还没有收藏的服务\n点击右下角 + 添加");
             } else {
                 mPinHint.setText("长按可取消收藏");
                 mPinHint.setVisibility(View.VISIBLE);
-            }
-
-            if (mFavoritesList.isEmpty()) {
-                ((TextView) findViewById(R.id.empty_view)).setText("还没有收藏的服务\n点击右下角 + 添加");
-            } else {
                 ((TextView) findViewById(R.id.empty_view)).setText("未找到结果");
             }
             updateAdapter(mFavoritesList);
         } else {
-            // 切换到全部 Tab
+            // 切换到全部 Tab 或者白名单配置模式
             ((TextView) findViewById(R.id.empty_view)).setText("未找到结果");
             List<AccessibilityServiceInfo> source = (mFilteredList != null) ? mFilteredList : tmp;
             if (mIsWhitelistMode) {
