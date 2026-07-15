@@ -1745,6 +1745,59 @@ public class MainActivity extends Activity {
             holder.itemView.setOnClickListener(null);
             holder.itemView.setOnLongClickListener(null);
 
+            holder.sw.setEnabled(true);
+            holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
+            holder.ib.setOnClickListener(view -> {
+                if (checkPermission()) {
+                    showNoPermissionDialog(true);
+                    return;
+                }
+                if (containsService(daemon, serviceName)) {
+                    String[] entries = daemon.split(":");
+                    StringBuilder newList = new StringBuilder();
+                    for (String entry : entries) {
+                        if (entry.isEmpty() || serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
+                        if (newList.length() > 0) newList.append(":");
+                        newList.append(entry);
+                    }
+                    daemon = newList.toString();
+                } else {
+                    daemon = serviceName + ":" + daemon;
+                }
+                sp.edit().putString("daemon", daemon).apply();
+                holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
+                StartForeGroundDaemon();
+            });
+
+            holder.sw.setChecked(isServiceEnabled(serviceName, settingValue));
+            holder.ib.setVisibility(holder.sw.isChecked() ? View.VISIBLE : View.INVISIBLE);
+            
+            holder.sw.setOnClickListener(view -> {
+                if (checkPermission()) {
+                    showNoPermissionDialog(true);
+                    holder.sw.setChecked(!holder.sw.isChecked());
+                } else {
+                    String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+                    if (s == null) s = "";
+
+                    if (holder.sw.isChecked()) {
+                        if (!isServiceEnabled(serviceName, s)) tmpSettingValue = serviceName + ":" + s;
+                        else tmpSettingValue = s;
+                    } else {
+                        StringBuilder sb = new StringBuilder();
+                        for (String entry : s.split(":")) {
+                            if (entry.isEmpty() || serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
+                            if (sb.length() > 0) sb.append(":");
+                            sb.append(entry);
+                        }
+                        tmpSettingValue = sb.toString();
+                    }
+                    Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
+                    holder.ib.setVisibility(holder.sw.isChecked() ? View.VISIBLE : View.INVISIBLE);
+                }
+            });
+
+
             holder.cardView.setOnClickListener(view -> {
                 com.google.android.material.dialog.MaterialAlertDialogBuilder builder = new com.google.android.material.dialog.MaterialAlertDialogBuilder(MainActivity.this);
                 int fb = info.feedbackType;
