@@ -504,6 +504,9 @@ public class MainActivity extends Activity {
             }
         }
         final String currentSetting = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        final java.text.Collator collator = java.text.Collator.getInstance(java.util.Locale.CHINA);
+        final ComponentName ownCn = ComponentName.unflattenFromString(ownServiceId);
+        
         Collections.sort(tmp, new Comparator<AccessibilityServiceInfo>() {
             @Override
             public int compare(AccessibilityServiceInfo info1, AccessibilityServiceInfo info2) {
@@ -522,7 +525,6 @@ public class MainActivity extends Activity {
                     if (!enabled1 && enabled2) return 1;
                 }
 
-                ComponentName ownCn = ComponentName.unflattenFromString(ownServiceId);
                 ComponentName cn1 = ComponentName.unflattenFromString(id1);
                 ComponentName cn2 = ComponentName.unflattenFromString(id2);
                 boolean own1 = ownCn != null && ownCn.equals(cn1);
@@ -534,11 +536,11 @@ public class MainActivity extends Activity {
                 ServiceCache cache2 = mServiceCache.get(normalizeServiceId(id2));
                 String label1 = cache1 != null && cache1.packageLabel != null ? cache1.packageLabel : "";
                 String label2 = cache2 != null && cache2.packageLabel != null ? cache2.packageLabel : "";
-                int compareName = java.text.Collator.getInstance(java.util.Locale.CHINA).compare(label1, label2);
+                int compareName = collator.compare(label1, label2);
                 if (compareName == 0) {
                     String svc1 = cache1 != null && cache1.serviceLabel != null ? cache1.serviceLabel : "";
                     String svc2 = cache2 != null && cache2.serviceLabel != null ? cache2.serviceLabel : "";
-                    compareName = java.text.Collator.getInstance(java.util.Locale.CHINA).compare(svc1, svc2);
+                    compareName = collator.compare(svc1, svc2);
                 }
                 
                 return compareName;
@@ -591,6 +593,9 @@ public class MainActivity extends Activity {
 
     private void sortForWhitelist(List<AccessibilityServiceInfo> list) {
         String whitelistServices = sp.getString("whitelist_services", "");
+        final java.text.Collator collator = java.text.Collator.getInstance(java.util.Locale.CHINA);
+        final ComponentName ownCn = ComponentName.unflattenFromString(new ComponentName(MainActivity.this, MyAccessibilityService.class).flattenToString());
+        
         Collections.sort(list, new Comparator<AccessibilityServiceInfo>() {
             @Override
             public int compare(AccessibilityServiceInfo info1, AccessibilityServiceInfo info2) {
@@ -602,7 +607,6 @@ public class MainActivity extends Activity {
                 if (enabled1 && !enabled2) return -1;
                 if (!enabled1 && enabled2) return 1;
 
-                ComponentName ownCn = ComponentName.unflattenFromString(new ComponentName(MainActivity.this, MyAccessibilityService.class).flattenToString());
                 ComponentName cn1 = ComponentName.unflattenFromString(id1);
                 ComponentName cn2 = ComponentName.unflattenFromString(id2);
                 boolean own1 = ownCn != null && ownCn.equals(cn1);
@@ -614,11 +618,11 @@ public class MainActivity extends Activity {
                 ServiceCache cache2 = mServiceCache.get(normalizeServiceId(id2));
                 String label1 = cache1 != null && cache1.packageLabel != null ? cache1.packageLabel : "";
                 String label2 = cache2 != null && cache2.packageLabel != null ? cache2.packageLabel : "";
-                int compareName = java.text.Collator.getInstance(java.util.Locale.CHINA).compare(label1, label2);
+                int compareName = collator.compare(label1, label2);
                 if (compareName == 0) {
                     String svc1 = cache1 != null && cache1.serviceLabel != null ? cache1.serviceLabel : "";
                     String svc2 = cache2 != null && cache2.serviceLabel != null ? cache2.serviceLabel : "";
-                    compareName = java.text.Collator.getInstance(java.util.Locale.CHINA).compare(svc1, svc2);
+                    compareName = collator.compare(svc1, svc2);
                 }
                 return compareName;
             }
