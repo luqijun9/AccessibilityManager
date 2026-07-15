@@ -2319,6 +2319,17 @@ public class MainActivity extends Activity {
                 else holder.pinIndicator.setVisibility(View.GONE);
 
                 holder.cardView.setOnLongClickListener(v -> {
+                    androidx.recyclerview.widget.LinearLayoutManager layoutManager = (androidx.recyclerview.widget.LinearLayoutManager) listView.getLayoutManager();
+                    int firstVisible = -1;
+                    int offset = 0;
+                    if (layoutManager != null) {
+                        firstVisible = layoutManager.findFirstVisibleItemPosition();
+                        View firstView = layoutManager.getChildAt(0);
+                        if (firstView != null) {
+                            offset = firstView.getTop();
+                        }
+                    }
+
                     String currentTop = sp.getString("top", "");
                     if (containsService(currentTop, serviceName)) {
                         String[] topArray = currentTop.split(":");
@@ -2338,6 +2349,10 @@ public class MainActivity extends Activity {
                     sp.edit().putString("top", top).apply();
                     Sort();
                     switchToTab(false);
+                    
+                    if (layoutManager != null && firstVisible != -1) {
+                        layoutManager.scrollToPositionWithOffset(firstVisible, offset);
+                    }
                     return true;
                 });
             }
