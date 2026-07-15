@@ -689,7 +689,10 @@ public class MainActivity extends Activity {
         mArrowDown.setScaleType(ImageView.ScaleType.FIT_CENTER);
         int arrowMargin = (int) (2 * getResources().getDisplayMetrics().density + 0.5f);
         ((LinearLayout.LayoutParams) mArrowDown.getLayoutParams()).setMarginStart(arrowMargin);
+        updateTitleView();
 
+        layout.addView(mTitleText);
+        layout.addView(mArrowDown);
 
         layout.setOnClickListener(v -> {
             showTabSwitcherPopup(v);
