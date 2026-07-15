@@ -160,7 +160,7 @@ public class WhitelistActivity extends AppCompatActivity {
         layout.setFocusable(true);
 
         TextView mTitleText = new TextView(this);
-        mTitleText.setText("白名单配置");
+        mTitleText.setText("局部关闭");
         mTitleText.setTextColor(textColor);
         mTitleText.setTextSize(20);
         mTitleText.setTypeface(null, android.graphics.Typeface.BOLD);

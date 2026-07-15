@@ -10,7 +10,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="开启白名单模式"
+        android:text="开启局部关闭功能"
         android:textColor="@color/text_primary"
         android:textSize="18sp"
         android:textStyle="bold"
@@ -25,7 +25,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="「局部关闭」可在配置的白名单应用内强制关闭指定服务（即使已开启保活），主要用于解决部分应用界面异常、游戏掉帧或遭遇无障碍检测等问题。"
+        android:text="「局部关闭」可在配置的白名单应用内强制「关闭」指定服务（即使已开启保活），主要用于解决部分应用界面异常、游戏掉帧、遭遇无障碍检测或减少耗电等问题。"
         android:textColor="@color/text_primary"
         android:textSize="14sp"
         android:lineSpacingExtra="4dp"

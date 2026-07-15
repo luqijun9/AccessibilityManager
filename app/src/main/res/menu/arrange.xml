@@ -10,7 +10,7 @@
         android:id="@+id/whitelist_mode"
         android:icon="@drawable/ic_block"
         app:showAsAction="always"
-        android:title="白名单配置" />
+        android:title="局部关闭" />
     <item
         android:id="@+id/viewlog"
         android:icon="@drawable/ic_log"
