@@ -2189,7 +2189,7 @@ public class MainActivity extends Activity {
                 });
             }
 
-            holder.itemView.setOnClickListener(view -> {
+            holder.cardView.setOnClickListener(view -> {
                 com.google.android.material.dialog.MaterialAlertDialogBuilder builder = new com.google.android.material.dialog.MaterialAlertDialogBuilder(MainActivity.this);
                 int fb = info.feedbackType;
                 String feedback = "";
@@ -2201,66 +2201,150 @@ public class MainActivity extends Activity {
                 if ((fb & 1) != 0) feedback += "口头反馈\n";
                 if (feedback.equals("")) feedback = "无\n";
 
-                int flag = info.flags;
-                String fLags = "";
-                if ((flag & 1) != 0) fLags += "此服务可能会请求查询所有正在运行的内容并与其交互的权限\n";
-                if ((flag & 2) != 0) fLags += "此服务可以接收不包含UI信息的事件\n";
-                if ((flag & 4) != 0) fLags += "此服务会在触屏探索下，向用户请求服务\n";
-                if ((flag & 8) != 0) fLags += "此服务会在增强网络辅助功能下，向用户请求服务\n";
-                if ((flag & 16) != 0) fLags += "此服务能屏蔽后续事件，如点击长按\n";
-                if ((flag & 32) != 0) fLags += "此服务获取其他应用活动窗口内容的权限\n";
-                if ((flag & 64) != 0) fLags += "请求显示布局边界、焦点等信息的权限\n";
-                if ((flag & 128) != 0) fLags += "服务即使在未开启触摸探索时也能检测到手势\n";
-                if ((flag & 256) != 0) fLags += "请求分发触屏探索事件的权限\n";
-                if ((flag & 512) != 0) fLags += "请求包含所有窗口的信息\n";
-                if ((flag & 1024) != 0) fLags += "请求多显示器支持\n";
-                if ((flag & 4096) != 0) fLags += "提供双指缩放提示权限\n";
-                if (fLags.equals("")) fLags += "无\n";
+                int cap = info.getCapabilities();
+                String capa = "";
+                if ((cap & 32) != 0) capa += "执行手势\n";
+                if ((cap & 16) != 0) capa += "控制显示器放大率\n";
+                if ((cap & 8) != 0) capa += "监听和拦截按键事件\n";
+                if ((cap & 4) != 0) capa += "请求增强的Web辅助功能增强功能。 例如，安装脚本以使网页内容更易于访问\n";
+                if ((cap & 2) != 0) capa += "请求触摸探索模式，使触屏操作变成鼠标操作\n";
+                if ((cap & 1) != 0) capa += "读取屏幕内容\n";
+                if (capa.equals("")) capa = "无\n";
 
-                String id = info.getId();
-                String sett = info.getSettingsActivityName();
-                if (sett == null || sett.equals("")) sett = "无";
+                int eve = info.eventTypes;
+                String event = "";
+                if ((eve & 33554432) != 0) event += "当前正在阅读用户屏幕上下文的助理事件\n";
+                if ((eve & 16777216) != 0) event += "点击控件上下文的事件\n";
+                if ((eve & 8388608) != 0) event += "窗口更改的事件\n";
+                if ((eve & 4194304) != 0) event += "用户结束触摸屏幕的事件\n";
+                if ((eve & 2097152) != 0) event += "用户开始触摸屏幕的事件\n";
+                if ((eve & 1048576) != 0) event += "结束手势检测的事件\n";
+                if ((eve & 524288) != 0) event += "开始手势检测事件\n";
+                if ((eve & 262144) != 0) event += "遍历视图文本事件\n";
+                if ((eve & 131072) != 0) event += "清除可访问性焦点事件\n";
+                if ((eve & 65536) != 0) event += "获得可访问性焦点的事件\n";
+                if ((eve & 32768) != 0) event += "发布公告的应用程序的事件\n";
+                if ((eve & 16384) != 0) event += "更改选中文本的事件\n";
+                if ((eve & 8192) != 0) event += "滚动视图的事件\n";
+                if ((eve & 4096) != 0) event += "窗口内容更改的事件\n";
+                if ((eve & 2048) != 0) event += "结束触摸探索手势的事件\n";
+                if ((eve & 1024) != 0) event += "开始触摸探索手势的事件\n";
+                if ((eve & 512) != 0) event += "控件结束文字输入事件\n";
+                if ((eve & 256) != 0) event += "控件接受文字输入事件\n";
+                if ((eve & 128) != 0) event += "通知状态改变的事件\n";
+                if ((eve & 64) != 0) event += "窗口状态更改的事件\n";
+                if ((eve & 32) != 0) event += "文本框的文字改变事件\n";
+                if ((eve & 16) != 0) event += "控件获得焦点的事件\n";
+                if ((eve & 8) != 0) event += "控件被选取的事件\n";
+                if ((eve & 4) != 0) event += "长按控件的事件\n";
+                if ((eve & 2) != 0) event += "点击控件的事件\n";
+                if (event.equals("")) event = "无\n";
 
-                builder.setTitle("服务详细信息");
-                builder.setMessage("服务ID：" + id + "\n\n所提供的反馈：" + feedback + "\n相关配置活动名称：" + sett + "\n\n服务Flag标志相关：\n" + fLags);
-                builder.setPositiveButton("复制名称", (dialog, which) -> {
-                    android.content.ClipboardManager clipboardManager = (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                    clipboardManager.setPrimaryClip(android.content.ClipData.newPlainText("label", finalPackageLabel));
-                    Toast.makeText(MainActivity.this, "已复制：" + finalPackageLabel, Toast.LENGTH_SHORT).show();
-                });
-                builder.setNegativeButton("返回", null);
-                builder.show();
-            });
+                String range = info.packageNames == null ? "全局生效" : java.util.Arrays.toString(info.packageNames).replace("[", "").replace("]", "").replace(", ", "\n").replace(",", "\n");
 
-            if (containsService(favorites, serviceName)) holder.pinIndicator.setVisibility(View.VISIBLE);
-            else holder.pinIndicator.setVisibility(View.GONE);
+                int fg = info.flags;
+                String flag = "";
+                if ((fg & 64) != 0) flag += "访问所有交互式窗口的内容\n";
+                if ((fg & 32) != 0) flag += "监听和拦截按键事件\n";
+                if ((fg & 16) != 0) flag += "获取屏幕视图上所有控件的ID\n";
+                if ((fg & 8) != 0) flag += "启用Web可访问性增强扩展\n";
+                if ((fg & 4) != 0) flag += "要求系统进入触摸探索模式\n";
+                if ((fg & 2) != 0) flag += "查询窗口中的不重要内容\n";
+                if ((fg & 1) != 0) flag += "默认\n";
+                if (flag.equals("")) flag = "无\n";
 
-            holder.itemView.setOnLongClickListener(v -> {
-                String currentFavs = sp.getString("favorites", "");
-                if (containsService(currentFavs, serviceName)) {
-                    String[] favArray = currentFavs.split(":");
-                    StringBuilder newFavs = new StringBuilder();
-                    for (String entry : favArray) {
-                        if (entry.isEmpty() || entry.equals(serviceName)) continue;
-                        if (newFavs.length() > 0) newFavs.append(":");
-                        newFavs.append(entry);
+                try {
+                    final ScrollView scrollView = new ScrollView(MainActivity.this);
+                    final TextView textView = new TextView(MainActivity.this);
+                    textView.setTextIsSelectable(true);
+                    textView.setPadding(40, 20, 40, 20);
+                    textView.setTextSize(18f);
+                    textView.setAlpha(0.8f);
+                    boolean night = (getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+                    textView.setTextColor(night ? Color.WHITE : Color.BLACK);
+                    textView.setText(String.format("服务类名：\n%s\n\n特殊能力：\n%s\n生效范围：\n%s\n\n反馈方式：\n%s\n捕获事件类型：\n%s\n特殊标志：\n%s", serviceName, capa, range, feedback, event, flag));
+                    scrollView.addView(textView);
+                    
+                    if (info.getSettingsActivityName() != null && info.getSettingsActivityName().length() > 0) {
+                        builder.setNegativeButton("设置", (dialogInterface, i) -> {
+                            try {
+                                startActivity(new Intent().setComponent(new ComponentName(packageName[0], info.getSettingsActivityName())));
+                            } catch (Exception ignored) {
+                            }
+                        });
                     }
-                    favorites = newFavs.toString();
-                    Toast.makeText(MainActivity.this, "已取消收藏", Toast.LENGTH_SHORT).show();
-                } else {
-                    if (!currentFavs.isEmpty()) favorites = serviceName + ":" + currentFavs;
-                    else favorites = serviceName;
-                    Toast.makeText(MainActivity.this, "已收藏，将置顶显示", Toast.LENGTH_SHORT).show();
+
+                    builder
+                            .setIcon(pm.getApplicationIcon(packageName[0]))
+                            .setView(scrollView).setTitle("服务详细信息")
+                            .setPositiveButton("知道了", null)
+                            .setNeutralButton("复制类名", (dialog, which) -> {
+                                android.content.ClipboardManager clipboardManager = (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                                clipboardManager.setPrimaryClip(android.content.ClipData.newPlainText("label", finalPackageLabel));
+                                Toast.makeText(MainActivity.this, "已复制：" + finalPackageLabel, Toast.LENGTH_SHORT).show();
+                            })
+                            .create().show();
+                } catch (Exception ignored) {
                 }
-                sp.edit().putString("favorites", favorites).apply();
-                
-                mFavoritesList = new java.util.ArrayList<>();
-                for (AccessibilityServiceInfo servInfo : l) {
-                    if (isServiceFavorite(normalizeServiceId(servInfo.getId()))) mFavoritesList.add(servInfo);
-                }
-                switchToTab(mIsFavoritesTab);
-                return true;
             });
+
+            if (mIsFavoritesTab) {
+                if (containsService(favorites, serviceName)) holder.pinIndicator.setVisibility(View.VISIBLE);
+                else holder.pinIndicator.setVisibility(View.GONE);
+
+                holder.cardView.setOnLongClickListener(v -> {
+                    String currentFavs = sp.getString("favorites", "");
+                    if (containsService(currentFavs, serviceName)) {
+                        String[] favArray = currentFavs.split(":");
+                        StringBuilder newFavs = new StringBuilder();
+                        for (String entry : favArray) {
+                            if (entry.isEmpty() || entry.equals(serviceName)) continue;
+                            if (newFavs.length() > 0) newFavs.append(":");
+                            newFavs.append(entry);
+                        }
+                        favorites = newFavs.toString();
+                        Toast.makeText(MainActivity.this, "已取消收藏", Toast.LENGTH_SHORT).show();
+                    } else {
+                        if (!currentFavs.isEmpty()) favorites = serviceName + ":" + currentFavs;
+                        else favorites = serviceName;
+                        Toast.makeText(MainActivity.this, "已收藏，将置顶显示", Toast.LENGTH_SHORT).show();
+                    }
+                    sp.edit().putString("favorites", favorites).apply();
+                    
+                    mFavoritesList = new java.util.ArrayList<>();
+                    for (AccessibilityServiceInfo servInfo : l) {
+                        if (isServiceFavorite(normalizeServiceId(servInfo.getId()))) mFavoritesList.add(servInfo);
+                    }
+                    switchToTab(true);
+                    return true;
+                });
+            } else {
+                if (containsService(top, serviceName)) holder.pinIndicator.setVisibility(View.VISIBLE);
+                else holder.pinIndicator.setVisibility(View.GONE);
+
+                holder.cardView.setOnLongClickListener(v -> {
+                    String currentTop = sp.getString("top", "");
+                    if (containsService(currentTop, serviceName)) {
+                        String[] topArray = currentTop.split(":");
+                        StringBuilder newTop = new StringBuilder();
+                        for (String entry : topArray) {
+                            if (entry.isEmpty() || entry.equals(serviceName)) continue;
+                            if (newTop.length() > 0) newTop.append(":");
+                            newTop.append(entry);
+                        }
+                        top = newTop.toString();
+                        Toast.makeText(MainActivity.this, "已取消置顶", Toast.LENGTH_SHORT).show();
+                    } else {
+                        if (!currentTop.isEmpty()) top = serviceName + ":" + currentTop;
+                        else top = serviceName;
+                        Toast.makeText(MainActivity.this, "已置顶显示", Toast.LENGTH_SHORT).show();
+                    }
+                    sp.edit().putString("top", top).apply();
+                    Sort();
+                    switchToTab(false);
+                    return true;
+                });
+            }
         }
 
         class ItemViewHolder extends androidx.recyclerview.widget.RecyclerView.ViewHolder {
@@ -2269,6 +2353,7 @@ public class MainActivity extends Activity {
             com.google.android.material.materialswitch.MaterialSwitch sw;
             ImageButton ib;
             View pinIndicator;
+            View cardView;
 
             public ItemViewHolder(View itemView) {
                 super(itemView);
@@ -2278,6 +2363,7 @@ public class MainActivity extends Activity {
                 sw = itemView.findViewById(R.id.s);
                 ib = itemView.findViewById(R.id.ib);
                 pinIndicator = itemView.findViewById(R.id.pin_indicator);
+                cardView = itemView.findViewById(R.id.card_layout);
                 ib.setColorFilter(mColorPrimary, android.graphics.PorterDuff.Mode.SRC_IN);
             }
         }
