@@ -257,6 +257,16 @@ public class daemonService extends Service {
         String whitelistStr = sp.getString("whitelist_services", "");
         boolean globalWhitelistEnable = sp.getBoolean("whitelist_global_enable", false);
         String currentForegroundPkg = sp.getString("current_foreground_pkg", "");
+        String foregroundAppLabel = currentForegroundPkg;
+        if (!currentForegroundPkg.isEmpty()) {
+            try {
+                ApplicationInfo appInfo = packageManager.getApplicationInfo(currentForegroundPkg, PackageManager.GET_META_DATA);
+                CharSequence label = appInfo.loadLabel(packageManager);
+                if (label != null) {
+                    foregroundAppLabel = label.toString();
+                }
+            } catch (PackageManager.NameNotFoundException ignored) {}
+        }
 
         java.util.Set<String> daemonSet = new java.util.HashSet<>(java.util.Arrays.asList(daemonStr.split(":")));
         java.util.Set<String> whitelistSet = new java.util.HashSet<>(java.util.Arrays.asList(whitelistStr.split(":")));
@@ -320,11 +330,18 @@ public class daemonService extends Service {
             boolean desiredState = false;
 
             if (isWhitelisted && globalWhitelistEnable) {
-                String whitelist = sp.getString("whitelist_" + normalized, "");
+                String whitelist = sp.getString("whitelist_apps_" + normalized, "");
                 if (whitelist.isEmpty()) {
-                    desiredState = false;
+                    desiredState = true;
                 } else {
-                    desiredState = !whitelist.contains(":" + currentForegroundPkg + ":");
+                    boolean isInWhitelist = false;
+                    for (String pkg : whitelist.split(",")) {
+                        if (pkg.equals(currentForegroundPkg)) {
+                            isInWhitelist = true;
+                            break;
+                        }
+                    }
+                    desiredState = !isInWhitelist;
                 }
             } else if (isLocked) {
                 desiredState = true;
@@ -395,7 +412,11 @@ public class daemonService extends Service {
                 LogUtil.log(daemonService.this, "[状态同步] 开启服务：" + logWhitelistAdded.toString().trim());
             }
             if (logWhitelistRemoved.length() > 0) {
-                LogUtil.log(daemonService.this, "[状态同步] 关闭服务：" + logWhitelistRemoved.toString().trim());
+                String logMsg = "[状态同步] 关闭服务：" + logWhitelistRemoved.toString().trim();
+                if (!foregroundAppLabel.isEmpty()) {
+                    logMsg += " (" + foregroundAppLabel + ")";
+                }
+                LogUtil.log(daemonService.this, logMsg);
             }
             
             if (sp.getBoolean("toast", true) && logAdded.length() > 0) {
