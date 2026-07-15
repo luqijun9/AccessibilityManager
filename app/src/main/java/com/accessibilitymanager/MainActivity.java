@@ -742,6 +742,7 @@ public class MainActivity extends Activity {
                 
                 if (listView != null) {
                     switchToTab(mIsFavoritesTab);
+                    listView.post(() -> listView.scrollToPosition(0));
                     float offset = -100f * getResources().getDisplayMetrics().density;
                     listView.setTranslationX(offset);
                     listView.animate().translationX(0f).setDuration(250).start();
