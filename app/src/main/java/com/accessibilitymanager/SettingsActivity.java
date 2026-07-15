@@ -152,6 +152,23 @@ public class SettingsActivity extends AppCompatActivity {
         }
         toolbar.setNavigationOnClickListener(v -> finish());
 
+        toolbar.setPaddingRelative(
+                toolbar.getPaddingStart(),
+                toolbar.getPaddingTop(),
+                (int) (8 * getResources().getDisplayMetrics().density + 0.5f),
+                toolbar.getPaddingBottom()
+        );
+
+        toolbar.inflateMenu(R.menu.settings_menu);
+        toolbar.setOnMenuItemClickListener(item -> {
+            if (item.getItemId() == R.id.viewlog) {
+                startActivity(new Intent(this, LogActivity.class));
+                overridePendingTransition(R.anim.slide_in_right, R.anim.slide_out_left);
+                return true;
+            }
+            return false;
+        });
+
         if (!night) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 WindowInsetsController controller = getWindow().getInsetsController();

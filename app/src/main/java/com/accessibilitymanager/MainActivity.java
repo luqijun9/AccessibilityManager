@@ -246,10 +246,7 @@ public class MainActivity extends Activity {
                 overridePendingTransition(R.anim.slide_in_right, R.anim.slide_out_left);
                 return true;
             }
-            if (itemId == R.id.viewlog) {
-                startActivity(new Intent(this, LogActivity.class));
-                return true;
-            }
+
             return false;
         });
         updateToolbarMenu();

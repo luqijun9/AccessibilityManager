@@ -11,11 +11,7 @@
         android:icon="@drawable/ic_block"
         app:showAsAction="always"
         android:title="局部关闭" />
-    <item
-        android:id="@+id/viewlog"
-        android:icon="@drawable/ic_log"
-        app:showAsAction="always"
-        android:title="日志" />
+
     <item
         android:id="@+id/search"
         android:icon="@drawable/ic_search"
