@@ -83,7 +83,8 @@ public class MainActivity extends Activity {
 
     private SettingsValueChangeContentObserver mContentOb;  //自定义的内容监视器
     List<AccessibilityServiceInfo> l, tmp;//所有AccessibilityServiceInfo列表，临时列表
-    ListView listView;//列表视图
+    androidx.recyclerview.widget.RecyclerView listView;//列表视图
+    ServiceListAdapter mAdapter;
     SharedPreferences sp;//共享偏好设置
     String settingValue, tmpSettingValue, daemon, top;  //当前设置项值，临时设置项值，守护进程名称，顶部进程名称
     boolean night = true;//是否为夜间模式
@@ -152,25 +153,8 @@ public class MainActivity extends Activity {
                     public void run() {
                         if (mIsWhitelistMode) return; // 不要覆盖白名单模式的UI状态
                         
-                        int firstPosition = listView.getFirstVisiblePosition();
-                        int lastPosition = listView.getLastVisiblePosition();
-                        if (tmp == null || tmp.isEmpty() || firstPosition < 0) return;
-                        lastPosition = Math.min(lastPosition, tmp.size() - 1);
-                        if (firstPosition > lastPosition) return;
-                        
-                        // 取得当前数据源
-                        List<AccessibilityServiceInfo> source = mIsFavoritesTab ? mFavoritesList : ((mFilteredList != null) ? mFilteredList : tmp);
-                        if (source == null || source.isEmpty()) return;
-                        lastPosition = Math.min(lastPosition, source.size() - 1);
-                        
-                        for (int i = firstPosition; i <= lastPosition; i++) {
-                            View view = listView.getChildAt(i - firstPosition);
-                            if (view == null) continue;
-                            boolean isChecked = isServiceEnabled(source.get(i).getId(), settingValue);
-                            View ib = view.findViewById(R.id.ib);
-                            if (ib != null) ib.setVisibility(isChecked ? View.VISIBLE : View.INVISIBLE);
-                            com.google.android.material.materialswitch.MaterialSwitch sw = view.findViewById(R.id.s);
-                            if (sw != null) sw.setChecked(isChecked);
+                        if (mAdapter != null) {
+                            mAdapter.notifyDataSetChanged();
                         }
                     }
                 });
@@ -327,7 +311,7 @@ public class MainActivity extends Activity {
 
 
         listView = findViewById(R.id.list);
-        listView.setEmptyView(findViewById(R.id.empty_view));
+        listView.setLayoutManager(new androidx.recyclerview.widget.LinearLayoutManager(this));
 
         // 列表底部提示
         mPinHint = new TextView(this);
@@ -336,18 +320,19 @@ public class MainActivity extends Activity {
         mPinHint.setTextSize(12f);
         mPinHint.setGravity(Gravity.CENTER);
         mPinHint.setPadding(0, 6, 0, 6);
-        listView.addFooterView(mPinHint, null, false);
+        // mPinHint is handled in adapter
 
         // ListView 滚动监听：FAB 显示/隐藏动画
-        listView.setOnScrollListener(new AbsListView.OnScrollListener() {
+        listView.addOnScrollListener(new androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
             private int mLastFirstVisibleItem = 0;
 
             @Override
-            public void onScrollStateChanged(AbsListView view, int scrollState) {}
-
-            @Override
-            public void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount, int totalItemCount) {
+            public void onScrolled(androidx.recyclerview.widget.RecyclerView recyclerView, int dx, int dy) {
                 if (!mIsFavoritesTab || fabAdd.getVisibility() != View.VISIBLE) return;
+                androidx.recyclerview.widget.LinearLayoutManager layoutManager = (androidx.recyclerview.widget.LinearLayoutManager) recyclerView.getLayoutManager();
+                if (layoutManager == null) return;
+                int firstVisibleItem = layoutManager.findFirstVisibleItemPosition();
+                
                 if (firstVisibleItem > mLastFirstVisibleItem && !mFabHidden) {
                     // 向下滑动 → 隐藏 FAB
                     fabAdd.animate().cancel();
@@ -409,7 +394,7 @@ public class MainActivity extends Activity {
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
-                    listView.setAdapter(new adapter(tmp));
+                    updateAdapter(tmp);
                 }
             });
             // 只要有任意一个加锁服务，启动一次保活服务即可，不需要为每个加锁服务重复启动
@@ -672,7 +657,7 @@ public class MainActivity extends Activity {
             } else {
                 ((TextView) findViewById(R.id.empty_view)).setText("未找到结果");
             }
-            listView.setAdapter(new adapter(mFavoritesList));
+            updateAdapter(mFavoritesList);
         } else {
             // 切换到全部 Tab
             ((TextView) findViewById(R.id.empty_view)).setText("未找到结果");
@@ -682,7 +667,7 @@ public class MainActivity extends Activity {
                 sortForWhitelist(whitelistSorted);
                 source = whitelistSorted;
             }
-            listView.setAdapter(new adapter(source));
+            updateAdapter(source);
         }
     }
 
@@ -1540,6 +1525,16 @@ public class MainActivity extends Activity {
     }
 
     //==================== 搜索功能 ====================
+    private void updateAdapter(List<AccessibilityServiceInfo> newData) {
+        if (mAdapter == null) {
+            mAdapter = new ServiceListAdapter(newData);
+            listView.setAdapter(mAdapter);
+        } else {
+            mAdapter.updateData(newData);
+        }
+        findViewById(R.id.empty_view).setVisibility(newData.isEmpty() ? View.VISIBLE : View.GONE);
+    }
+
     private void enterSearchMode() {
         if (mIsSearching) return;
         mIsSearching = true;
@@ -1603,14 +1598,14 @@ public class MainActivity extends Activity {
                 }
             }
             mFavoritesList = favList;
-            listView.setAdapter(new adapter(mFavoritesList));
+            updateAdapter(mFavoritesList);
             if (mFavoritesList.isEmpty()) {
                 ((TextView) findViewById(R.id.empty_view)).setText("还没有收藏的服务\n点击右下角 + 添加");
             } else {
                 ((TextView) findViewById(R.id.empty_view)).setText("未找到结果");
             }
         } else {
-            listView.setAdapter(new adapter(tmp));
+            updateAdapter(tmp);
         }
         mFilteredList = null;
 
@@ -1649,7 +1644,7 @@ public class MainActivity extends Activity {
 
         if (query.isEmpty()) {
             mFilteredList = null;
-            listView.setAdapter(new adapter(source));
+            updateAdapter(source);
             return;
         }
 
@@ -1696,7 +1691,7 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
         }
 
-        listView.setAdapter(new adapter(mFilteredList));
+        updateAdapter(mFilteredList);
     }
 
     // 首次置顶提示（仅触发一次）
@@ -1793,7 +1788,7 @@ public class MainActivity extends Activity {
             daemon = sp.getString("daemon", "");
 
             // 刷新列表显示
-            runOnUiThread(() -> listView.setAdapter(new adapter(tmp)));
+            runOnUiThread(() -> updateAdapter(tmp));
 
             Toast.makeText(MainActivity.this, "已取消保活并关闭无障碍服务", Toast.LENGTH_SHORT).show();
         });
@@ -1982,48 +1977,61 @@ public class MainActivity extends Activity {
     }
 
     //这个是用于适配列表中的每一项设置项的显示
-    public class adapter extends BaseAdapter {
-        private final List<AccessibilityServiceInfo> list;
+    public class ServiceListAdapter extends androidx.recyclerview.widget.RecyclerView.Adapter<androidx.recyclerview.widget.RecyclerView.ViewHolder> {
+        private static final int TYPE_ITEM = 0;
+        private static final int TYPE_FOOTER = 1;
 
+        private List<AccessibilityServiceInfo> mList = new java.util.ArrayList<>();
 
-        public adapter(List<AccessibilityServiceInfo> list) {
-            super();
-            this.list = list;
+        public ServiceListAdapter(List<AccessibilityServiceInfo> list) {
+            this.mList = new java.util.ArrayList<>(list);
         }
 
-        public int getCount() {
-            return list.size();
+        public void updateData(List<AccessibilityServiceInfo> newList) {
+            androidx.recyclerview.widget.DiffUtil.DiffResult diffResult = androidx.recyclerview.widget.DiffUtil.calculateDiff(new androidx.recyclerview.widget.DiffUtil.Callback() {
+                @Override
+                public int getOldListSize() { return mList.size(); }
+                @Override
+                public int getNewListSize() { return newList.size(); }
+                @Override
+                public boolean areItemsTheSame(int oldItemPosition, int newItemPosition) {
+                    return mList.get(oldItemPosition).getId().equals(newList.get(newItemPosition).getId());
+                }
+                @Override
+                public boolean areContentsTheSame(int oldItemPosition, int newItemPosition) {
+                    return false; // Force rebind to update UI states (Switch/Lock) properly on mode switch
+                }
+            });
+            mList = new java.util.ArrayList<>(newList);
+            diffResult.dispatchUpdatesTo(this);
         }
 
         @Override
-        public Object getItem(int position) {
-            return null;
+        public int getItemCount() { return mList.size() + (mPinHint != null ? 1 : 0); }
+
+        @Override
+        public int getItemViewType(int position) {
+            if (position == mList.size() && mPinHint != null) return TYPE_FOOTER;
+            return TYPE_ITEM;
         }
 
         @Override
-        public long getItemId(int position) {
-            return position;
-        }
-
-        public View getView(int position, View convertView, ViewGroup parent) {
-            ViewHolder holder;
-            if (convertView == null) {
-                convertView = LayoutInflater.from(MainActivity.this).inflate(R.layout.item, null);
-                holder = new ViewHolder();
-                holder.texta = convertView.findViewById(R.id.a);
-                holder.textb = convertView.findViewById(R.id.b);
-                holder.imageView = convertView.findViewById(R.id.c);
-                holder.sw = convertView.findViewById(R.id.s);
-                holder.ib = convertView.findViewById(R.id.ib);
-                holder.pinIndicator = convertView.findViewById(R.id.pin_indicator);
-                
-                holder.ib.setColorFilter(mColorPrimary, android.graphics.PorterDuff.Mode.SRC_IN);
-                
-                convertView.setTag(holder);
-            } else {
-                holder = (ViewHolder) convertView.getTag();
+        public androidx.recyclerview.widget.RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+            if (viewType == TYPE_FOOTER) {
+                if (mPinHint.getParent() != null) ((ViewGroup) mPinHint.getParent()).removeView(mPinHint);
+                mPinHint.setLayoutParams(new androidx.recyclerview.widget.RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                return new androidx.recyclerview.widget.RecyclerView.ViewHolder(mPinHint) {};
             }
-            AccessibilityServiceInfo info = list.get(position);
+            View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item, parent, false);
+            return new ItemViewHolder(view);
+        }
+
+        @Override
+        public void onBindViewHolder(androidx.recyclerview.widget.RecyclerView.ViewHolder rawHolder, int position) {
+            if (getItemViewType(position) == TYPE_FOOTER) return;
+
+            ItemViewHolder holder = (ItemViewHolder) rawHolder;
+            AccessibilityServiceInfo info = mList.get(position);
             String rawServiceName = info.getId();
             String serviceName = normalizeServiceId(rawServiceName);
             ComponentName serviceComponent = ComponentName.unflattenFromString(serviceName);
@@ -2039,24 +2047,25 @@ public class MainActivity extends Activity {
                 ServiceLabel = cache.serviceLabel;
                 Description = cache.description;
             } else {
-                // 缓存未命中时回退到原始加载
                 try {
                     icon = pm.getApplicationIcon(packageName[0]);
                     Packagelabel = String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(packageName[0], PackageManager.GET_META_DATA)));
                     ServiceLabel = pm.getServiceInfo(new ComponentName(packageName[0], packageName[1]), PackageManager.MATCH_DEFAULT_ONLY).loadLabel(pm).toString();
                     Description = info.loadDescription(pm);
-                } catch (PackageManager.NameNotFoundException ignored) {
-                }
+                } catch (PackageManager.NameNotFoundException ignored) {}
             }
             if (ServiceLabel == null) ServiceLabel = Packagelabel;
+            final String finalPackageLabel = Packagelabel;
             holder.imageView.setImageDrawable(icon);
             holder.textb.setText(Packagelabel.equals(ServiceLabel) ? ServiceLabel : String.format("%s/%s", Packagelabel, ServiceLabel));
             holder.texta.setText(Description == null || Description.length() == 0 ? "该服务没有描述" : Description);
+            
+            holder.sw.setOnCheckedChangeListener(null);
+            holder.ib.setOnClickListener(null);
+            holder.itemView.setOnClickListener(null);
+            holder.itemView.setOnLongClickListener(null);
 
             if (mIsWhitelistMode) {
-                // ==========================================
-                // 白名单模式
-                // ==========================================
                 String whitelistServices = sp.getString("whitelist_services", "");
                 boolean isWhitelisted = containsService(whitelistServices, serviceName);
                 boolean globalWhitelistEnable = sp.getBoolean("whitelist_global_enable", false);
@@ -2072,12 +2081,10 @@ public class MainActivity extends Activity {
                         holder.ib.setOnClickListener(v -> showWhitelistAppPickerDialog(serviceName));
                     } else {
                         holder.ib.setAlpha(0.5f);
-                        holder.ib.setOnClickListener(null);
                     }
                 } else {
                     holder.ib.setVisibility(View.INVISIBLE);
                     holder.ib.setAlpha(1.0f);
-                    holder.ib.setOnClickListener(null);
                 }
 
                 holder.sw.setOnClickListener(view -> {
@@ -2089,8 +2096,7 @@ public class MainActivity extends Activity {
                     } else {
                         StringBuilder sb = new StringBuilder();
                         for (String entry : ws.split(":")) {
-                            if (entry.isEmpty()) continue;
-                            if (serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
+                            if (entry.isEmpty() || serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
                             if (sb.length() > 0) sb.append(":");
                             sb.append(entry);
                         }
@@ -2106,30 +2112,24 @@ public class MainActivity extends Activity {
                             holder.ib.setOnClickListener(v -> showWhitelistAppPickerDialog(serviceName));
                         } else {
                             holder.ib.setAlpha(0.5f);
-                            holder.ib.setOnClickListener(null);
                         }
                     } else {
                         holder.ib.setVisibility(View.INVISIBLE);
                         holder.ib.setAlpha(1.0f);
-                        holder.ib.setOnClickListener(null);
                     }
                 });
             } else {
-                // ==========================================
-                // 正常模式
-                // ==========================================
                 holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
                 holder.ib.setOnClickListener(view -> {
                     if (checkPermission()) {
-                        createPermissionDialog();
+                        showNoPermissionDialog(true);
                         return;
                     }
                     if (containsService(daemon, serviceName)) {
                         String[] entries = daemon.split(":");
                         StringBuilder newList = new StringBuilder();
                         for (String entry : entries) {
-                            if (entry.isEmpty()) continue;
-                            if (serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
+                            if (entry.isEmpty() || serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
                             if (newList.length() > 0) newList.append(":");
                             newList.append(entry);
                         }
@@ -2145,236 +2145,124 @@ public class MainActivity extends Activity {
                 holder.ib.setVisibility(holder.sw.isChecked() ? View.VISIBLE : View.INVISIBLE);
                 holder.sw.setOnClickListener(view -> {
                     if (checkPermission()) {
-                        createPermissionDialog();
+                        showNoPermissionDialog(true);
                         holder.sw.setChecked(!holder.sw.isChecked());
                     } else {
                         String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
                         if (s == null) s = "";
 
                         if (holder.sw.isChecked()) {
-                            if (!isServiceEnabled(serviceName, s)) {
-                                tmpSettingValue = serviceName + ":" + s;
-                            } else {
-                                tmpSettingValue = s;
-                            }
+                            if (!isServiceEnabled(serviceName, s)) tmpSettingValue = serviceName + ":" + s;
+                            else tmpSettingValue = s;
                         } else {
                             StringBuilder sb = new StringBuilder();
                             for (String entry : s.split(":")) {
-                                if (entry.isEmpty()) continue;
-                                ComponentName entryCn = ComponentName.unflattenFromString(entry);
-                                if (serviceComponent.equals(entryCn)) continue;
+                                if (entry.isEmpty() || serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
                                 if (sb.length() > 0) sb.append(":");
                                 sb.append(entry);
                             }
                             tmpSettingValue = sb.toString();
                         }
-
                         Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
                         holder.ib.setVisibility(holder.sw.isChecked() ? View.VISIBLE : View.INVISIBLE);
                     }
                 });
             }
 
+            holder.itemView.setOnClickListener(view -> {
+                com.google.android.material.dialog.MaterialAlertDialogBuilder builder = new com.google.android.material.dialog.MaterialAlertDialogBuilder(MainActivity.this);
+                int fb = info.feedbackType;
+                String feedback = "";
+                if ((fb & 32) != 0) feedback += "盲文反馈\n";
+                if ((fb & 16) != 0) feedback += "通用反馈\n";
+                if ((fb & 8) != 0) feedback += "视觉反馈\n";
+                if ((fb & 4) != 0) feedback += "可听（未说出）反馈\n";
+                if ((fb & 2) != 0) feedback += "触觉反馈\n";
+                if ((fb & 1) != 0) feedback += "口头反馈\n";
+                if (feedback.equals("")) feedback = "无\n";
 
-            //点击某个项目的空白处将展示该服务的详细信息，下面的代码是解析各类FLAG的，挺麻烦，不过没别的方法。
-            convertView.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View view) {
-                    com.google.android.material.dialog.MaterialAlertDialogBuilder builder = new com.google.android.material.dialog.MaterialAlertDialogBuilder(MainActivity.this);
-                    int fb = info.feedbackType;
-                    String feedback = "";
-                    if ((fb & 32) != 0) feedback += "盲文反馈\n";
-                    if ((fb & 16) != 0) feedback += "通用反馈\n";
-                    if ((fb & 8) != 0) feedback += "视觉反馈\n";
-                    if ((fb & 4) != 0) feedback += "可听（未说出）反馈\n";
-                    if ((fb & 2) != 0) feedback += "触觉反馈\n";
-                    if ((fb & 1) != 0) feedback += "口头反馈\n";
-                    if (feedback.equals("")) feedback = "无\n";
+                int flag = info.flags;
+                String fLags = "";
+                if ((flag & 1) != 0) fLags += "此服务可能会请求查询所有正在运行的内容并与其交互的权限\n";
+                if ((flag & 2) != 0) fLags += "此服务可以接收不包含UI信息的事件\n";
+                if ((flag & 4) != 0) fLags += "此服务会在触屏探索下，向用户请求服务\n";
+                if ((flag & 8) != 0) fLags += "此服务会在增强网络辅助功能下，向用户请求服务\n";
+                if ((flag & 16) != 0) fLags += "此服务能屏蔽后续事件，如点击长按\n";
+                if ((flag & 32) != 0) fLags += "此服务获取其他应用活动窗口内容的权限\n";
+                if ((flag & 64) != 0) fLags += "请求显示布局边界、焦点等信息的权限\n";
+                if ((flag & 128) != 0) fLags += "服务即使在未开启触摸探索时也能检测到手势\n";
+                if ((flag & 256) != 0) fLags += "请求分发触屏探索事件的权限\n";
+                if ((flag & 512) != 0) fLags += "请求包含所有窗口的信息\n";
+                if ((flag & 1024) != 0) fLags += "请求多显示器支持\n";
+                if ((flag & 4096) != 0) fLags += "提供双指缩放提示权限\n";
+                if (fLags.equals("")) fLags += "无\n";
 
+                String id = info.getId();
+                String sett = info.getSettingsActivityName();
+                if (sett == null || sett.equals("")) sett = "无";
 
-                    int cap = info.getCapabilities();
-                    String capa = "";
-                    if ((cap & 32) != 0) capa += "执行手势\n";
-                    if ((cap & 16) != 0) capa += "控制显示器放大率\n";
-                    if ((cap & 8) != 0) capa += "监听和拦截按键事件\n";
-                    if ((cap & 4) != 0) capa += "请求增强的Web辅助功能增强功能。 例如，安装脚本以使网页内容更易于访问\n";
-                    if ((cap & 2) != 0) capa += "请求触摸探索模式，使触屏操作变成鼠标操作\n";
-                    if ((cap & 1) != 0) capa += "读取屏幕内容\n";
-                    if (capa.equals("")) capa = "无\n";
-
-                    int eve = info.eventTypes;
-                    String event = "";
-                    if ((eve & 33554432) != 0) event += "当前正在阅读用户屏幕上下文的助理事件\n";
-                    if ((eve & 16777216) != 0) event += "点击控件上下文的事件\n";
-                    if ((eve & 8388608) != 0) event += "窗口更改的事件\n";
-                    if ((eve & 4194304) != 0) event += "用户结束触摸屏幕的事件\n";
-                    if ((eve & 2097152) != 0) event += "用户开始触摸屏幕的事件\n";
-                    if ((eve & 1048576) != 0) event += "结束手势检测的事件\n";
-                    if ((eve & 524288) != 0) event += "开始手势检测事件\n";
-                    if ((eve & 262144) != 0) event += "遍历视图文本事件\n";
-                    if ((eve & 131072) != 0) event += "清除可访问性焦点事件\n";
-                    if ((eve & 65536) != 0) event += "获得可访问性焦点的事件\n";
-                    if ((eve & 32768) != 0) event += "发布公告的应用程序的事件\n";
-                    if ((eve & 16384) != 0) event += "更改选中文本的事件\n";
-                    if ((eve & 8192) != 0) event += "滚动视图的事件\n";
-                    if ((eve & 4096) != 0) event += "窗口内容更改的事件\n";
-                    if ((eve & 2048) != 0) event += "结束触摸探索手势的事件\n";
-                    if ((eve & 1024) != 0) event += "开始触摸探索手势的事件\n";
-                    if ((eve & 512) != 0) event += "控件结束文字输入事件\n";
-                    if ((eve & 256) != 0) event += "控件接受文字输入事件\n";
-                    if ((eve & 128) != 0) event += "通知状态改变的事件\n";
-                    if ((eve & 64) != 0) event += "窗口状态更改的事件\n";
-                    if ((eve & 32) != 0) event += "文本框的文字改变事件\n";
-                    if ((eve & 16) != 0) event += "控件获得焦点的事件\n";
-                    if ((eve & 8) != 0) event += "控件被选取的事件\n";
-                    if ((eve & 4) != 0) event += "长按控件的事件\n";
-                    if ((eve & 2) != 0) event += "点击控件的事件\n";
-                    if (event.equals("")) event = "无\n";
-
-
-                    String range = info.packageNames == null ? "全局生效" : Arrays.toString(info.packageNames).replace("[", "").replace("]", "").replace(", ", "\n").replace(",", "\n");
-
-                    int fg = info.flags;
-                    String flag = "";
-                    if ((fg & 64) != 0) flag += "访问所有交互式窗口的内容\n";
-                    if ((fg & 32) != 0) flag += "监听和拦截按键事件\n";
-                    if ((fg & 16) != 0) flag += "获取屏幕视图上所有控件的ID\n";
-                    if ((fg & 8) != 0) flag += "启用Web可访问性增强扩展\n";
-                    if ((fg & 4) != 0) flag += "要求系统进入触摸探索模式\n";
-                    if ((fg & 2) != 0) flag += "查询窗口中的不重要内容\n";
-                    if ((fg & 1) != 0) flag += "默认\n";
-                    if (flag.equals("")) flag = "无\n";
-
-
-                    try {
-                        final ScrollView scrollView = new ScrollView(MainActivity.this);
-                        final TextView textView = new TextView(MainActivity.this);
-                        textView.setTextIsSelectable(true);
-                        textView.setPadding(40, 20, 40, 20);
-                        textView.setTextSize(18f);
-                        textView.setAlpha(0.8f);
-                        textView.setTextColor(night ? Color.WHITE : Color.BLACK);
-                        textView.setText(String.format("服务类名：\n%s\n\n特殊能力：\n%s\n生效范围：\n%s\n\n反馈方式：\n%s\n捕获事件类型：\n%s\n特殊标志：\n%s", serviceName, capa, range, feedback, event, flag));
-                        scrollView.addView(textView);
-                        if (info.getSettingsActivityName() != null && info.getSettingsActivityName().length() > 0)
-                            builder.setNegativeButton("设置", new DialogInterface.OnClickListener() {
-                                @Override
-                                public void onClick(DialogInterface dialogInterface, int i) {
-                                    try {
-                                        startActivity(new Intent().setComponent(new ComponentName(packageName[0], info.getSettingsActivityName())));
-                                    } catch (Exception ignored) {
-                                    }
-                                }
-                            });
-
-                        builder
-                                .setIcon(pm.getApplicationIcon(packageName[0]))
-                                .setView(scrollView).setTitle("服务详细信息")
-                                .setPositiveButton("知道了", null)
-                                .create().show();
-                    } catch (Exception ignored) {
-                    }
-                }
+                builder.setTitle("服务详细信息");
+                builder.setMessage("服务ID：" + id + "\n\n所提供的反馈：" + feedback + "\n相关配置活动名称：" + sett + "\n\n服务Flag标志相关：\n" + fLags);
+                builder.setPositiveButton("复制名称", (dialog, which) -> {
+                    android.content.ClipboardManager clipboardManager = (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                    clipboardManager.setPrimaryClip(android.content.ClipData.newPlainText("label", finalPackageLabel));
+                    Toast.makeText(MainActivity.this, "已复制：" + finalPackageLabel, Toast.LENGTH_SHORT).show();
+                });
+                builder.setNegativeButton("返回", null);
+                builder.show();
             });
-            String finalServiceLabel = ServiceLabel;
-            if (mIsFavoritesTab) {
-                // 收藏 Tab：长按取消收藏
-                convertView.setOnLongClickListener(v -> {
-                    removeFromFavorites(serviceName);
-                    Toast.makeText(MainActivity.this, "已取消收藏" + finalServiceLabel, Toast.LENGTH_SHORT).show();
-                    switchToTab(true);
-                    return true;
-                });
-            } else {
-                // 全部服务 Tab：长按置顶/取消置顶
-                convertView.setOnLongClickListener(v -> {
-                    if (!containsService(top, serviceName)) {
-                        top = serviceName + ":" + top;
-                        Toast.makeText(MainActivity.this, "已将" + finalServiceLabel + "置顶", Toast.LENGTH_SHORT).show();
-                    } else {
-                        String[] entries = top.split(":");
-                        StringBuilder newTop = new StringBuilder();
-                        for (String entry : entries) {
-                            if (entry.isEmpty()) continue;
-                            if (serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
-                            if (newTop.length() > 0) newTop.append(":");
-                            newTop.append(entry);
-                        }
-                        top = newTop.toString();
-                        Toast.makeText(MainActivity.this, "已将" + finalServiceLabel + "取消置顶", Toast.LENGTH_SHORT).show();
+
+            if (containsService(favorites, serviceName)) holder.pinIndicator.setVisibility(View.VISIBLE);
+            else holder.pinIndicator.setVisibility(View.GONE);
+
+            holder.itemView.setOnLongClickListener(v -> {
+                String currentFavs = sp.getString("favorites", "");
+                if (containsService(currentFavs, serviceName)) {
+                    String[] favArray = currentFavs.split(":");
+                    StringBuilder newFavs = new StringBuilder();
+                    for (String entry : favArray) {
+                        if (entry.isEmpty() || entry.equals(serviceName)) continue;
+                        if (newFavs.length() > 0) newFavs.append(":");
+                        newFavs.append(entry);
                     }
-                    sp.edit().putString("top", top).apply();
-                    Sort();
-                    runOnUiThread(() -> {
-                        if (mIsFavoritesTab) {
-                            switchToTab(true);
-                        } else {
-                            listView.setAdapter(new adapter(tmp));
-                        }
-                    });
-                    return true;
-                });
-            }
-            if (top.contains(serviceName))
-                holder.pinIndicator.setVisibility(View.VISIBLE);
-            else
-                holder.pinIndicator.setVisibility(View.GONE);
-            return convertView;
+                    favorites = newFavs.toString();
+                    Toast.makeText(MainActivity.this, "已取消收藏", Toast.LENGTH_SHORT).show();
+                } else {
+                    if (!currentFavs.isEmpty()) favorites = serviceName + ":" + currentFavs;
+                    else favorites = serviceName;
+                    Toast.makeText(MainActivity.this, "已收藏，将置顶显示", Toast.LENGTH_SHORT).show();
+                }
+                sp.edit().putString("favorites", favorites).apply();
+                
+                mFavoritesList = new java.util.ArrayList<>();
+                for (AccessibilityServiceInfo servInfo : l) {
+                    if (isServiceFavorite(normalizeServiceId(servInfo.getId()))) mFavoritesList.add(servInfo);
+                }
+                switchToTab(mIsFavoritesTab);
+                return true;
+            });
         }
 
-        private void createPermissionDialog() {
-            String pkg = getPackageName();
-            String cmd = "adb shell \"pm grant " + pkg + " android.permission.WRITE_SECURE_SETTINGS; pm grant " + pkg + " android.permission.DUMP\"";
-            String rootCmd = "pm grant " + pkg + " android.permission.WRITE_SECURE_SETTINGS; pm grant " + pkg + " android.permission.DUMP";
-            new com.google.android.material.dialog.MaterialAlertDialogBuilder(MainActivity.this)
-                    .setMessage("安卓5.1和更低版本的设备，需将本APP转换为系统应用。\n\n安卓6.0及更高版本的设备，在下面三个方法中任选一个均可：\n1.连接电脑USB调试后在电脑CMD执行以下命令：\n" + cmd + "\n\n2.root激活。\n\n3.Shizuku激活。")
-                    .setTitle("需要授予权限")
-                    .setPositiveButton("复制命令", new DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface dialogInterface, int i) {
-                            ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("c", cmd));
-                            Toast.makeText(MainActivity.this, "命令已复制到剪切板", Toast.LENGTH_SHORT).show();
-                        }
-                    })
-                    .setNegativeButton("root激活", new DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface dialoginterface, int i) {
-                            Process p;
-                            try {
-                                p = Runtime.getRuntime().exec("su");
-                                DataOutputStream o = new DataOutputStream(p.getOutputStream());
-                                o.writeBytes(rootCmd + "\nexit\n");
-                                o.flush();
-                                o.close();
-                                p.waitFor();
-                                if (p.exitValue() == 0) {
-                                    Toast.makeText(MainActivity.this, "成功激活", Toast.LENGTH_SHORT).show();
-                                }
-                            } catch (IOException | InterruptedException ignored) {
-                                Toast.makeText(MainActivity.this, "激活失败", Toast.LENGTH_SHORT).show();
-                            }
-                        }
-                    })
-                    .setNeutralButton("Shizuku激活", new DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface dialogInterface, int i) {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) check();
-                        }
-                    })
-                    .create().show();
-        }
-
-        class ViewHolder {
-
-            TextView texta;
-            TextView textb;
+        class ItemViewHolder extends androidx.recyclerview.widget.RecyclerView.ViewHolder {
+            TextView texta, textb;
             ImageView imageView;
             com.google.android.material.materialswitch.MaterialSwitch sw;
             ImageButton ib;
             View pinIndicator;
-        }
 
+            public ItemViewHolder(View itemView) {
+                super(itemView);
+                texta = itemView.findViewById(R.id.a);
+                textb = itemView.findViewById(R.id.b);
+                imageView = itemView.findViewById(R.id.c);
+                sw = itemView.findViewById(R.id.s);
+                ib = itemView.findViewById(R.id.ib);
+                pinIndicator = itemView.findViewById(R.id.pin_indicator);
+                ib.setColorFilter(mColorPrimary, android.graphics.PorterDuff.Mode.SRC_IN);
+            }
+        }
     }
+
 
     static class ServiceCache {
         Drawable icon;
@@ -2532,7 +2420,7 @@ public class MainActivity extends Activity {
                 if (mIsFavoritesTab) {
                     switchToTab(true);
                 } else {
-                    listView.setAdapter(new adapter(tmp));
+                    updateAdapter(tmp);
                 }
             });
         }
