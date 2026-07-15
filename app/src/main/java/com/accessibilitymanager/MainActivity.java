@@ -573,6 +573,7 @@ public class MainActivity extends Activity {
 
 
     private void switchToTab(boolean isFavorites) {
+        boolean tabChanged = (mIsFavoritesTab != isFavorites);
         mIsFavoritesTab = isFavorites;
         updateTitleView();
         
@@ -624,6 +625,10 @@ public class MainActivity extends Activity {
             mPinHint.setText("长按服务项可将其置顶");
             mPinHint.setVisibility(View.VISIBLE);
             updateAdapter(source);
+        }
+
+        if (tabChanged && listView != null) {
+            listView.scrollToPosition(0);
         }
     }
 
