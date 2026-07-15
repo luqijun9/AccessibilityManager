@@ -626,7 +626,7 @@ public class WhitelistActivity extends AppCompatActivity {
                     }
                 });
 
-                android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
+                androidx.appcompat.app.AlertDialog dialog = new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
                         .setTitle("配置应用白名单")
                         .setView(dialogView)
                         .setPositiveButton("保存", (d, which) -> {
