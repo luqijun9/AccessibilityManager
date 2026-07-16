@@ -1083,30 +1083,11 @@ public class SettingsActivity extends AppCompatActivity {
     private void showIntervalDialog(Runnable onSaved) {
         int currentInterval = sp.getInt("periodic_check_interval", 10);
 
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.HORIZONTAL);
-        layout.setPadding(40, 20, 40, 20);
-
-        final EditText input = new EditText(this);
-        input.setHint("10");
+        View layout = getLayoutInflater().inflate(R.layout.dialog_time_input, null);
+        final com.google.android.material.textfield.TextInputEditText input = layout.findViewById(R.id.edit_text);
+        final com.google.android.material.textfield.TextInputLayout inputLayout = layout.findViewById(R.id.text_input_layout);
+        inputLayout.setHint("定时检测间隔");
         input.setText(String.valueOf(currentInterval));
-        input.setInputType(InputType.TYPE_CLASS_NUMBER);
-        LinearLayout.LayoutParams inputParams = new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        input.setLayoutParams(inputParams);
-        layout.addView(input);
-
-        TextView unit = new TextView(this);
-        unit.setText("分钟");
-        unit.setTextSize(16f);
-        if (night)
-            unit.setTextColor(Color.WHITE);
-        LinearLayout.LayoutParams unitParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        unitParams.leftMargin = 16;
-        unit.setLayoutParams(unitParams);
-        layout.addView(unit);
 
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle("设置定时检测间隔（非精确时间）")
@@ -1147,30 +1128,11 @@ public class SettingsActivity extends AppCompatActivity {
     private void showCooldownTimeDialog() {
         int currentCooldown = sp.getInt("global_cooldown_time_minutes", 15);
 
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.HORIZONTAL);
-        layout.setPadding(40, 20, 40, 20);
-
-        final EditText input = new EditText(this);
-        input.setHint("15");
+        View layout = getLayoutInflater().inflate(R.layout.dialog_time_input, null);
+        final com.google.android.material.textfield.TextInputEditText input = layout.findViewById(R.id.edit_text);
+        final com.google.android.material.textfield.TextInputLayout inputLayout = layout.findViewById(R.id.text_input_layout);
+        inputLayout.setHint("全局冷却时间");
         input.setText(String.valueOf(currentCooldown));
-        input.setInputType(InputType.TYPE_CLASS_NUMBER);
-        LinearLayout.LayoutParams inputParams = new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        input.setLayoutParams(inputParams);
-        layout.addView(input);
-
-        TextView unit = new TextView(this);
-        unit.setText("分钟");
-        unit.setTextSize(16f);
-        if (night)
-            unit.setTextColor(Color.WHITE);
-        LinearLayout.LayoutParams unitParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        unitParams.leftMargin = 16;
-        unit.setLayoutParams(unitParams);
-        layout.addView(unit);
 
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
                 .setTitle("设置全局冷却时间")
