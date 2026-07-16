@@ -636,7 +636,10 @@ public class MainActivity extends Activity {
         android.graphics.drawable.Drawable icon = getResources().getDrawable(mIsFavoritesTab ? R.drawable.ic_star : R.drawable.ic_grid).mutate();
         icon.setColorFilter(textColor, android.graphics.PorterDuff.Mode.SRC_IN);
         mTitleText.setCompoundDrawablesRelativeWithIntrinsicBounds(icon, null, null, null);
-        if (mArrowDown != null) mArrowDown.setVisibility(android.view.View.VISIBLE);
+        if (mArrowDown != null) {
+            mArrowDown.setVisibility(android.view.View.VISIBLE);
+            mArrowDown.setColorFilter(textColor, android.graphics.PorterDuff.Mode.SRC_IN);
+        }
         
         if (mMenu != null) {
             for (int i = 0; i < mMenu.size(); i++) {
@@ -672,9 +675,30 @@ public class MainActivity extends Activity {
         layout.setGravity(android.view.Gravity.CENTER_VERTICAL);
         layout.setClickable(true);
         layout.setFocusable(true);
-        TypedArray ta = getTheme().obtainStyledAttributes(new int[]{android.R.attr.selectableItemBackground});
-        Drawable bg = ta.getDrawable(0);
-        ta.recycle();
+        int paddingHorizontal = (int) (12 * getResources().getDisplayMetrics().density + 0.5f);
+        int paddingVertical = (int) (6 * getResources().getDisplayMetrics().density + 0.5f);
+        layout.setPadding(paddingHorizontal, paddingVertical, paddingHorizontal, paddingVertical);
+
+        android.util.TypedValue typedValue = new android.util.TypedValue();
+        getTheme().resolveAttribute(R.attr.colorPrimary, typedValue, true);
+        int primaryColor = typedValue.data;
+        int rippleColor = android.graphics.Color.argb(
+                51, // 20% 透明度
+                android.graphics.Color.red(primaryColor),
+                android.graphics.Color.green(primaryColor),
+                android.graphics.Color.blue(primaryColor)
+        );
+
+        android.graphics.drawable.GradientDrawable mask = new android.graphics.drawable.GradientDrawable();
+        mask.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+        mask.setCornerRadius(1000); // 胶囊形状
+        mask.setColor(android.graphics.Color.WHITE);
+
+        android.graphics.drawable.RippleDrawable bg = new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(rippleColor),
+                null,
+                mask
+        );
         layout.setBackground(bg);
 
         mTitleText = new TextView(this);
@@ -687,9 +711,9 @@ public class MainActivity extends Activity {
         mArrowDown = new ImageView(this);
         int arrowSize = (int) (16 * getResources().getDisplayMetrics().density + 0.5f);
         mArrowDown.setLayoutParams(new LinearLayout.LayoutParams(arrowSize, arrowSize));
-        mArrowDown.setImageResource(R.drawable.ic_arrow_down);
+        mArrowDown.setImageResource(R.drawable.ic_swap);
         mArrowDown.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        int arrowMargin = (int) (2 * getResources().getDisplayMetrics().density + 0.5f);
+        int arrowMargin = (int) (4 * getResources().getDisplayMetrics().density + 0.5f);
         ((LinearLayout.LayoutParams) mArrowDown.getLayoutParams()).setMarginStart(arrowMargin);
         updateTitleView();
 
@@ -697,7 +721,7 @@ public class MainActivity extends Activity {
         layout.addView(mArrowDown);
 
         layout.setOnClickListener(v -> {
-            showTabSwitcherPopup(v);
+            switchToTab(!mIsFavoritesTab);
         });
 
         toolbar.addView(layout, new Toolbar.LayoutParams(
@@ -709,31 +733,7 @@ public class MainActivity extends Activity {
         mTitleView = layout;
     }
 
-    private void showTabSwitcherPopup(View anchor) {
-        View contentView = getLayoutInflater().inflate(R.layout.popup_tab_switcher, null);
-        PopupWindow popup = new PopupWindow(contentView,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                true);
-        popup.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
-        popup.setElevation(8);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            contentView.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            popup.setEnterTransition(new android.transition.Fade());
-        }
-        popup.showAsDropDown(anchor, (int) (-10 * getResources().getDisplayMetrics().density + 0.5f), (int) (8 * getResources().getDisplayMetrics().density + 0.5f));
 
-        contentView.findViewById(R.id.item_all).setOnClickListener(v -> {
-            switchToTab(false);
-            popup.dismiss();
-        });
-        contentView.findViewById(R.id.item_fav).setOnClickListener(v -> {
-            switchToTab(true);
-            popup.dismiss();
-        });
-    }
 
     private boolean isServiceFavorite(String serviceId) {
         return containsService(favorites, serviceId);
