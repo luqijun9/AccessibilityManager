@@ -814,9 +814,13 @@ public class SettingsActivity extends AppCompatActivity {
     class ServiceItem {
         String serviceId;
         String label;
-        String labelPinyin;
+        String packageLabelPinyin;
+        String serviceLabelPinyin;
         boolean isChecked;
-        ServiceItem(String id, String l, boolean c) { serviceId = id; label = l; isChecked = c; labelPinyin = PinyinUtils.getPinyin(l); }
+        ServiceItem(String id, String l, boolean c, String pkgPinyin, String svcPinyin) { 
+            serviceId = id; label = l; isChecked = c; 
+            packageLabelPinyin = pkgPinyin; serviceLabelPinyin = svcPinyin;
+        }
     }
 
     private void showFixmodeServicesDialog() {
@@ -849,7 +853,23 @@ public class SettingsActivity extends AppCompatActivity {
             CharSequence label = info.getResolveInfo().loadLabel(pm);
             String labelStr = label != null ? label.toString() : id;
             boolean isChecked = !disabledStr.contains(id);
-            allItems.add(new ServiceItem(id, labelStr, isChecked));
+            
+            String[] parts = id.split("/");
+            String appLabel = "";
+            String svcLabel = "";
+            if (parts.length >= 2) {
+                try {
+                    CharSequence pkgLabel = pm.getApplicationLabel(pm.getApplicationInfo(parts[0], PackageManager.GET_META_DATA));
+                    appLabel = pkgLabel != null ? pkgLabel.toString() : parts[0];
+                    svcLabel = pm.getServiceInfo(new ComponentName(parts[0], parts[1]), PackageManager.MATCH_DEFAULT_ONLY).loadLabel(pm).toString();
+                } catch (Exception e) {}
+            } else {
+                appLabel = labelStr;
+            }
+            String pkgPinyin = PinyinUtils.getPinyin(appLabel);
+            String svcPinyin = PinyinUtils.getPinyin(svcLabel);
+            
+            allItems.add(new ServiceItem(id, labelStr, isChecked, pkgPinyin, svcPinyin));
         }
 
         if (allItems.isEmpty()) {
@@ -858,9 +878,13 @@ public class SettingsActivity extends AppCompatActivity {
         }
 
         java.util.Collections.sort(allItems, (o1, o2) -> {
-            String pinyin1 = o1.labelPinyin != null ? o1.labelPinyin : "";
-            String pinyin2 = o2.labelPinyin != null ? o2.labelPinyin : "";
-            return pinyin1.compareToIgnoreCase(pinyin2);
+            int compare = (o1.packageLabelPinyin != null ? o1.packageLabelPinyin : "").compareToIgnoreCase(
+                          o2.packageLabelPinyin != null ? o2.packageLabelPinyin : "");
+            if (compare == 0) {
+                compare = (o1.serviceLabelPinyin != null ? o1.serviceLabelPinyin : "").compareToIgnoreCase(
+                          o2.serviceLabelPinyin != null ? o2.serviceLabelPinyin : "");
+            }
+            return compare;
         });
 
         View dialogView = getLayoutInflater().inflate(R.layout.dialog_add_favorites, null);
