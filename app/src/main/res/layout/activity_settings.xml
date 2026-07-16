@@ -569,149 +569,157 @@
                     android:layout_marginRight="16dp"
                     android:background="@color/divider" />
 
-                <!-- 定时检测状态 -->
                 <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:minHeight="72dp"
-                    android:paddingLeft="20dp"
-                    android:paddingRight="16dp"
-                    android:paddingTop="12dp"
-                    android:paddingBottom="12dp"
-                    android:background="?android:attr/selectableItemBackground"
-                    android:clickable="true"
-                    android:focusable="true">
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:paddingRight="16dp">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="定时检测"
-                            android:textColor="@color/text_primary"
-                            android:textSize="16sp" />
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="在后台每隔一段时间自动轮询检测崩溃服务"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="13sp"
-                            android:layout_marginTop="2dp" />
-                    </LinearLayout>
-
-                    <com.google.android.material.materialswitch.MaterialSwitch
-                        android:id="@+id/periodic_check"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:clickable="true"
-                        android:focusable="false" />
-                </LinearLayout>
-
-                <!-- 定时检测的子项容器 (动态显隐) -->
-                <LinearLayout
-                    android:id="@+id/periodic_sub_layout"
+                    android:id="@+id/periodic_wrapper"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:visibility="gone">
-
-                    <!-- 息屏空闲时强制检测 (子开关) -->
+                    android:layout_marginHorizontal="8dp"
+                    android:layout_marginVertical="4dp">
+                    <!-- 定时检测状态 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:gravity="center_vertical"
-                        android:minHeight="64dp"
-                        android:paddingLeft="40dp"
-                        android:paddingRight="16dp"
-                        android:paddingTop="8dp"
-                    android:paddingBottom="8dp"
-                    android:background="?android:attr/selectableItemBackground"
-                    android:clickable="true"
-                    android:focusable="true">
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:paddingRight="16dp">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="深度休眠时检测"
-                            android:textColor="@color/text_primary"
-                            android:textSize="15sp" />
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="开启后将可在深度休眠时执行定时检测，可能增加耗电"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="13sp"
-                            android:layout_marginTop="2dp" />
-                    </LinearLayout>
-
-                    <com.google.android.material.materialswitch.MaterialSwitch
-                        android:id="@+id/periodic_check_wake_idle"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
+                        android:minHeight="72dp"
+                        android:paddingLeft="12dp"
+                        android:paddingRight="8dp"
+                        android:paddingTop="12dp"
+                        android:paddingBottom="12dp"
+                        android:background="?android:attr/selectableItemBackground"
                         android:clickable="true"
-                        android:focusable="false" />
-                </LinearLayout>
+                        android:focusable="true">
 
-                <!-- 设定检测间隔 (子设置) -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:minHeight="64dp"
-                    android:paddingLeft="40dp"
-                    android:paddingRight="16dp"
-                    android:paddingTop="8dp"
-                    android:paddingBottom="8dp"
-                    android:background="?android:attr/selectableItemBackground"
-                    android:clickable="true"
-                    android:focusable="true">
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical"
+                            android:paddingRight="16dp">
 
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:paddingRight="16dp">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="定时检测"
+                                android:textColor="@color/text_primary"
+                                android:textSize="16sp" />
 
-                        <TextView
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="在后台每隔一段时间自动轮询检测崩溃服务"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="13sp"
+                                android:layout_marginTop="2dp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/periodic_check"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="设定检测间隔"
-                            android:textColor="@color/text_primary"
-                            android:textSize="15sp" />
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="点击修改定时器的时间间隔"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="13sp"
-                            android:layout_marginTop="2dp" />
+                            android:clickable="true"
+                            android:focusable="false" />
                     </LinearLayout>
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/periodic_interval_label"
-                        style="@style/Widget.Material3.Button.TonalButton"
-                        android:layout_width="wrap_content"
+
+                    <!-- 定时检测的子项容器 (动态显隐) -->
+                    <LinearLayout
+                        android:id="@+id/periodic_sub_layout"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:minWidth="0dp"
-                        android:paddingLeft="16dp"
-                        android:paddingRight="16dp"
-                        android:text="10分钟" />
-                </LinearLayout>
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <!-- 息屏空闲时强制检测 (子开关) -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:minHeight="64dp"
+                            android:paddingLeft="12dp"
+                            android:paddingRight="8dp"
+                            android:paddingTop="8dp"
+                            android:paddingBottom="8dp"
+                            android:background="?android:attr/selectableItemBackground"
+                            android:clickable="true"
+                            android:focusable="true">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical"
+                                android:paddingRight="16dp">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="深度休眠时检测"
+                                    android:textColor="@color/text_primary"
+                                    android:textSize="15sp" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="开启后将可在深度休眠时执行定时检测，可能增加耗电"
+                                    android:textColor="@color/text_secondary"
+                                    android:textSize="13sp"
+                                    android:layout_marginTop="2dp" />
+                            </LinearLayout>
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/periodic_check_wake_idle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:clickable="true"
+                                android:focusable="false" />
+                        </LinearLayout>
+
+                        <!-- 设定检测间隔 (子设置) -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:minHeight="64dp"
+                            android:paddingLeft="12dp"
+                            android:paddingRight="8dp"
+                            android:paddingTop="8dp"
+                            android:paddingBottom="8dp"
+                            android:background="?android:attr/selectableItemBackground"
+                            android:clickable="true"
+                            android:focusable="true">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical"
+                                android:paddingRight="16dp">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="设定检测间隔"
+                                    android:textColor="@color/text_primary"
+                                    android:textSize="15sp" />
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="点击修改定时器的时间间隔"
+                                    android:textColor="@color/text_secondary"
+                                    android:textSize="13sp"
+                                    android:layout_marginTop="2dp" />
+                            </LinearLayout>
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/periodic_interval_label"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:minWidth="0dp"
+                                android:paddingLeft="16dp"
+                                android:paddingRight="16dp"
+                                android:text="10分钟" />
+                        </LinearLayout>
+                    </LinearLayout>
                 </LinearLayout>
 
                 <View
@@ -721,168 +729,68 @@
                     android:layout_marginRight="16dp"
                     android:background="@color/divider" />
 
-                <!-- 先强杀应用再重启服务 -->
                 <LinearLayout
+                    android:id="@+id/fixmode_wrapper"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:minHeight="72dp"
-                    android:paddingLeft="20dp"
-                    android:paddingRight="16dp"
-                    android:paddingTop="12dp"
-                    android:paddingBottom="12dp"
-                    android:background="?android:attr/selectableItemBackground"
-                    android:clickable="true"
-                    android:focusable="true">
-
+                    android:orientation="vertical"
+                    android:layout_marginHorizontal="8dp"
+                    android:layout_marginVertical="4dp">
+                    <!-- 先强杀应用再重启服务 -->
                     <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:paddingRight="16dp">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="先强杀应用再重启服务"
-                            android:textColor="@color/text_primary"
-                            android:textSize="16sp" />
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="需 Shizuku/Root 权限，若崩溃服务重启仍崩溃，可尝试此功能"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="13sp"
-                            android:layout_marginTop="2dp" />
-                    </LinearLayout>
-
-                    <com.google.android.material.materialswitch.MaterialSwitch
-                        android:id="@+id/fixmode"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:clickable="true"
-                        android:focusable="false" />
-                </LinearLayout>
-
-                <!-- 强杀重启服务选择 (子设置) -->
-                <LinearLayout
-                    android:id="@+id/fixmode_services_layout"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:visibility="gone"
-                    android:minHeight="64dp"
-                    android:paddingLeft="40dp"
-                    android:paddingRight="16dp"
-                    android:paddingTop="8dp"
-                    android:paddingBottom="8dp"
-                    android:background="?android:attr/selectableItemBackground"
-                    android:clickable="true"
-                    android:focusable="true">
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:paddingRight="16dp">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="选择强杀重启的服务"
-                            android:textColor="@color/text_primary"
-                            android:textSize="15sp" />
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="控制哪些服务允许被强杀"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="13sp"
-                            android:layout_marginTop="2dp" />
-                    </LinearLayout>
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/fixmode_services_btn"
-                        style="@style/Widget.Material3.Button.TonalButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:minWidth="0dp"
-                        android:paddingLeft="16dp"
-                        android:paddingRight="16dp"
-                        android:text="设置"
-                        android:textSize="14sp" />
-                </LinearLayout>
-
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginLeft="20dp"
-                    android:layout_marginRight="16dp"
-                    android:background="@color/divider" />
-
-                <!-- 崩溃检测全局冷却开关 -->
-                <LinearLayout
-                    android:id="@+id/global_cooldown_enable_layout"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:minHeight="72dp"
-                    android:paddingLeft="20dp"
-                    android:paddingRight="16dp"
-                    android:paddingTop="12dp"
-                    android:paddingBottom="12dp"
-                    android:background="?android:attr/selectableItemBackground"
-                    android:clickable="true"
-                    android:focusable="true">
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:paddingRight="16dp">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="崩溃检测全局冷却"
-                            android:textColor="@color/text_primary"
-                            android:textSize="16sp" />
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="限制自动触发检测(解锁/服务变化)的频率以节省电量。手动操作及定时检测不受此限制"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="13sp"
-                            android:layout_marginTop="2dp" />
-                    </LinearLayout>
-
-                    <com.google.android.material.materialswitch.MaterialSwitch
-                        android:id="@+id/global_cooldown_enable"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:clickable="true"
-                        android:focusable="false" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:id="@+id/global_cooldown_sub_layout"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical">
-
-                    <!-- 设定全局冷却时间 (子设置) -->
-                    <LinearLayout
-                        android:id="@+id/global_cooldown_time_layout"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:gravity="center_vertical"
+                        android:minHeight="72dp"
+                        android:paddingLeft="12dp"
+                        android:paddingRight="8dp"
+                        android:paddingTop="12dp"
+                        android:paddingBottom="12dp"
+                        android:background="?android:attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical"
+                            android:paddingRight="16dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="先强杀应用再重启服务"
+                                android:textColor="@color/text_primary"
+                                android:textSize="16sp" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="需 Shizuku/Root 权限，若崩溃服务重启仍崩溃，可尝试此功能"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="13sp"
+                                android:layout_marginTop="2dp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/fixmode"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:clickable="true"
+                            android:focusable="false" />
+                    </LinearLayout>
+
+                    <!-- 强杀重启服务选择 (子设置) -->
+                    <LinearLayout
+                        android:id="@+id/fixmode_services_layout"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:visibility="gone"
                         android:minHeight="64dp"
-                        android:paddingLeft="40dp"
-                        android:paddingRight="16dp"
+                        android:paddingLeft="12dp"
+                        android:paddingRight="8dp"
                         android:paddingTop="8dp"
                         android:paddingBottom="8dp"
                         android:background="?android:attr/selectableItemBackground"
@@ -899,27 +807,144 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="设定全局冷却时间"
+                                android:text="选择强杀重启的服务"
                                 android:textColor="@color/text_primary"
                                 android:textSize="15sp" />
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="点击修改冷却时间的间隔"
+                                android:text="控制哪些服务允许被强杀"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="13sp"
                                 android:layout_marginTop="2dp" />
                         </LinearLayout>
-
                         <com.google.android.material.button.MaterialButton
-                            android:id="@+id/global_cooldown_time"
+                            android:id="@+id/fixmode_services_btn"
                             style="@style/Widget.Material3.Button.TonalButton"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:minWidth="0dp"
                             android:paddingLeft="16dp"
                             android:paddingRight="16dp"
-                            android:text="15分钟" />
+                            android:text="设置"
+                            android:textSize="14sp" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginLeft="20dp"
+                    android:layout_marginRight="16dp"
+                    android:background="@color/divider" />
+
+                <LinearLayout
+                    android:id="@+id/global_cooldown_wrapper"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginHorizontal="8dp"
+                    android:layout_marginVertical="4dp">
+                    <!-- 崩溃检测全局冷却开关 -->
+                    <LinearLayout
+                        android:id="@+id/global_cooldown_enable_layout"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:minHeight="72dp"
+                        android:paddingLeft="12dp"
+                        android:paddingRight="8dp"
+                        android:paddingTop="12dp"
+                        android:paddingBottom="12dp"
+                        android:background="?android:attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical"
+                            android:paddingRight="16dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="崩溃检测全局冷却"
+                                android:textColor="@color/text_primary"
+                                android:textSize="16sp" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="限制自动触发检测(解锁/服务变化)的频率以节省电量。手动操作及定时检测不受此限制"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="13sp"
+                                android:layout_marginTop="2dp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/global_cooldown_enable"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:clickable="true"
+                            android:focusable="false" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/global_cooldown_sub_layout"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <!-- 设定全局冷却时间 (子设置) -->
+                        <LinearLayout
+                            android:id="@+id/global_cooldown_time_layout"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:minHeight="64dp"
+                            android:paddingLeft="12dp"
+                            android:paddingRight="8dp"
+                            android:paddingTop="8dp"
+                            android:paddingBottom="8dp"
+                            android:background="?android:attr/selectableItemBackground"
+                            android:clickable="true"
+                            android:focusable="true">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical"
+                                android:paddingRight="16dp">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="设定全局冷却时间"
+                                    android:textColor="@color/text_primary"
+                                    android:textSize="15sp" />
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="点击修改冷却时间的间隔"
+                                    android:textColor="@color/text_secondary"
+                                    android:textSize="13sp"
+                                    android:layout_marginTop="2dp" />
+                            </LinearLayout>
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/global_cooldown_time"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:minWidth="0dp"
+                                android:paddingLeft="16dp"
+                                android:paddingRight="16dp"
+                                android:text="15分钟" />
+                        </LinearLayout>
                     </LinearLayout>
                 </LinearLayout>
 

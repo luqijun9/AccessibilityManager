@@ -49,6 +49,7 @@ public class SettingsActivity extends AppCompatActivity {
     private LinearLayout crashDependentLayout, fixmodeServicesLayout, periodicSubLayout, globalCooldownTimeLayout,
             globalCooldownEnableLayout, globalCooldownSubLayout;
     private View fixmodeServicesBtn;
+    private View fixmodeWrapper, globalCooldownWrapper, periodicWrapper;
     private TextView intervalLabel, notifyCustomBtn, crashTutorialBtn, aboutBtn, checkUpdateBtn,
             globalCooldownTimeLabel;
     private View btnThemeColor;
@@ -221,6 +222,9 @@ public class SettingsActivity extends AppCompatActivity {
         checkUpdateBtn = findViewById(R.id.check_update_btn);
         btnThemeColor = findViewById(R.id.btn_theme_color);
         tvThemeDesc = findViewById(R.id.tv_theme_desc);
+        fixmodeWrapper = findViewById(R.id.fixmode_wrapper);
+        globalCooldownWrapper = findViewById(R.id.global_cooldown_wrapper);
+        periodicWrapper = findViewById(R.id.periodic_wrapper);
     }
 
     private void loadValues() {
@@ -234,6 +238,7 @@ public class SettingsActivity extends AppCompatActivity {
         boolean globalCooldownEnabled = sp.getBoolean("global_cooldown_enable", false);
         switchGlobalCooldown.setChecked(globalCooldownEnabled);
         globalCooldownSubLayout.setVisibility(globalCooldownEnabled ? View.VISIBLE : View.GONE);
+        globalCooldownWrapper.setBackgroundResource(globalCooldownEnabled ? R.drawable.bg_nested_setting : 0);
         globalCooldownTimeLabel.setText(sp.getInt("global_cooldown_time_minutes", 15) + "分钟");
         switchUnlockCrashCheck.setChecked(sp.getBoolean("unlock_crash_check", false));
         switchFixMode.setChecked(sp.getBoolean("fixmode", false));
@@ -318,6 +323,7 @@ public class SettingsActivity extends AppCompatActivity {
                 android.transition.TransitionManager.beginDelayedTransition((android.view.ViewGroup) rootView);
             }
             globalCooldownSubLayout.setVisibility(checked ? View.VISIBLE : View.GONE);
+            globalCooldownWrapper.setBackgroundResource(checked ? R.drawable.bg_nested_setting : 0);
         });
 
         globalCooldownEnableLayout.setOnClickListener(v -> switchGlobalCooldown.toggle());
@@ -791,6 +797,7 @@ public class SettingsActivity extends AppCompatActivity {
         }
         if (periodicSubLayout != null) {
             periodicSubLayout.setVisibility(periodicEnabled ? View.VISIBLE : View.GONE);
+            periodicWrapper.setBackgroundResource(periodicEnabled ? R.drawable.bg_nested_setting : 0);
         }
 
         switchUnlockCrashCheck.setEnabled(crashFixEnabled);
@@ -804,6 +811,7 @@ public class SettingsActivity extends AppCompatActivity {
         if (fixmodeServicesLayout != null) {
             fixmodeServicesLayout.setEnabled(fixModeEnabled);
             fixmodeServicesLayout.setVisibility(fixModeEnabled ? View.VISIBLE : View.GONE);
+            fixmodeWrapper.setBackgroundResource(fixModeEnabled ? R.drawable.bg_nested_setting : 0);
         }
         if (fixmodeServicesBtn != null)
             fixmodeServicesBtn.setEnabled(fixModeEnabled);
