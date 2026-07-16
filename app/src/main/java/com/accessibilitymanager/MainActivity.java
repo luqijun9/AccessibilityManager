@@ -1759,7 +1759,7 @@ public class MainActivity extends Activity {
             holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
             holder.ib.setOnClickListener(view -> {
                 if (checkPermission()) {
-                    showNoPermissionDialog(true);
+                    createPermissionDialog();
                     return;
                 }
                 if (containsService(daemon, serviceName)) {
@@ -1784,7 +1784,7 @@ public class MainActivity extends Activity {
             
             holder.sw.setOnClickListener(view -> {
                 if (checkPermission()) {
-                    showNoPermissionDialog(true);
+                    createPermissionDialog();
                     holder.sw.setChecked(!holder.sw.isChecked());
                 } else {
                     String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
@@ -1994,6 +1994,48 @@ public class MainActivity extends Activity {
                 cardView = itemView.findViewById(R.id.card_layout);
                 ib.setColorFilter(mColorPrimary, android.graphics.PorterDuff.Mode.SRC_IN);
             }
+        }
+
+        private void createPermissionDialog() {
+            String pkg = getPackageName();
+            String cmd = "adb shell \"pm grant " + pkg + " android.permission.WRITE_SECURE_SETTINGS; pm grant " + pkg + " android.permission.DUMP\"";
+            String rootCmd = "pm grant " + pkg + " android.permission.WRITE_SECURE_SETTINGS; pm grant " + pkg + " android.permission.DUMP";
+            new com.google.android.material.dialog.MaterialAlertDialogBuilder(MainActivity.this)
+                    .setMessage("安卓5.1和更低版本的设备，需将本APP转换为系统应用。\n\n安卓6.0及更高版本的设备，在下面三个方法中任选一个均可：\n1.连接电脑USB调试后在电脑CMD执行以下命令：\n" + cmd + "\n\n2.root激活。\n\n3.Shizuku激活。")
+                    .setTitle("需要授予权限")
+                    .setPositiveButton("复制命令", new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialogInterface, int i) {
+                            ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("c", cmd));
+                            Toast.makeText(MainActivity.this, "命令已复制到剪切板", Toast.LENGTH_SHORT).show();
+                        }
+                    })
+                    .setNegativeButton("root激活", new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialoginterface, int i) {
+                            Process p;
+                            try {
+                                p = Runtime.getRuntime().exec("su");
+                                java.io.DataOutputStream o = new java.io.DataOutputStream(p.getOutputStream());
+                                o.writeBytes(rootCmd + "\nexit\n");
+                                o.flush();
+                                o.close();
+                                p.waitFor();
+                                if (p.exitValue() == 0) {
+                                    Toast.makeText(MainActivity.this, "成功激活", Toast.LENGTH_SHORT).show();
+                                }
+                            } catch (java.io.IOException | InterruptedException ignored) {
+                                Toast.makeText(MainActivity.this, "激活失败", Toast.LENGTH_SHORT).show();
+                            }
+                        }
+                    })
+                    .setNeutralButton("Shizuku激活", new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialogInterface, int i) {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) check();
+                        }
+                    })
+                    .create().show();
         }
     }
 
