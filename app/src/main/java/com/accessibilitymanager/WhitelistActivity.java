@@ -344,10 +344,25 @@ public class WhitelistActivity extends AppCompatActivity {
         
         class Wrapper {
             AccessibilityServiceInfo info;
-            String labelPinyin;
+            String packageLabelPinyin;
+            String serviceLabelPinyin;
             Wrapper(AccessibilityServiceInfo info) {
                 this.info = info;
-                this.labelPinyin = PinyinUtils.getPinyin(info.getResolveInfo().loadLabel(getPackageManager()).toString());
+                String serviceId = normalizeServiceId(info.getId());
+                String[] parts = serviceId.split("/");
+                String appLabel = "";
+                String svcLabel = "";
+                if (parts.length >= 2) {
+                    try {
+                        CharSequence pkgLabel = getPackageManager().getApplicationLabel(getPackageManager().getApplicationInfo(parts[0], PackageManager.GET_META_DATA));
+                        appLabel = pkgLabel != null ? pkgLabel.toString() : parts[0];
+                        svcLabel = getPackageManager().getServiceInfo(new ComponentName(parts[0], parts[1]), PackageManager.MATCH_DEFAULT_ONLY).loadLabel(getPackageManager()).toString();
+                    } catch (Exception e) {}
+                } else {
+                    appLabel = info.getResolveInfo().loadLabel(getPackageManager()).toString();
+                }
+                this.packageLabelPinyin = PinyinUtils.getPinyin(appLabel);
+                this.serviceLabelPinyin = PinyinUtils.getPinyin(svcLabel);
             }
         }
         
@@ -374,7 +389,11 @@ public class WhitelistActivity extends AppCompatActivity {
                 if (own1 && !own2) return -1;
                 if (!own1 && own2) return 1;
 
-                return w1.labelPinyin.compareToIgnoreCase(w2.labelPinyin);
+                int compareName = w1.packageLabelPinyin.compareToIgnoreCase(w2.packageLabelPinyin);
+                if (compareName == 0) {
+                    compareName = w1.serviceLabelPinyin.compareToIgnoreCase(w2.serviceLabelPinyin);
+                }
+                return compareName;
             }
         });
         
