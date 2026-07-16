@@ -358,7 +358,7 @@
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/notify_custom_btn"
-                        style="@style/Widget.Material3.Button.TonalButton"
+                        style="@style/Widget.Material3.Button"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:minWidth="0dp"
@@ -711,7 +711,7 @@
                             </LinearLayout>
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/periodic_interval_label"
-                                style="@style/Widget.Material3.Button.TonalButton"
+                                style="@style/Widget.Material3.Button"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:minWidth="0dp"
@@ -820,7 +820,7 @@
                         </LinearLayout>
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/fixmode_services_btn"
-                            style="@style/Widget.Material3.Button.TonalButton"
+                            style="@style/Widget.Material3.Button"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:minWidth="0dp"
@@ -937,7 +937,7 @@
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/global_cooldown_time"
-                                style="@style/Widget.Material3.Button.TonalButton"
+                                style="@style/Widget.Material3.Button"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:minWidth="0dp"
@@ -1122,7 +1122,7 @@
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/check_update_btn"
-                        style="@style/Widget.Material3.Button.TonalButton"
+                        style="@style/Widget.Material3.Button"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:minWidth="0dp"
@@ -1178,7 +1178,7 @@
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/about_btn"
-                        style="@style/Widget.Material3.Button.TonalButton"
+                        style="@style/Widget.Material3.Button"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:minWidth="0dp"
