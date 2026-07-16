@@ -84,6 +84,28 @@
                 android:textColor="@color/text_hint"
                 android:textSize="16sp"
                 android:visibility="gone" />
+                
+            <TextView
+                android:id="@+id/sidebar_bubble"
+                android:layout_width="60dp"
+                android:layout_height="60dp"
+                android:layout_gravity="top|end"
+                android:layout_marginEnd="40dp"
+                android:background="@drawable/bg_sidebar_bubble"
+                android:gravity="center"
+                android:textColor="@android:color/white"
+                android:textSize="28sp"
+                android:textStyle="bold"
+                android:visibility="gone"
+                android:elevation="4dp" />
+
+            <com.accessibilitymanager.SideBar
+                android:id="@+id/sidebar"
+                android:layout_width="20dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical|end"
+                android:visibility="gone" />
+                
         </FrameLayout>
 
         <!-- ===== FAB 添加收藏按钮 ===== -->

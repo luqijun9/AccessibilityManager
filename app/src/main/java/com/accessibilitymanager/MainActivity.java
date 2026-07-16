@@ -104,6 +104,10 @@ public class MainActivity extends Activity {
     private List<AccessibilityServiceInfo> mFavoritesList;
     private TextView mPinHint;
     private final Map<String, ServiceCache> mServiceCache = new HashMap<>();
+    
+    private SideBar sidebar;
+    private TextView sidebarBubble;
+    private int mFirstNormalItemIndex = 0;
 
     static class AppCacheItem {
         ApplicationInfo info;
@@ -308,6 +312,45 @@ public class MainActivity extends Activity {
 
         listView = findViewById(R.id.list);
         listView.setLayoutManager(new androidx.recyclerview.widget.LinearLayoutManager(this));
+
+        sidebar = findViewById(R.id.sidebar);
+        sidebarBubble = findViewById(R.id.sidebar_bubble);
+
+        sidebar.setOnTouchingLetterChangedListener(new SideBar.OnTouchingLetterChangedListener() {
+            @Override
+            public void onTouchingLetterChanged(String s, float touchY) {
+                sidebarBubble.setText(s);
+                sidebarBubble.setVisibility(View.VISIBLE);
+                // touchY 是相对于 sidebar 的内部坐标，需要加上 sidebar.getTop() 转换为父容器坐标
+                sidebarBubble.setTranslationY(sidebar.getTop() + touchY - sidebarBubble.getHeight() / 2f);
+
+                if (mAdapter != null && mAdapter.mList != null) {
+                    List<AccessibilityServiceInfo> list = mAdapter.mList;
+                    for (int i = mFirstNormalItemIndex; i < list.size(); i++) {
+                        AccessibilityServiceInfo info = list.get(i);
+                        String id = info.getId();
+
+                        ServiceCache cache = mServiceCache.get(normalizeServiceId(id));
+                        String pinyin = cache != null && cache.packageLabelPinyin != null ? cache.packageLabelPinyin : "";
+                        if (pinyin.length() > 0) {
+                            String firstLetter = pinyin.substring(0, 1).toUpperCase();
+                            if (firstLetter.compareTo(s) >= 0) {
+                                androidx.recyclerview.widget.LinearLayoutManager llm = (androidx.recyclerview.widget.LinearLayoutManager) listView.getLayoutManager();
+                                if (llm != null) {
+                                    llm.scrollToPositionWithOffset(i, 0);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            @Override
+            public void onTouchEnd() {
+                sidebarBubble.setVisibility(View.GONE);
+            }
+        });
 
         // 列表底部提示
         mPinHint = new TextView(this);
@@ -523,6 +566,16 @@ public class MainActivity extends Activity {
                 return compareName;
             }
         });
+
+        mFirstNormalItemIndex = 0;
+        for (int i = 0; i < tmp.size(); i++) {
+            String id = tmp.get(i).getId();
+            if (containsService(top, id) || isServiceEnabled(id, currentSetting) || id.equals(ownServiceId)) {
+                mFirstNormalItemIndex = i + 1;
+            } else {
+                break;
+            }
+        }
     }
 
     private boolean isUserApp(AccessibilityServiceInfo info) {
@@ -626,6 +679,14 @@ public class MainActivity extends Activity {
 
         if (tabChanged && listView != null) {
             listView.scrollToPosition(0);
+        }
+        
+        if (sidebar != null) {
+            if (effectivelyFavorites || mIsSearching || (tmp != null && tmp.size() < 10)) {
+                sidebar.setVisibility(View.GONE);
+            } else {
+                sidebar.setVisibility(View.VISIBLE);
+            }
         }
     }
 
@@ -1390,6 +1451,9 @@ public class MainActivity extends Activity {
     private void enterSearchMode() {
         if (mIsSearching) return;
         mIsSearching = true;
+        if (sidebar != null) {
+            sidebar.setVisibility(View.GONE);
+        }
 
         //隐藏标题和菜单项
         toolbar.setTitle("");
@@ -1441,6 +1505,15 @@ public class MainActivity extends Activity {
 
         //刷新排序并恢复完整列表
         Sort();
+        
+        if (sidebar != null) {
+            if (mIsFavoritesTab || (tmp != null && tmp.size() < 10)) {
+                sidebar.setVisibility(View.GONE);
+            } else {
+                sidebar.setVisibility(View.VISIBLE);
+            }
+        }
+        
         if (mIsFavoritesTab) {
             // 收藏 Tab → 恢复收藏列表
             List<AccessibilityServiceInfo> favList = new ArrayList<>();
