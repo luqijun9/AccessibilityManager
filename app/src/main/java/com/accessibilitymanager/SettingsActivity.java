@@ -29,7 +29,11 @@ import android.widget.LinearLayout;
 import com.google.android.material.materialswitch.MaterialSwitch;
 import android.widget.TextView;
 import android.widget.Toast;
-
+import java.util.List;
+import java.util.ArrayList;
+import android.widget.ListView;
+import android.widget.BaseAdapter;
+import android.view.ViewGroup;
 import rikka.shizuku.Shizuku;
 
 public class SettingsActivity extends AppCompatActivity {
@@ -807,6 +811,13 @@ public class SettingsActivity extends AppCompatActivity {
 
     // ========== 对话框 ==========
 
+    class ServiceItem {
+        String serviceId;
+        String label;
+        boolean isChecked;
+        ServiceItem(String id, String l, boolean c) { serviceId = id; label = l; isChecked = c; }
+    }
+
     private void showFixmodeServicesDialog() {
         if (!switchFixMode.isChecked())
             return;
@@ -816,21 +827,10 @@ public class SettingsActivity extends AppCompatActivity {
                         .getSystemService(Context.ACCESSIBILITY_SERVICE)).getInstalledAccessibilityServiceList());
 
         final PackageManager pm = getPackageManager();
-        java.util.Collections.sort(list,
-                new java.util.Comparator<android.accessibilityservice.AccessibilityServiceInfo>() {
-                    @Override
-                    public int compare(android.accessibilityservice.AccessibilityServiceInfo o1,
-                            android.accessibilityservice.AccessibilityServiceInfo o2) {
-                        CharSequence label1 = o1.getResolveInfo().loadLabel(pm);
-                        CharSequence label2 = o2.getResolveInfo().loadLabel(pm);
-                        String s1 = label1 != null ? label1.toString() : o1.getId();
-                        String s2 = label2 != null ? label2.toString() : o2.getId();
-                        return java.text.Collator.getInstance(java.util.Locale.CHINA).compare(s1, s2);
-                    }
-                });
+        String disabledStr = sp.getString("fixmode_disabled_services", "");
 
-        java.util.List<String> serviceNames = new java.util.ArrayList<>();
-        java.util.List<String> serviceIds = new java.util.ArrayList<>();
+        List<ServiceItem> allItems = new ArrayList<>();
+
         for (android.accessibilityservice.AccessibilityServiceInfo info : list) {
             String id = info.getId();
             // 排除无障碍管理器自身
@@ -845,59 +845,119 @@ public class SettingsActivity extends AppCompatActivity {
                 }
             }
 
-            CharSequence label = info.getResolveInfo().loadLabel(getPackageManager());
-            serviceNames.add(label != null ? label.toString() : id);
-            serviceIds.add(id);
+            CharSequence label = info.getResolveInfo().loadLabel(pm);
+            String labelStr = label != null ? label.toString() : id;
+            boolean isChecked = !disabledStr.contains(id);
+            allItems.add(new ServiceItem(id, labelStr, isChecked));
         }
 
-        if (serviceNames.isEmpty()) {
+        if (allItems.isEmpty()) {
             Toast.makeText(this, "未找到其他无障碍服务", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        CharSequence[] items = serviceNames.toArray(new CharSequence[0]);
-        boolean[] checkedItems = new boolean[items.length];
+        java.util.Collections.sort(allItems, (o1, o2) -> java.text.Collator.getInstance(java.util.Locale.CHINA).compare(o1.label, o2.label));
 
-        String disabledStr = sp.getString("fixmode_disabled_services", "");
-        for (int i = 0; i < items.length; i++) {
-            checkedItems[i] = !disabledStr.contains(serviceIds.get(i));
+        View dialogView = getLayoutInflater().inflate(R.layout.dialog_add_favorites, null);
+        android.widget.EditText editSearch = dialogView.findViewById(R.id.edit_search);
+        ListView listFavorites = dialogView.findViewById(R.id.list_favorites);
+
+        class ServiceAdapter extends BaseAdapter {
+            List<ServiceItem> displayedItems = new ArrayList<>(allItems);
+
+            @Override public int getCount() { return displayedItems.size(); }
+            @Override public ServiceItem getItem(int position) { return displayedItems.get(position); }
+            @Override public long getItemId(int position) { return position; }
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                if (convertView == null) {
+                    convertView = getLayoutInflater().inflate(android.R.layout.simple_list_item_multiple_choice, parent, false);
+                }
+                android.widget.CheckedTextView ctv = (android.widget.CheckedTextView) convertView;
+                ServiceItem item = getItem(position);
+                ctv.setText(item.label);
+                ctv.setChecked(item.isChecked);
+                
+                android.graphics.drawable.Drawable icon = null;
+                try {
+                    String packageName = item.serviceId.split("/")[0];
+                    icon = pm.getApplicationIcon(packageName);
+                } catch (Exception ignored) {}
+                
+                if (icon != null) {
+                    icon = icon.getConstantState().newDrawable().mutate();
+                    int size = (int) (32 * getResources().getDisplayMetrics().density + 0.5f);
+                    icon.setBounds(0, 0, size, size);
+                    ctv.setCompoundDrawables(icon, null, null, null);
+                    ctv.setCompoundDrawablePadding((int) (12 * getResources().getDisplayMetrics().density + 0.5f));
+                } else {
+                    ctv.setCompoundDrawables(null, null, null, null);
+                }
+                
+                ctv.setOnClickListener(v -> {
+                    item.isChecked = !item.isChecked;
+                    ctv.setChecked(item.isChecked);
+                });
+                return convertView;
+            }
+
+            public void filter(String text) {
+                String filterString = text.toLowerCase();
+                List<ServiceItem> filtered = new ArrayList<>();
+                for (ServiceItem item : allItems) {
+                    if (item.label.toLowerCase().contains(filterString)) {
+                        filtered.add(item);
+                    }
+                }
+                displayedItems = filtered;
+                notifyDataSetChanged();
+            }
         }
 
-        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(this);
-        builder.setTitle("选择强杀重启的服务");
-        builder.setMultiChoiceItems(items, checkedItems, (dialog, which, isChecked) -> {
-            checkedItems[which] = isChecked;
-        });
-        builder.setPositiveButton("确定", (dialog, which) -> {
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < items.length; i++) {
-                if (!checkedItems[i]) {
-                    if (sb.length() > 0)
-                        sb.append(":");
-                    sb.append(serviceIds.get(i));
-                }
-            }
-            sp.edit().putString("fixmode_disabled_services", sb.toString()).apply();
-        });
-        builder.setNegativeButton("取消", null);
-        builder.setNeutralButton("全选/全不选", null);
+        ServiceAdapter adapter = new ServiceAdapter();
+        listFavorites.setAdapter(adapter);
 
-        androidx.appcompat.app.AlertDialog dialog = builder.create();
+        editSearch.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(android.text.Editable s) {
+                adapter.filter(s.toString());
+            }
+        });
+
+        androidx.appcompat.app.AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+                .setTitle("选择强杀重启的服务")
+                .setView(dialogView)
+                .setPositiveButton("确定", (d, which) -> {
+                    StringBuilder sb = new StringBuilder();
+                    for (ServiceItem item : allItems) {
+                        if (!item.isChecked) {
+                            if (sb.length() > 0)
+                                sb.append(":");
+                            sb.append(item.serviceId);
+                        }
+                    }
+                    sp.edit().putString("fixmode_disabled_services", sb.toString()).apply();
+                })
+                .setNegativeButton("取消", null)
+                .setNeutralButton("全选/全不选", null)
+                .create();
+
         dialog.show();
 
         dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+            if (adapter.displayedItems.isEmpty()) return;
             boolean allChecked = true;
-            for (boolean b : checkedItems) {
-                if (!b) {
+            for (ServiceItem item : adapter.displayedItems) {
+                if (!item.isChecked) {
                     allChecked = false;
                     break;
                 }
             }
             boolean targetState = !allChecked;
-            for (int i = 0; i < checkedItems.length; i++) {
-                checkedItems[i] = targetState;
-                dialog.getListView().setItemChecked(i, targetState);
+            for (ServiceItem item : adapter.displayedItems) {
+                item.isChecked = targetState;
             }
+            adapter.notifyDataSetChanged();
         });
     }
 
