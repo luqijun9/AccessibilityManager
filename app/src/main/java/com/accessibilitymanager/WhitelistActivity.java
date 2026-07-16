@@ -77,9 +77,11 @@ public class WhitelistActivity extends AppCompatActivity {
     static class AppCacheItem {
         ApplicationInfo info;
         String label;
+        String labelPinyin;
         Drawable icon;
         AppCacheItem(ApplicationInfo info, String label, Drawable icon) {
             this.info = info; this.label = label; this.icon = icon;
+            this.labelPinyin = PinyinUtils.getPinyin(label);
         }
     }
 
@@ -338,14 +340,27 @@ public class WhitelistActivity extends AppCompatActivity {
 
     private void sortForWhitelist(List<AccessibilityServiceInfo> list) {
         String whitelistServices = sp.getString("whitelist_services", "");
-        final java.text.Collator collator = java.text.Collator.getInstance(java.util.Locale.CHINA);
         final ComponentName ownCn = ComponentName.unflattenFromString(new ComponentName(this, MyAccessibilityService.class).flattenToString());
         
-        Collections.sort(list, new Comparator<AccessibilityServiceInfo>() {
+        class Wrapper {
+            AccessibilityServiceInfo info;
+            String labelPinyin;
+            Wrapper(AccessibilityServiceInfo info) {
+                this.info = info;
+                this.labelPinyin = PinyinUtils.getPinyin(info.getResolveInfo().loadLabel(getPackageManager()).toString());
+            }
+        }
+        
+        List<Wrapper> wrappers = new java.util.ArrayList<>(list.size());
+        for (AccessibilityServiceInfo info : list) {
+            wrappers.add(new Wrapper(info));
+        }
+
+        Collections.sort(wrappers, new Comparator<Wrapper>() {
             @Override
-            public int compare(AccessibilityServiceInfo info1, AccessibilityServiceInfo info2) {
-                String id1 = info1.getId();
-                String id2 = info2.getId();
+            public int compare(Wrapper w1, Wrapper w2) {
+                String id1 = w1.info.getId();
+                String id2 = w2.info.getId();
                 
                 boolean enabled1 = containsService(whitelistServices, normalizeServiceId(id1));
                 boolean enabled2 = containsService(whitelistServices, normalizeServiceId(id2));
@@ -359,11 +374,14 @@ public class WhitelistActivity extends AppCompatActivity {
                 if (own1 && !own2) return -1;
                 if (!own1 && own2) return 1;
 
-                String label1 = info1.getResolveInfo().loadLabel(getPackageManager()).toString();
-                String label2 = info2.getResolveInfo().loadLabel(getPackageManager()).toString();
-                return collator.compare(label1, label2);
+                return w1.labelPinyin.compareToIgnoreCase(w2.labelPinyin);
             }
         });
+        
+        list.clear();
+        for (Wrapper w : wrappers) {
+            list.add(w.info);
+        }
     }
 
     private boolean containsService(String services, String serviceName) {
@@ -523,7 +541,9 @@ public class WhitelistActivity extends AppCompatActivity {
                 if (aChecked != bChecked) {
                     return aChecked ? -1 : 1;
                 }
-                return java.text.Collator.getInstance().compare(a.label, b.label);
+                String pinyinA = a.labelPinyin != null ? a.labelPinyin : "";
+                String pinyinB = b.labelPinyin != null ? b.labelPinyin : "";
+                return pinyinA.compareToIgnoreCase(pinyinB);
             });
 
             runOnUiThread(() -> {

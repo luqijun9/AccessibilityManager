@@ -814,8 +814,9 @@ public class SettingsActivity extends AppCompatActivity {
     class ServiceItem {
         String serviceId;
         String label;
+        String labelPinyin;
         boolean isChecked;
-        ServiceItem(String id, String l, boolean c) { serviceId = id; label = l; isChecked = c; }
+        ServiceItem(String id, String l, boolean c) { serviceId = id; label = l; isChecked = c; labelPinyin = PinyinUtils.getPinyin(l); }
     }
 
     private void showFixmodeServicesDialog() {
@@ -856,7 +857,11 @@ public class SettingsActivity extends AppCompatActivity {
             return;
         }
 
-        java.util.Collections.sort(allItems, (o1, o2) -> java.text.Collator.getInstance(java.util.Locale.CHINA).compare(o1.label, o2.label));
+        java.util.Collections.sort(allItems, (o1, o2) -> {
+            String pinyin1 = o1.labelPinyin != null ? o1.labelPinyin : "";
+            String pinyin2 = o2.labelPinyin != null ? o2.labelPinyin : "";
+            return pinyin1.compareToIgnoreCase(pinyin2);
+        });
 
         View dialogView = getLayoutInflater().inflate(R.layout.dialog_add_favorites, null);
         android.widget.EditText editSearch = dialogView.findViewById(R.id.edit_search);
