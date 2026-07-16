@@ -101,7 +101,7 @@
 
             <com.accessibilitymanager.SideBar
                 android:id="@+id/sidebar"
-                android:layout_width="20dp"
+                android:layout_width="23dp"
                 android:layout_height="wrap_content"
                 android:layout_gravity="center_vertical|end"
                 android:visibility="gone" />

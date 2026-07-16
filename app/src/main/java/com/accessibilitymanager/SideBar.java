@@ -62,7 +62,9 @@ public class SideBar extends View {
                 paint.setColor(Color.parseColor("#3399ff"));
                 paint.setFakeBoldText(true);
             }
-            float xPos = width / 2f - paint.measureText(b[i]) / 2f;
+            // 保持文字的视觉中心距离右侧边缘刚好 8dp
+            float textCenter = width - getResources().getDisplayMetrics().density * 8;
+            float xPos = textCenter - paint.measureText(b[i]) / 2f;
             float yPos = singleHeight * i + singleHeight;
             canvas.drawText(b[i], xPos, yPos, paint);
             paint.reset();
