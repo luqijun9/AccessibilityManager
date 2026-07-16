@@ -533,7 +533,8 @@ public class WhitelistActivity extends AppCompatActivity {
                 View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_whitelist_apps, null);
                 EditText searchEdit = dialogView.findViewById(R.id.edit_search_app);
                 ListView listViewDialog = dialogView.findViewById(R.id.list_apps);
-                android.widget.CheckBox checkSelectAll = dialogView.findViewById(R.id.check_select_all);
+                android.widget.CheckedTextView checkSelectAll = dialogView.findViewById(R.id.check_select_all);
+                Runnable[] updateSelectAllState = new Runnable[1];
 
                 class AppAdapter extends BaseAdapter implements android.widget.Filterable {
                     private List<AppCacheItem> originalList = userApps;
@@ -567,6 +568,9 @@ public class WhitelistActivity extends AppCompatActivity {
                             } else {
                                 checkedPkgs.remove(item.info.packageName);
                             }
+                            if (updateSelectAllState[0] != null) {
+                                updateSelectAllState[0].run();
+                            }
                         });
                         return convertView;
                     }
@@ -599,6 +603,9 @@ public class WhitelistActivity extends AppCompatActivity {
                             protected void publishResults(CharSequence constraint, FilterResults results) {
                                 filteredList = (List<AppCacheItem>) results.values;
                                 notifyDataSetChanged();
+                                if (updateSelectAllState[0] != null) {
+                                    updateSelectAllState[0].run();
+                                }
                             }
                         };
                     }
@@ -607,14 +614,34 @@ public class WhitelistActivity extends AppCompatActivity {
                 AppAdapter adapter = new AppAdapter();
                 listViewDialog.setAdapter(adapter);
                 
-                checkSelectAll.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                View.OnClickListener selectAllListener = v -> {
+                    boolean isChecked = !checkSelectAll.isChecked();
+                    checkSelectAll.setChecked(isChecked);
                     if (isChecked) {
-                        for (AppCacheItem item : adapter.filteredList) checkedPkgs.add(item.info.packageName);
+                        for (AppCacheItem item : adapter.originalList) checkedPkgs.add(item.info.packageName);
                     } else {
-                        for (AppCacheItem item : adapter.filteredList) checkedPkgs.remove(item.info.packageName);
+                        for (AppCacheItem item : adapter.originalList) checkedPkgs.remove(item.info.packageName);
                     }
                     adapter.notifyDataSetChanged();
-                });
+                };
+                checkSelectAll.setOnClickListener(selectAllListener);
+                
+                updateSelectAllState[0] = () -> {
+                    if (adapter.originalList == null || adapter.originalList.isEmpty()) {
+                        checkSelectAll.setChecked(false);
+                        return;
+                    }
+                    boolean allChecked = true;
+                    for (AppCacheItem item : adapter.originalList) {
+                        if (!checkedPkgs.contains(item.info.packageName)) {
+                            allChecked = false;
+                            break;
+                        }
+                    }
+                    checkSelectAll.setChecked(allChecked);
+                };
+
+                updateSelectAllState[0].run();
                 
                 searchEdit.addTextChangedListener(new TextWatcher() {
                     @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
@@ -622,7 +649,6 @@ public class WhitelistActivity extends AppCompatActivity {
                     @Override
                     public void afterTextChanged(Editable s) {
                         adapter.getFilter().filter(s);
-                        checkSelectAll.setChecked(false);
                     }
                 });
 
