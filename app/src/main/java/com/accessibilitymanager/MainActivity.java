@@ -702,6 +702,7 @@ public class MainActivity extends Activity {
             mArrowDown.setColorFilter(textColor, android.graphics.PorterDuff.Mode.SRC_IN);
         }
         
+        
         if (mMenu != null) {
             for (int i = 0; i < mMenu.size(); i++) {
                 android.view.MenuItem item = mMenu.getItem(i);
@@ -736,9 +737,10 @@ public class MainActivity extends Activity {
         layout.setGravity(android.view.Gravity.CENTER_VERTICAL);
         layout.setClickable(true);
         layout.setFocusable(true);
-        int paddingHorizontal = (int) (12 * getResources().getDisplayMetrics().density + 0.5f);
+        int paddingLeft = (int) (12 * getResources().getDisplayMetrics().density + 0.5f);
+        int paddingRight = (int) (8 * getResources().getDisplayMetrics().density + 0.5f);
         int paddingVertical = (int) (6 * getResources().getDisplayMetrics().density + 0.5f);
-        layout.setPadding(paddingHorizontal, paddingVertical, paddingHorizontal, paddingVertical);
+        layout.setPadding(paddingLeft, paddingVertical, paddingRight, paddingVertical);
 
         android.util.TypedValue typedValue = new android.util.TypedValue();
         getTheme().resolveAttribute(R.attr.colorPrimary, typedValue, true);
@@ -755,12 +757,25 @@ public class MainActivity extends Activity {
         mask.setCornerRadius(1000); // 胶囊形状
         mask.setColor(android.graphics.Color.WHITE);
 
+        
+        android.graphics.drawable.GradientDrawable baseBg = new android.graphics.drawable.GradientDrawable();
+        baseBg.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+        baseBg.setCornerRadius(1000);
+        android.util.TypedValue tvSurface = new android.util.TypedValue();
+        getTheme().resolveAttribute(com.google.android.material.R.attr.colorSecondaryContainer, tvSurface, true);
+        baseBg.setColor(tvSurface.data);
+
         android.graphics.drawable.RippleDrawable bg = new android.graphics.drawable.RippleDrawable(
                 android.content.res.ColorStateList.valueOf(rippleColor),
-                null,
+                baseBg,
                 mask
         );
         layout.setBackground(bg);
+        // 增加阴影，使其看起来像一个凸起的实体按钮
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+            layout.setElevation(6 * getResources().getDisplayMetrics().density);
+            layout.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
+        }
 
         mTitleText = new TextView(this);
         mTitleText.setTextSize(18);
@@ -771,13 +786,13 @@ public class MainActivity extends Activity {
 
         mArrowDown = new ImageView(this);
         int arrowSize = (int) (16 * getResources().getDisplayMetrics().density + 0.5f);
-        mArrowDown.setLayoutParams(new LinearLayout.LayoutParams(arrowSize, arrowSize));
-        mArrowDown.setImageResource(R.drawable.ic_swap);
+        mArrowDown.setLayoutParams(new android.widget.LinearLayout.LayoutParams(arrowSize, arrowSize));
+        mArrowDown.setImageResource(R.drawable.ic_unfold_more);
         mArrowDown.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        int arrowMargin = (int) (4 * getResources().getDisplayMetrics().density + 0.5f);
-        ((LinearLayout.LayoutParams) mArrowDown.getLayoutParams()).setMarginStart(arrowMargin);
+        int arrowMargin = 0; // Moved icon to the left as requested
+        ((android.widget.LinearLayout.LayoutParams) mArrowDown.getLayoutParams()).setMarginStart(arrowMargin);
+        
         updateTitleView();
-
         layout.addView(mTitleText);
         layout.addView(mArrowDown);
 
@@ -1468,6 +1483,8 @@ public class MainActivity extends Activity {
         Toolbar.LayoutParams params = new Toolbar.LayoutParams(
                 Toolbar.LayoutParams.MATCH_PARENT,
                 Toolbar.LayoutParams.MATCH_PARENT);
+        // XML中的margin在inflate null parent时会失效，必须在这里通过代码设置！
+        params.setMarginStart((int) (24 * getResources().getDisplayMetrics().density + 0.5f));
         toolbar.addView(mSearchView, params);
 
         mSearchInput = mSearchView.findViewById(R.id.search_input);
