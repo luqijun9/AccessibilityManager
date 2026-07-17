@@ -699,7 +699,13 @@ public class MainActivity extends Activity {
         mTitleText.setCompoundDrawablesRelativeWithIntrinsicBounds(icon, null, null, null);
         if (mArrowDown != null) {
             mArrowDown.setVisibility(android.view.View.VISIBLE);
-            mArrowDown.setColorFilter(textColor, android.graphics.PorterDuff.Mode.SRC_IN);
+            int arrowColor = android.graphics.Color.argb(
+                    102, // 40% alpha to make it look lighter/weaker
+                    android.graphics.Color.red(textColor),
+                    android.graphics.Color.green(textColor),
+                    android.graphics.Color.blue(textColor)
+            );
+            mArrowDown.setColorFilter(arrowColor, android.graphics.PorterDuff.Mode.SRC_IN);
         }
         
         
@@ -761,9 +767,7 @@ public class MainActivity extends Activity {
         android.graphics.drawable.GradientDrawable baseBg = new android.graphics.drawable.GradientDrawable();
         baseBg.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
         baseBg.setCornerRadius(1000);
-        android.util.TypedValue tvSurface = new android.util.TypedValue();
-        getTheme().resolveAttribute(com.google.android.material.R.attr.colorSecondaryContainer, tvSurface, true);
-        baseBg.setColor(tvSurface.data);
+        baseBg.setColor(android.graphics.Color.TRANSPARENT);
 
         android.graphics.drawable.RippleDrawable bg = new android.graphics.drawable.RippleDrawable(
                 android.content.res.ColorStateList.valueOf(rippleColor),
@@ -771,18 +775,13 @@ public class MainActivity extends Activity {
                 mask
         );
         layout.setBackground(bg);
-        // 增加阴影，使其看起来像一个凸起的实体按钮
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
-            layout.setElevation(6 * getResources().getDisplayMetrics().density);
-            layout.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
-        }
 
         mTitleText = new TextView(this);
         mTitleText.setTextSize(18);
         mTitleText.setGravity(android.view.Gravity.CENTER_VERTICAL);
         mTitleText.setIncludeFontPadding(false);
-        mTitleText.setCompoundDrawablePadding((int) (6 * getResources().getDisplayMetrics().density + 0.5f));
-        mTitleText.setPaddingRelative(0, 0, (int) (4 * getResources().getDisplayMetrics().density + 0.5f), 0);
+        mTitleText.setCompoundDrawablePadding((int) (3 * getResources().getDisplayMetrics().density + 0.5f));
+        mTitleText.setPaddingRelative(0, 0, (int) (3 * getResources().getDisplayMetrics().density + 0.5f), 0);
 
         mArrowDown = new ImageView(this);
         int arrowSize = (int) (16 * getResources().getDisplayMetrics().density + 0.5f);
