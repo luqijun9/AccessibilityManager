@@ -340,8 +340,8 @@ public class MainActivity extends Activity {
                         ServiceCache cache = mServiceCache.get(normalizeServiceId(id));
                         String pinyin = cache != null && cache.packageLabelPinyin != null ? cache.packageLabelPinyin : "";
                         if (pinyin.length() > 0) {
-                            String firstLetter = pinyin.substring(0, 1).toUpperCase();
-                            if (firstLetter.compareTo(s) >= 0) {
+                            String firstLetter = pinyin.substring(0, 1);
+                            if (firstLetter.compareToIgnoreCase(s) >= 0) {
                                 androidx.recyclerview.widget.LinearLayoutManager llm = (androidx.recyclerview.widget.LinearLayoutManager) listView.getLayoutManager();
                                 if (llm != null) {
                                     llm.scrollToPositionWithOffset(i, 0);
