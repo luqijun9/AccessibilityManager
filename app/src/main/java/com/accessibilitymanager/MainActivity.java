@@ -326,6 +326,13 @@ public class MainActivity extends Activity {
 
                 if (mAdapter != null && mAdapter.mList != null) {
                     List<AccessibilityServiceInfo> list = mAdapter.mList;
+                    if ("⤒".equals(s)) {
+                        androidx.recyclerview.widget.LinearLayoutManager llm = (androidx.recyclerview.widget.LinearLayoutManager) listView.getLayoutManager();
+                        if (llm != null) {
+                            llm.scrollToPositionWithOffset(0, 0);
+                        }
+                        return;
+                    }
                     for (int i = mFirstNormalItemIndex; i < list.size(); i++) {
                         AccessibilityServiceInfo info = list.get(i);
                         String id = info.getId();

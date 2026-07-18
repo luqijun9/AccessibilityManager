@@ -10,7 +10,7 @@ import android.view.View;
 
 public class SideBar extends View {
     private OnTouchingLetterChangedListener onTouchingLetterChangedListener;
-    public static String[] b = {"A", "B", "C", "D", "E", "F", "G", "H", "I",
+    public static String[] b = {"⤒", "A", "B", "C", "D", "E", "F", "G", "H", "I",
             "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V",
             "W", "X", "Y", "Z", "#"};
     private int choose = -1;
@@ -57,7 +57,16 @@ public class SideBar extends View {
         for (int i = 0; i < b.length; i++) {
             paint.setColor(Color.parseColor("#999999"));
             paint.setAntiAlias(true);
-            paint.setTextSize(getResources().getDisplayMetrics().density * 10);
+            
+            // 特殊处理第一个置顶符号，因为它在系统字体中本身偏小
+            if (i == 0) {
+                paint.setTextSize(getResources().getDisplayMetrics().density * 15);
+                paint.setFakeBoldText(true);
+            } else {
+                paint.setTextSize(getResources().getDisplayMetrics().density * 10);
+                paint.setFakeBoldText(false); // 重置加粗
+            }
+            
             if (i == choose) {
                 paint.setColor(Color.parseColor("#3399ff"));
                 paint.setFakeBoldText(true);
