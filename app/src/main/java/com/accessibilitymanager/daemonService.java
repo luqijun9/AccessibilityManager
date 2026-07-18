@@ -368,7 +368,16 @@ public class daemonService extends Service {
                         }
                     }
                     
-                    if (!mIsWhitelistAppSwitch || (isLocked && !isWhitelisted)) {
+                    boolean isKeepAliveAction = false;
+                    if (isLocked) {
+                        if (mIsWhitelistAppSwitch && isWhitelisted) {
+                            isKeepAliveAction = false; // 切换应用引发的白名单状态恢复，不算保活
+                        } else {
+                            isKeepAliveAction = true; // 崩溃或被强杀，且用户开启了保活
+                        }
+                    }
+
+                    if (isKeepAliveAction) {
                         // daemon 服务：保活日志显示应用名称
                         logDaemonAdded.append(appLabel).append(" ");
                         LogUtil.log(daemonService.this, "[保活] 检测到服务缺失：" + normalized + " (" + appLabel + ")");
