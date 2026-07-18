@@ -103,7 +103,8 @@
                 android:id="@+id/sidebar"
                 android:layout_width="23dp"
                 android:layout_height="wrap_content"
-                android:layout_gravity="center_vertical|end"
+                android:layout_gravity="top|end"
+                android:layout_marginTop="80dp"
                 android:visibility="gone" />
                 
         </FrameLayout>
