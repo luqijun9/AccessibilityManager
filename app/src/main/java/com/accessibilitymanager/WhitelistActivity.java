@@ -141,6 +141,7 @@ public class WhitelistActivity extends AppCompatActivity {
         boolean userOnly = sp.getBoolean("useronly", false);
         for (AccessibilityServiceInfo info : l) {
             if (userOnly && !isUserApp(info)) continue;
+            if (info.getResolveInfo().serviceInfo.packageName.equals(getPackageName())) continue;
             tmp.add(info);
         }
         sortForWhitelist(tmp);
@@ -547,7 +548,7 @@ public class WhitelistActivity extends AppCompatActivity {
                 mCachedAppList = new java.util.ArrayList<>();
                 for (ApplicationInfo info : allApps) {
                     Intent launchIntent = pm.getLaunchIntentForPackage(info.packageName);
-                    if (launchIntent != null) {
+                    if (launchIntent != null && !info.packageName.equals(getPackageName())) {
                         mCachedAppList.add(new AppCacheItem(info, info.loadLabel(pm).toString(), info.loadIcon(pm)));
                     }
                 }
@@ -692,7 +693,7 @@ public class WhitelistActivity extends AppCompatActivity {
                 });
 
                 androidx.appcompat.app.AlertDialog dialog = new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
-                        .setTitle("配置应用白名单")
+                        .setTitle("在以下应用内关闭")
                         .setView(dialogView)
                         .setPositiveButton("保存", (d, which) -> {
                             sp.edit().putString("whitelist_apps_" + serviceName, TextUtils.join(",", checkedPkgs)).apply();

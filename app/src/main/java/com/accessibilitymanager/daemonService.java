@@ -335,10 +335,12 @@ public class daemonService extends Service {
                     desiredState = true;
                 } else {
                     boolean isInWhitelist = false;
-                    for (String pkg : whitelist.split(",")) {
-                        if (pkg.equals(currentForegroundPkg)) {
-                            isInWhitelist = true;
-                            break;
+                    if (!getPackageName().equals(currentForegroundPkg)) {
+                        for (String pkg : whitelist.split(",")) {
+                            if (pkg.equals(currentForegroundPkg)) {
+                                isInWhitelist = true;
+                                break;
+                            }
                         }
                     }
                     desiredState = !isInWhitelist;
@@ -599,8 +601,10 @@ public class daemonService extends Service {
         String taskId = Integer.toHexString(System.identityHashCode(this)) + "-" + (int)(Math.random() * 0xFFFF);
         Log.d("AccMgrDebug", "[TASK-" + taskId + "] ENTER source=" + source);
         String daemonList = sp.getString("daemon", "");
-        if (daemonList.length() == 0) {
-            Log.d("AccMgrDebug", "[TASK-" + taskId + "] daemonList empty, return");
+        boolean globalWhitelistEnable = sp.getBoolean("whitelist_global_enable", false);
+        String whitelistStr = globalWhitelistEnable ? sp.getString("whitelist_services", "") : "";
+        if (daemonList.length() == 0 && whitelistStr.length() == 0) {
+            Log.d("AccMgrDebug", "[TASK-" + taskId + "] daemonList and whitelist empty, return");
             return;
         }
         LogUtil.log(daemonService.this, "[崩溃检测] 触发来源：" + source);
@@ -664,10 +668,12 @@ public class daemonService extends Service {
             }
             Log.d("AccMgrDebug", "[TASK-" + taskId + "] crashedServicesList=" + crashedServicesList);
 
-            String[] trackedServices = daemonList.split(":");
+            java.util.Set<String> trackedSet = new java.util.HashSet<>(java.util.Arrays.asList(daemonList.split(":")));
+            trackedSet.addAll(java.util.Arrays.asList(whitelistStr.split(":")));
+            trackedSet.remove("");
 
             for (String cs : crashedServicesList) {
-                for (String tracked : trackedServices) {
+                for (String tracked : trackedSet) {
                     if (serviceNameMatches(cs, tracked)) {
                         // 把修复操作提交回 daemonExecutor 串行执行
                         if ("修复后复查".equals(source)) {
