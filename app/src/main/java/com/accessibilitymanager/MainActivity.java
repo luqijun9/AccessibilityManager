@@ -333,6 +333,33 @@ public class MainActivity extends Activity {
                         }
                         return;
                     }
+                    if ("#".equals(s)) {
+                        boolean found = false;
+                        for (int i = mFirstNormalItemIndex; i < list.size(); i++) {
+                            AccessibilityServiceInfo info = list.get(i);
+                            ServiceCache cache = mServiceCache.get(normalizeServiceId(info.getId()));
+                            String pinyin = cache != null && cache.packageLabelPinyin != null ? cache.packageLabelPinyin : "";
+                            if (pinyin.length() > 0) {
+                                char c = pinyin.toUpperCase().charAt(0);
+                                if (c < 'A' || c > 'Z') {
+                                    androidx.recyclerview.widget.LinearLayoutManager llm = (androidx.recyclerview.widget.LinearLayoutManager) listView.getLayoutManager();
+                                    if (llm != null) {
+                                        llm.scrollToPositionWithOffset(i, 0);
+                                    }
+                                    found = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!found && list.size() > 0) {
+                            androidx.recyclerview.widget.LinearLayoutManager llm = (androidx.recyclerview.widget.LinearLayoutManager) listView.getLayoutManager();
+                            if (llm != null) {
+                                llm.scrollToPositionWithOffset(list.size() - 1, 0);
+                            }
+                        }
+                        return;
+                    }
+
                     for (int i = mFirstNormalItemIndex; i < list.size(); i++) {
                         AccessibilityServiceInfo info = list.get(i);
                         String id = info.getId();
