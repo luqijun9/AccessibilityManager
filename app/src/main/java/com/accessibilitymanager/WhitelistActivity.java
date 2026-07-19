@@ -693,7 +693,7 @@ public class WhitelistActivity extends AppCompatActivity {
                 });
 
                 androidx.appcompat.app.AlertDialog dialog = new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
-                        .setTitle("在以下应用内关闭")
+                        .setTitle("在勾选应用内关闭")
                         .setView(dialogView)
                         .setPositiveButton("保存", (d, which) -> {
                             sp.edit().putString("whitelist_apps_" + serviceName, TextUtils.join(",", checkedPkgs)).apply();

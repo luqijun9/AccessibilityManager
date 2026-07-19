@@ -4,7 +4,16 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:paddingTop="12dp">
+    android:paddingTop="0dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="24dp"
+        android:layout_marginEnd="24dp"
+        android:text="注意:勾选输入法会在打开指定键盘时关闭"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="12sp" />
 
     <com.google.android.material.textfield.TextInputLayout
         android:id="@+id/layout_search_app"
@@ -43,7 +52,10 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="8dp"
+        android:paddingTop="8dp"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="0dp"
         android:gravity="center_vertical">
 
         <CheckedTextView
