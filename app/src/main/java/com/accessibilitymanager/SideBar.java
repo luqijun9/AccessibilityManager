@@ -105,6 +105,7 @@ public class SideBar extends View {
                             listener.onTouchingLetterChanged(b[c], touchY);
                         }
                         choose = c;
+                        performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK);
                         invalidate();
                     }
                 }
