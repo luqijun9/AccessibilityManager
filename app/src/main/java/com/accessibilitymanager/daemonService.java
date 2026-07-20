@@ -929,6 +929,16 @@ public class daemonService extends Service {
 
         // crashCheckExecutor 执行首次崩溃检测
         checkCrashedServices("服务启动");
+
+        // ── TaskStackHelper：利用 Shizuku + ITaskStackListener 监听前台应用 ──
+        // 仅在 Android Q+ 且 Shizuku 已授权时生效，结果写入日志
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            TaskStackHelper.getInstance().start(this, pkg -> {
+                // pkg = 新前台应用包名，日志已在 TaskStackHelper 内部写入
+                // 此处可扩展：将 pkg 保存到 sp 供白名单逻辑使用
+                // sp.edit().putString("current_foreground_pkg_taskstack", pkg).apply();
+            });
+        }
     }
 
     @Override
@@ -945,7 +955,10 @@ public class daemonService extends Service {
         if (mForegroundPkgListener != null) {
             sp.unregisterOnSharedPreferenceChangeListener(mForegroundPkgListener);
         }
-        
+
+        // 停止 ITaskStackListener 监听
+        TaskStackHelper.getInstance().stop(this);
+
         // 关键修复：防止停止保活时导致内存和线程泄漏
         if (daemonExecutor != null && !daemonExecutor.isShutdown()) {
             daemonExecutor.shutdownNow();

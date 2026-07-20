@@ -75,4 +75,8 @@ dependencies {
     implementation "dev.rikka.shizuku:provider:13.1.0"
     implementation "androidx.core:core:1.12.0"
     implementation 'com.belerweb:pinyin4j:2.5.1'
+    // GKD 同款：隐藏 API 访问绕过（用于 IActivityTaskManager.Stub.asInterface 等）
+    implementation 'org.lsposed.hiddenapibypass:hiddenapibypass:4.3'
+    compileOnly project(':hidden_api')
 }
+

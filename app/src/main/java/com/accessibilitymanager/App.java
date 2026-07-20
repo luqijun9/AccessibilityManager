@@ -2,11 +2,24 @@ package com.accessibilitymanager;
 
 import android.app.Activity;
 import android.app.Application;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
+import android.content.Context;
 import com.google.android.material.color.DynamicColors;
+import org.lsposed.hiddenapibypass.HiddenApiBypass;
 
 public class App extends Application {
+    @Override
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(base);
+        // GKD 同款：在 Android P+ 上解除所有隐藏 API 限制
+        // 必须在 onCreate 之前、attachBaseContext 中调用，确保后续类加载不受限制
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            HiddenApiBypass.addHiddenApiExemptions("L");
+        }
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
