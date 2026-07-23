@@ -1123,7 +1123,7 @@ public class MainActivity extends Activity {
                 enableCrashFix(false);
             } else {
                 LogUtil.log(MainActivity.this, "[权限] 用户拒绝授权(grantResult=" + grantResult + ")");
-                Toast.makeText(MainActivity.this, "获取shizuku权限失败", Toast.LENGTH_SHORT).show();
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "获取Shizuku权限失败", Toast.LENGTH_SHORT).show());
             }
         } else if (mPendingFixModeRequest) {
             mPendingFixModeRequest = false;
@@ -1131,15 +1131,18 @@ public class MainActivity extends Activity {
                 LogUtil.log(MainActivity.this, "[权限] Shizuku 已授权，启用强杀模式");
                 ShellUtil.reset();
                 updateToolbarMenu();
-                Toast.makeText(MainActivity.this, "已获取Shizuku权限，强杀模式已开启", Toast.LENGTH_SHORT).show();
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "已获取Shizuku权限，强杀模式已开启", Toast.LENGTH_SHORT).show());
             } else {
                 LogUtil.log(MainActivity.this, "[权限] Shizuku 授权被拒绝");
-                Toast.makeText(MainActivity.this, "获取Shizuku权限失败，强杀模式未开启", Toast.LENGTH_SHORT).show();
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "获取Shizuku权限失败，强杀模式未开启", Toast.LENGTH_SHORT).show());
             }
         } else if (grantResult == PackageManager.PERMISSION_GRANTED) {
             // 权限被授予时执行 check() 尝试授予 WRITE_SECURE_SETTINGS
             // 注意：拒绝时不能调用 check()，否则 check() 内部会重新 requestPermission 导致无限循环
             check();
+        } else {
+            LogUtil.log(MainActivity.this, "[权限] 用户拒绝授权(grantResult=" + grantResult + ")");
+            runOnUiThread(() -> Toast.makeText(MainActivity.this, "获取Shizuku权限失败", Toast.LENGTH_SHORT).show());
         }
     };
 
