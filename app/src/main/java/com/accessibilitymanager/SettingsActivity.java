@@ -1169,7 +1169,7 @@ public class SettingsActivity extends AppCompatActivity {
         String[] themeValues = { ThemeUtils.THEME_DYNAMIC, ThemeUtils.THEME_BLUE, ThemeUtils.THEME_GREEN,
                 ThemeUtils.THEME_PURPLE };
         SharedPreferences mainSp = getSharedPreferences("Main", Context.MODE_PRIVATE);
-        String currentTheme = mainSp.getString(ThemeUtils.PREF_THEME, ThemeUtils.THEME_DYNAMIC);
+        String currentTheme = mainSp.getString(ThemeUtils.PREF_THEME, ThemeUtils.THEME_BLUE);
         int checkedItem = 0;
         for (int i = 0; i < themeValues.length; i++) {
             if (themeValues[i].equals(currentTheme)) {
