@@ -743,7 +743,7 @@ public class daemonService extends Service {
             return;
         }
 
-        boolean useForceStop = sp.getBoolean("fixmode", true);
+        boolean useForceStop = sp.getBoolean("fixmode", false);
         if (pkgName.equals(getPackageName())) {
             useForceStop = false;
         } else if (useForceStop) {
