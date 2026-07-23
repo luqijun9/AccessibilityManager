@@ -298,7 +298,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="触发保活后延迟1秒再执行"
+                            android:text="触发保活后延迟1秒再执行，保活异常时可尝试开启使保活更稳定"
                             android:textColor="@color/text_secondary"
                             android:textSize="13sp"
                             android:layout_marginTop="2dp" />
@@ -760,14 +760,14 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="先强杀应用再重启服务"
+                                android:text="强杀应用后重启"
                                 android:textColor="@color/text_primary"
                                 android:textSize="16sp" />
 
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="需 Shizuku/Root 权限，若崩溃服务重启仍崩溃，可尝试此功能"
+                                android:text="需shizuku/root权限。若普通重启后仍失效，可尝试强杀App进程后再恢复服务"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="13sp"
                                 android:layout_marginTop="2dp" />
