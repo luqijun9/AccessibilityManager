@@ -744,12 +744,16 @@ public class daemonService extends Service {
         }
 
         boolean useForceStop = sp.getBoolean("fixmode", false);
+        boolean isDegraded = false;
         if (pkgName.equals(getPackageName())) {
             useForceStop = false;
         } else if (useForceStop) {
             String disabledStr = sp.getString("fixmode_disabled_services", "");
             if (disabledStr.contains(serviceName)) {
                 useForceStop = false;
+            } else if (!ShellUtil.hasAnyPermission()) {
+                useForceStop = false;
+                isDegraded = true;
             }
         }
 
@@ -780,7 +784,11 @@ public class daemonService extends Service {
             }
             try { Thread.sleep(500); } catch (InterruptedException ignored) { }
         } else {
-            LogUtil.log(daemonService.this, logPrefix + " 仅关闭服务：" + serviceName);
+            if (isDegraded) {
+                LogUtil.log(daemonService.this, logPrefix + " (强杀失效降级) 仅关闭服务：" + serviceName);
+            } else {
+                LogUtil.log(daemonService.this, logPrefix + " 仅关闭服务：" + serviceName);
+            }
             String enabled = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             if (enabled == null) enabled = "";
             ComponentName target = ComponentName.unflattenFromString(serviceName);
