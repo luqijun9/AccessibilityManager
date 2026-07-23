@@ -71,7 +71,7 @@ public class daemonService extends Service {
     private String tmpSettingValue;
     private List<String> l = new ArrayList<>();
     private boolean mIsFixing = false;
-    private int mFixRetryRemaining = 1;
+    private int mFixRetryRemaining = 2;
     private long mLastFixStartTime = 0;
     private final Map<String, Long> mLastFixTime = new HashMap<>();
     private String mCrashedFixServiceName;
@@ -709,7 +709,7 @@ public class daemonService extends Service {
             return;
         }
         LogUtil.log(daemonService.this, "[崩溃检测] 检测到保活服务崩溃：" + cs);
-        mFixRetryRemaining = 1;
+        mFixRetryRemaining = 2;
         mLastFixTime.put(cs, System.currentTimeMillis());
         fixCrashedService(cs, false);
     }
