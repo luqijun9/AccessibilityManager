@@ -40,6 +40,7 @@ public class SettingsActivity extends AppCompatActivity {
 
     private SharedPreferences sp;
     private View rootView;
+    private final android.util.LruCache<String, android.graphics.drawable.Drawable> mIconCache = new android.util.LruCache<>(30);
 
     // 子项视图引用
     private MaterialSwitch switchBoot, switchToast, switchUserOnly, switchHide, switchDelayDaemon;
@@ -917,7 +918,11 @@ public class SettingsActivity extends AppCompatActivity {
                 android.graphics.drawable.Drawable icon = null;
                 try {
                     String packageName = item.serviceId.split("/")[0];
-                    icon = pm.getApplicationIcon(packageName);
+                    icon = mIconCache.get(packageName);
+                    if (icon == null) {
+                        icon = pm.getApplicationIcon(packageName);
+                        mIconCache.put(packageName, icon);
+                    }
                 } catch (Exception ignored) {}
                 
                 if (icon != null) {
@@ -1384,5 +1389,19 @@ public class SettingsActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
+    }
+
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+            if (mIconCache != null) mIconCache.evictAll();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (mIconCache != null) mIconCache.evictAll();
+        super.onDestroy();
     }
 }
