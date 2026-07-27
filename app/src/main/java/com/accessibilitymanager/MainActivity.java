@@ -104,6 +104,7 @@ public class MainActivity extends Activity {
     private List<AccessibilityServiceInfo> mFavoritesList;
     private TextView mPinHint;
     private final Map<String, ServiceCache> mServiceCache = new HashMap<>();
+    private final android.util.LruCache<String, Drawable> mIconCache = new android.util.LruCache<>(30);
     
     private SideBar sidebar;
     private TextView sidebarBubble;
@@ -546,12 +547,11 @@ public class MainActivity extends Activity {
                 String[] parts = Pattern.compile("/").split(sid);
                 if (parts.length >= 2) {
                     try {
-                        Drawable icon = pm.getApplicationIcon(parts[0]);
                         CharSequence pkgLabel = pm.getApplicationLabel(pm.getApplicationInfo(parts[0], PackageManager.GET_META_DATA));
                         String packagelabel = pkgLabel != null ? pkgLabel.toString() : parts[0];
                         String svcLabel = pm.getServiceInfo(new ComponentName(parts[0], parts[1]), PackageManager.MATCH_DEFAULT_ONLY).loadLabel(pm).toString();
                         String desc = info.loadDescription(pm);
-                        mServiceCache.put(sid, new ServiceCache(icon, packagelabel, svcLabel, desc));
+                        mServiceCache.put(sid, new ServiceCache(packagelabel, svcLabel, desc));
                     } catch (Exception ignored) {
                     }
                 }
@@ -929,15 +929,14 @@ public class MainActivity extends Activity {
                 ctv.setChecked(item.isChecked);
                 
                 android.graphics.drawable.Drawable icon = null;
-                ServiceCache cache = mServiceCache.get(item.serviceId);
-                if (cache != null) {
-                    icon = cache.icon;
-                } else {
-                    try {
-                        String packageName = item.serviceId.split("/")[0];
+                try {
+                    String packageName = item.serviceId.split("/")[0];
+                    icon = mIconCache.get(packageName);
+                    if (icon == null) {
                         icon = pm.getApplicationIcon(packageName);
-                    } catch (Exception ignored) {}
-                }
+                        mIconCache.put(packageName, icon);
+                    }
+                } catch (Exception ignored) {}
                 
                 if (icon != null) {
                     icon = icon.getConstantState().newDrawable().mutate();
@@ -1440,12 +1439,22 @@ public class MainActivity extends Activity {
         updateToolbarMenu();
     }
 
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+            if (mIconCache != null) mIconCache.evictAll();
+        }
+    }
+
     //一些收尾工作，取消注册监听器什么的
     @Override
     protected void onDestroy() {
         if (listenerAdded) Shizuku.removeRequestPermissionResultListener(RL);
 
         getContentResolver().unregisterContentObserver(mContentOb);
+        if (mIconCache != null) mIconCache.evictAll();
+        if (mServiceCache != null) mServiceCache.clear();
         super.onDestroy();
     }
 
@@ -1852,22 +1861,26 @@ public class MainActivity extends Activity {
             String serviceName = normalizeServiceId(rawServiceName);
             ComponentName serviceComponent = ComponentName.unflattenFromString(serviceName);
             String[] packageName = Pattern.compile("/").split(serviceName);
-            Drawable icon = null;
+            Drawable icon = mIconCache.get(packageName[0]);
             String Packagelabel = null;
             String ServiceLabel = null;
             String Description = null;
             ServiceCache cache = mServiceCache.get(serviceName);
             if (cache != null) {
-                icon = cache.icon;
                 Packagelabel = cache.packageLabel;
                 ServiceLabel = cache.serviceLabel;
                 Description = cache.description;
             } else {
                 try {
-                    icon = pm.getApplicationIcon(packageName[0]);
                     Packagelabel = String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(packageName[0], PackageManager.GET_META_DATA)));
                     ServiceLabel = pm.getServiceInfo(new ComponentName(packageName[0], packageName[1]), PackageManager.MATCH_DEFAULT_ONLY).loadLabel(pm).toString();
                     Description = info.loadDescription(pm);
+                } catch (PackageManager.NameNotFoundException ignored) {}
+            }
+            if (icon == null) {
+                try {
+                    icon = pm.getApplicationIcon(packageName[0]);
+                    mIconCache.put(packageName[0], icon);
                 } catch (PackageManager.NameNotFoundException ignored) {}
             }
             if (ServiceLabel == null) ServiceLabel = Packagelabel;
@@ -2167,15 +2180,13 @@ public class MainActivity extends Activity {
 
 
     static class ServiceCache {
-        Drawable icon;
         String packageLabel;
         String packageLabelPinyin;
         String serviceLabel;
         String serviceLabelPinyin;
         String description;
 
-        ServiceCache(Drawable icon, String packageLabel, String serviceLabel, String description) {
-            this.icon = icon;
+        ServiceCache(String packageLabel, String serviceLabel, String description) {
             this.packageLabel = packageLabel;
             this.packageLabelPinyin = PinyinUtils.getPinyin(packageLabel);
             this.serviceLabel = serviceLabel;

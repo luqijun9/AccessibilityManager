@@ -74,13 +74,14 @@ public class WhitelistActivity extends AppCompatActivity {
 
     // Cache
     private List<AppCacheItem> mCachedAppList;
+    private final android.util.LruCache<String, Drawable> mIconCache = new android.util.LruCache<>(30);
+
     static class AppCacheItem {
         ApplicationInfo info;
         String label;
         String labelPinyin;
-        Drawable icon;
-        AppCacheItem(ApplicationInfo info, String label, Drawable icon) {
-            this.info = info; this.label = label; this.icon = icon;
+        AppCacheItem(ApplicationInfo info, String label) {
+            this.info = info; this.label = label;
             this.labelPinyin = PinyinUtils.getPinyin(label);
         }
     }
@@ -549,7 +550,7 @@ public class WhitelistActivity extends AppCompatActivity {
                 for (ApplicationInfo info : allApps) {
                     Intent launchIntent = pm.getLaunchIntentForPackage(info.packageName);
                     if (launchIntent != null && !info.packageName.equals(getPackageName())) {
-                        mCachedAppList.add(new AppCacheItem(info, info.loadLabel(pm).toString(), info.loadIcon(pm)));
+                        mCachedAppList.add(new AppCacheItem(info, info.loadLabel(pm).toString()));
                     }
                 }
             }
@@ -596,7 +597,12 @@ public class WhitelistActivity extends AppCompatActivity {
                         android.widget.CheckedTextView nameView = convertView.findViewById(R.id.app_name);
                         
                         AppCacheItem item = getItem(position);
-                        iconView.setImageDrawable(item.icon);
+                        Drawable icon = mIconCache.get(item.info.packageName);
+                        if (icon == null) {
+                            icon = item.info.loadIcon(pm);
+                            mIconCache.put(item.info.packageName, icon);
+                        }
+                        iconView.setImageDrawable(icon);
                         nameView.setText(item.label);
                         nameView.setChecked(checkedPkgs.contains(item.info.packageName));
                         
@@ -707,6 +713,20 @@ public class WhitelistActivity extends AppCompatActivity {
             });
         }).start();
     }
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+            if (mIconCache != null) mIconCache.evictAll();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (mIconCache != null) mIconCache.evictAll();
+        if (mCachedAppList != null) mCachedAppList.clear();
+        super.onDestroy();
+    }
 
     private class WhitelistAdapter extends RecyclerView.Adapter<WhitelistAdapter.ViewHolder> {
         private List<AccessibilityServiceInfo> mData;
@@ -735,13 +755,16 @@ public class WhitelistActivity extends AppCompatActivity {
             String serviceName = normalizeServiceId(info.getId());
             String[] packageName = Pattern.compile("/").split(serviceName);
             
-            Drawable icon = null;
+            Drawable icon = mIconCache.get(packageName[0]);
             String packageLabel = null;
             String serviceLabel = null;
             String description = null;
             
             try {
-                icon = pm.getApplicationIcon(packageName[0]);
+                if (icon == null) {
+                    icon = pm.getApplicationIcon(packageName[0]);
+                    mIconCache.put(packageName[0], icon);
+                }
                 packageLabel = String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(packageName[0], PackageManager.GET_META_DATA)));
                 serviceLabel = pm.getServiceInfo(new ComponentName(packageName[0], packageName[1]), PackageManager.MATCH_DEFAULT_ONLY).loadLabel(pm).toString();
                 description = info.loadDescription(pm);
