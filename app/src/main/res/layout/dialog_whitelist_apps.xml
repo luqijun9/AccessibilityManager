@@ -15,6 +15,30 @@
         android:textColor="?android:attr/textColorSecondary"
         android:textSize="12sp" />
 
+    <RadioGroup
+        android:id="@+id/radio_group_batch_mode"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginStart="24dp"
+        android:layout_marginEnd="24dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="8dp"
+        android:visibility="gone">
+        <RadioButton
+            android:id="@+id/radio_append"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="追加模式"
+            android:checked="true" />
+        <RadioButton
+            android:id="@+id/radio_overwrite"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:text="覆盖模式" />
+    </RadioGroup>
+
     <com.google.android.material.textfield.TextInputLayout
         android:id="@+id/layout_search_app"
         android:layout_width="match_parent"

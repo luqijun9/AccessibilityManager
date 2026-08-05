@@ -76,6 +76,8 @@ public class WhitelistActivity extends AppCompatActivity {
     private List<AppCacheItem> mCachedAppList;
     private final android.util.LruCache<String, Drawable> mIconCache = new android.util.LruCache<>(30);
 
+    private CompoundButton.OnCheckedChangeListener mWhitelistSwitchListener;
+
     static class AppCacheItem {
         ApplicationInfo info;
         String label;
@@ -83,6 +85,19 @@ public class WhitelistActivity extends AppCompatActivity {
         AppCacheItem(ApplicationInfo info, String label) {
             this.info = info; this.label = label;
             this.labelPinyin = PinyinUtils.getPinyin(label);
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (sp != null && sp.getBoolean("whitelist_global_enable", false) && !isOwnAccessibilityServiceEnabled()) {
+            if (mGlobalWhitelistSwitch != null && mWhitelistSwitchListener != null) {
+                mGlobalWhitelistSwitch.setOnCheckedChangeListener(null);
+                mGlobalWhitelistSwitch.setChecked(false);
+                mGlobalWhitelistSwitch.setOnCheckedChangeListener(mWhitelistSwitchListener);
+                showWhitelistEnableDialog(mGlobalWhitelistSwitch, mWhitelistSwitchListener);
+            }
         }
     }
 
@@ -180,13 +195,12 @@ public class WhitelistActivity extends AppCompatActivity {
         mGlobalWhitelistSwitch.setLayoutParams(switchParams);
         mGlobalWhitelistSwitch.setChecked(sp.getBoolean("whitelist_global_enable", false));
         
-        final CompoundButton.OnCheckedChangeListener[] whitelistSwitchListenerHolder = new CompoundButton.OnCheckedChangeListener[1];
-        whitelistSwitchListenerHolder[0] = (buttonView, isChecked) -> {
+        mWhitelistSwitchListener = (buttonView, isChecked) -> {
             if (isChecked && !sp.getBoolean("whitelist_global_enable", false)) {
                 buttonView.setOnCheckedChangeListener(null);
                 buttonView.setChecked(false);
-                buttonView.setOnCheckedChangeListener(whitelistSwitchListenerHolder[0]);
-                showWhitelistEnableDialog(buttonView, whitelistSwitchListenerHolder[0]);
+                buttonView.setOnCheckedChangeListener(mWhitelistSwitchListener);
+                showWhitelistEnableDialog(buttonView, mWhitelistSwitchListener);
                 return;
             }
             sp.edit().putBoolean("whitelist_global_enable", isChecked).apply();
@@ -201,7 +215,7 @@ public class WhitelistActivity extends AppCompatActivity {
                 }
             } catch (Exception ignored) {}
         };
-        mGlobalWhitelistSwitch.setOnCheckedChangeListener(whitelistSwitchListenerHolder[0]);
+        mGlobalWhitelistSwitch.setOnCheckedChangeListener(mWhitelistSwitchListener);
 
         ImageView mSearchBtn = new ImageView(this);
         mSearchBtn.setImageResource(R.drawable.ic_search);
@@ -219,7 +233,29 @@ public class WhitelistActivity extends AppCompatActivity {
         searchParams.setMarginEnd((int) (8 * getResources().getDisplayMetrics().density));
         mSearchBtn.setLayoutParams(searchParams);
 
+        ImageView mBatchConfigBtn = new ImageView(this);
+        mBatchConfigBtn.setImageResource(R.drawable.ic_checklist);
+        mBatchConfigBtn.setColorFilter(textColor, android.graphics.PorterDuff.Mode.SRC_IN);
+        mBatchConfigBtn.setPadding(padding, padding, padding, padding);
+        mBatchConfigBtn.setBackgroundResource(outValue.resourceId);
+        mBatchConfigBtn.setOnClickListener(v -> {
+            if (!sp.getBoolean("whitelist_global_enable", false)) {
+                if (mGlobalWhitelistSwitch != null && mWhitelistSwitchListener != null) {
+                    showWhitelistEnableDialog(mGlobalWhitelistSwitch, mWhitelistSwitchListener);
+                }
+                return;
+            }
+            showBatchServiceSelectionDialog();
+        });
+        
+        LinearLayout.LayoutParams batchParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        batchParams.setMarginEnd(0);
+        mBatchConfigBtn.setLayoutParams(batchParams);
+
         layout.addView(mTitleText);
+        layout.addView(mBatchConfigBtn);
         layout.addView(mSearchBtn);
         layout.addView(mGlobalWhitelistSwitch);
 
@@ -464,6 +500,7 @@ public class WhitelistActivity extends AppCompatActivity {
 
         final TextView statusText = view.findViewById(R.id.permission_status_text);
         final Button btnGoSettings = view.findViewById(R.id.btn_go_settings);
+        final Button btnConfirm = view.findViewById(R.id.btn_continue);
         
         Runnable updateStatus = () -> {
             boolean isEnabled = isOwnAccessibilityServiceEnabled();
@@ -471,10 +508,14 @@ public class WhitelistActivity extends AppCompatActivity {
                 statusText.setText("已开启 ✓");
                 statusText.setTextColor(Color.parseColor("#4CAF50")); // Green
                 btnGoSettings.setVisibility(View.GONE);
+                btnConfirm.setEnabled(true);
+                btnConfirm.setAlpha(1.0f);
             } else {
                 statusText.setText("未开启 ✗");
                 statusText.setTextColor(Color.parseColor("#F44336")); // Red
                 btnGoSettings.setVisibility(View.VISIBLE);
+                btnConfirm.setEnabled(false);
+                btnConfirm.setAlpha(0.5f);
             }
         };
         
@@ -506,10 +547,12 @@ public class WhitelistActivity extends AppCompatActivity {
         statusText.setOnClickListener(goSettingsAction);
         
         Button btnCancel = view.findViewById(R.id.btn_cancel);
-        Button btnConfirm = view.findViewById(R.id.btn_continue);
+        
+        final boolean[] confirmed = {false};
         
         btnCancel.setOnClickListener(v -> dialog.dismiss());
         btnConfirm.setOnClickListener(v -> {
+            confirmed[0] = true;
             dialog.dismiss();
             switchButton.setOnCheckedChangeListener(null);
             switchButton.setChecked(true);
@@ -527,10 +570,80 @@ public class WhitelistActivity extends AppCompatActivity {
             } catch (Exception ignored) {}
         });
         
+        dialog.setOnDismissListener(d -> {
+            if (!confirmed[0]) {
+                sp.edit().putBoolean("whitelist_global_enable", false).apply();
+                switchButton.setOnCheckedChangeListener(null);
+                switchButton.setChecked(false);
+                switchButton.setOnCheckedChangeListener(listener);
+                if (mAdapter != null) mAdapter.notifyDataSetChanged();
+            }
+        });
+        
         dialog.show();
     }
 
-    private void showWhitelistAppPickerDialog(String serviceName) {
+    private void showBatchServiceSelectionDialog() {
+        String whitelistServices = sp.getString("whitelist_services", "");
+        if (whitelistServices.isEmpty()) {
+            Toast.makeText(this, "当前没有开启局部关闭的服务", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        List<AccessibilityServiceInfo> enabledServices = new java.util.ArrayList<>();
+        List<String> serviceNames = new java.util.ArrayList<>();
+        List<String> serviceIds = new java.util.ArrayList<>();
+        
+        PackageManager pm = getPackageManager();
+        for (AccessibilityServiceInfo info : tmp) {
+            String serviceId = normalizeServiceId(info.getId());
+            if (containsService(whitelistServices, serviceId)) {
+                enabledServices.add(info);
+                serviceIds.add(serviceId);
+                String[] parts = serviceId.split("/");
+                String label = serviceId;
+                if (parts.length >= 2) {
+                    try {
+                        String appLabel = pm.getApplicationLabel(pm.getApplicationInfo(parts[0], PackageManager.GET_META_DATA)).toString();
+                        String svcLabel = pm.getServiceInfo(new ComponentName(parts[0], parts[1]), PackageManager.MATCH_DEFAULT_ONLY).loadLabel(pm).toString();
+                        label = appLabel.equals(svcLabel) ? appLabel : appLabel + "/" + svcLabel;
+                    } catch (Exception ignored) {}
+                }
+                serviceNames.add(label);
+            }
+        }
+        
+        if (enabledServices.isEmpty()) {
+            Toast.makeText(this, "当前没有开启局部关闭的服务", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        boolean[] checkedItems = new boolean[serviceNames.size()];
+        String[] itemsArray = serviceNames.toArray(new String[0]);
+        
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+                .setTitle("选择要批量配置的服务")
+                .setMultiChoiceItems(itemsArray, checkedItems, (dialog, which, isChecked) -> {
+                    checkedItems[which] = isChecked;
+                })
+                .setPositiveButton("下一步", (dialog, which) -> {
+                    List<String> selectedServices = new java.util.ArrayList<>();
+                    for (int i = 0; i < checkedItems.length; i++) {
+                        if (checkedItems[i]) {
+                            selectedServices.add(serviceIds.get(i));
+                        }
+                    }
+                    if (selectedServices.isEmpty()) {
+                        Toast.makeText(this, "未选择任何服务", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    showWhitelistAppPickerDialog(selectedServices, true);
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void showWhitelistAppPickerDialog(List<String> targetServices, boolean isBatch) {
         android.app.ProgressDialog progressDialog = new android.app.ProgressDialog(this);
         progressDialog.setMessage("正在加载应用列表...");
         progressDialog.setCancelable(false);
@@ -539,9 +652,11 @@ public class WhitelistActivity extends AppCompatActivity {
         new Thread(() -> {
             PackageManager pm = getPackageManager();
             Set<String> checkedPkgs = new HashSet<>();
-            String currentList = sp.getString("whitelist_apps_" + serviceName, "");
-            if (!currentList.isEmpty()) {
-                Collections.addAll(checkedPkgs, currentList.split(","));
+            if (!isBatch && targetServices.size() == 1) {
+                String currentList = sp.getString("whitelist_apps_" + targetServices.get(0), "");
+                if (!currentList.isEmpty()) {
+                    Collections.addAll(checkedPkgs, currentList.split(","));
+                }
             }
 
             if (mCachedAppList == null) {
@@ -698,11 +813,32 @@ public class WhitelistActivity extends AppCompatActivity {
                     }
                 });
 
+                android.widget.RadioGroup radioGroupBatch = dialogView.findViewById(R.id.radio_group_batch_mode);
+                if (isBatch) {
+                    radioGroupBatch.setVisibility(View.VISIBLE);
+                }
+
                 androidx.appcompat.app.AlertDialog dialog = new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
-                        .setTitle("在勾选应用内关闭")
+                        .setTitle(isBatch ? "批量配置在勾选应用内关闭" : "在勾选应用内关闭")
                         .setView(dialogView)
                         .setPositiveButton("保存", (d, which) -> {
-                            sp.edit().putString("whitelist_apps_" + serviceName, TextUtils.join(",", checkedPkgs)).apply();
+                            SharedPreferences.Editor editor = sp.edit();
+                            boolean isAppend = radioGroupBatch.getCheckedRadioButtonId() == R.id.radio_append;
+                            
+                            for (String svcName : targetServices) {
+                                if (isBatch && isAppend) {
+                                    Set<String> existing = new HashSet<>();
+                                    String currentList = sp.getString("whitelist_apps_" + svcName, "");
+                                    if (!currentList.isEmpty()) {
+                                        Collections.addAll(existing, currentList.split(","));
+                                    }
+                                    existing.addAll(checkedPkgs);
+                                    editor.putString("whitelist_apps_" + svcName, TextUtils.join(",", existing));
+                                } else {
+                                    editor.putString("whitelist_apps_" + svcName, TextUtils.join(",", checkedPkgs));
+                                }
+                            }
+                            editor.apply();
                             Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show();
                         })
                         .setNegativeButton("取消", null)
@@ -788,7 +924,7 @@ public class WhitelistActivity extends AppCompatActivity {
                 holder.ib.setVisibility(View.VISIBLE);
                 if (globalWhitelistEnable) {
                     holder.ib.setAlpha(1.0f);
-                    holder.ib.setOnClickListener(v -> showWhitelistAppPickerDialog(serviceName));
+                    holder.ib.setOnClickListener(v -> showWhitelistAppPickerDialog(java.util.Collections.singletonList(serviceName), false));
                 } else {
                     holder.ib.setAlpha(0.5f);
                     holder.ib.setOnClickListener(null);
@@ -821,7 +957,7 @@ public class WhitelistActivity extends AppCompatActivity {
                     holder.ib.setVisibility(View.VISIBLE);
                     if (sp.getBoolean("whitelist_global_enable", false)) {
                         holder.ib.setAlpha(1.0f);
-                        holder.ib.setOnClickListener(v -> showWhitelistAppPickerDialog(serviceName));
+                        holder.ib.setOnClickListener(v -> showWhitelistAppPickerDialog(java.util.Collections.singletonList(serviceName), false));
                     } else {
                         holder.ib.setAlpha(0.5f);
                     }
