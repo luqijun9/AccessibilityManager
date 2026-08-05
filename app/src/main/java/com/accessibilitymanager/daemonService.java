@@ -772,6 +772,7 @@ public class daemonService extends Service {
 
         if (useForceStop) {
             LogUtil.log(daemonService.this, logPrefix + " 强杀进程：" + serviceName + " ← force-stop " + pkgName);
+            boolean forceStopSuccess = false;
             try {
                 Process forceStop = ShellUtil.exec();
                 DataOutputStream fos = new DataOutputStream(forceStop.getOutputStream());
@@ -779,29 +780,33 @@ public class daemonService extends Service {
                 fos.writeBytes("exit\n");
                 fos.flush();
                 fos.close();
-                forceStop.waitFor();
-            } catch (Exception ignored) {
+                
+                int exitCode = forceStop.waitFor();
+                
+                java.io.BufferedReader errorReader = new java.io.BufferedReader(new java.io.InputStreamReader(forceStop.getErrorStream()));
+                StringBuilder errorOutput = new StringBuilder();
+                String line;
+                while ((line = errorReader.readLine()) != null) {
+                    errorOutput.append(line).append(" ");
+                }
+                errorReader.close();
+
+                if (exitCode == 0 && errorOutput.length() == 0) {
+                    forceStopSuccess = true;
+                } else {
+                    LogUtil.log(daemonService.this, logPrefix + " 强杀命令执行失败。ExitCode: " + exitCode + ", Error: " + errorOutput.toString().trim());
+                }
+            } catch (Exception e) {
+                LogUtil.log(daemonService.this, logPrefix + " 强杀过程发生异常: " + e.getMessage());
             }
+
             try { Thread.sleep(500); } catch (InterruptedException ignored) { }
+            
+            if (!forceStopSuccess) {
+                disableServiceOnly(serviceName, logPrefix, true);
+            }
         } else {
-            if (isDegraded) {
-                LogUtil.log(daemonService.this, logPrefix + " (强杀失效降级) 仅关闭服务：" + serviceName);
-            } else {
-                LogUtil.log(daemonService.this, logPrefix + " 仅关闭服务：" + serviceName);
-            }
-            String enabled = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-            if (enabled == null) enabled = "";
-            ComponentName target = ComponentName.unflattenFromString(serviceName);
-            StringBuilder sb = new StringBuilder();
-            for (String entry : enabled.split(":")) {
-                if (entry.isEmpty()) continue;
-                ComponentName entryCn = ComponentName.unflattenFromString(entry);
-                if (target != null && target.equals(entryCn)) continue;
-                if (sb.length() > 0) sb.append(":");
-                sb.append(entry);
-            }
-            Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, sb.toString());
-            try { Thread.sleep(300); } catch (InterruptedException ignored) { }
+            disableServiceOnly(serviceName, logPrefix, isDegraded);
         }
 
         // 不再显示崩溃重启通知
@@ -825,6 +830,27 @@ public class daemonService extends Service {
             mHandler.removeCallbacks(mPostFixCheckRunnable);
             mPostFixCheckRunnable = null;
         }
+    }
+
+    private void disableServiceOnly(String serviceName, String logPrefix, boolean isDegraded) {
+        if (isDegraded) {
+            LogUtil.log(daemonService.this, logPrefix + " (强杀失效降级) 仅关闭服务：" + serviceName);
+        } else {
+            LogUtil.log(daemonService.this, logPrefix + " 仅关闭服务：" + serviceName);
+        }
+        String enabled = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        if (enabled == null) enabled = "";
+        ComponentName target = ComponentName.unflattenFromString(serviceName);
+        StringBuilder sb = new StringBuilder();
+        for (String entry : enabled.split(":")) {
+            if (entry.isEmpty()) continue;
+            ComponentName entryCn = ComponentName.unflattenFromString(entry);
+            if (target != null && target.equals(entryCn)) continue;
+            if (sb.length() > 0) sb.append(":");
+            sb.append(entry);
+        }
+        Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, sb.toString());
+        try { Thread.sleep(300); } catch (InterruptedException ignored) { }
     }
 
     // ════════════════════════════════════════════════════════════════
