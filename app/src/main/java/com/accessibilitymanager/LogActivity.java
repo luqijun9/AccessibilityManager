@@ -198,51 +198,66 @@ public class LogActivity extends AppCompatActivity {
 
     private String getSharedPreferencesDump() {
         StringBuilder sb = new StringBuilder();
-        sb.append("--- 设置项英文对应说明 (Settings Dictionary) ---\n");
-        sb.append("boot : 开机自启\n");
-        sb.append("auto_update : 自动检查更新\n");
-        sb.append("last_update_check_time : 上次检查更新的时间戳\n");
-        sb.append("toast : 运行状态吐司提示\n");
-        sb.append("daemon : 加锁守护服务列表\n");
-        sb.append("delay_daemon : 延迟启动守护服务\n");
-        sb.append("crashfix : 防崩溃/崩溃自动修复\n");
-        sb.append("crashfix_auto_disabled : 防崩溃触发阈值后自动禁用\n");
-        sb.append("fixmode : 强制停止修复模式\n");
-        sb.append("fixmode_disabled_services : 强制停止模式下被禁用的服务记录\n");
-        sb.append("periodic_check : 周期性检查状态\n");
-        sb.append("periodic_check_interval : 周期检查间隔(分钟)\n");
-        sb.append("periodic_check_wake_idle : 检查时唤醒空闲设备\n");
-        sb.append("unlock_crash_check : 解锁后触发崩溃检查\n");
-        sb.append("unlock_crash_dialog_dismissed : 解锁崩溃提示已忽略\n");
-        sb.append("unlock_duplicate_date / unlock_duplicate_count : 解锁重复检测日期/次数\n");
-        sb.append("unlock_duplicate_detected : 检测到异常重复解锁\n");
-        sb.append("ignore_system_crash_trigger : 忽略系统级崩溃触发\n");
-        sb.append("notify_title / notify_text : 保活通知的标题/内容\n");
-        sb.append("whitelist_global_enable : 全局白名单启用状态\n");
-        sb.append("whitelist_services : 白名单服务列表\n");
-        sb.append("global_cooldown_enable : 全局冷却时间启用\n");
-        sb.append("global_cooldown_time_minutes : 全局冷却时间(分钟)\n");
-        sb.append("useronly : 仅显示用户应用\n");
-        sb.append("hide : 隐藏最近任务界面\n");
-        sb.append("first : 首次运行隐私提示状态\n");
-        sb.append("pin_hint_shown : 屏幕固定提示已显示状态\n");
-        sb.append("top : 置顶服务列表\n");
-        sb.append("favorites : 收藏服务列表\n");
-        sb.append("favorites_tab_active : 当前处于收藏标签页\n");
-        sb.append("battery_warning_dismissed : 电池优化警告已忽略\n");
-        sb.append("current_foreground_pkg : 当前前台应用包名记录\n");
-        sb.append("theme : 应用UI主题\n\n");
+        
+        java.util.Map<String, String> descMap = new java.util.HashMap<>();
+        descMap.put("boot", "开机自启");
+        descMap.put("auto_update", "自动检查更新");
+        descMap.put("last_update_check_time", "上次检查更新的时间戳");
+        descMap.put("toast", "toast保活提示");
+        descMap.put("daemon", "加锁守护服务列表");
+        descMap.put("delay_daemon", "延迟保活");
+        descMap.put("crashfix", "崩溃检测总开关");
+        descMap.put("crashfix_auto_disabled", "防崩溃触发阈值后自动禁用");
+        descMap.put("fixmode", "强制停止修复模式");
+        descMap.put("fixmode_disabled_services", "强制停止模式下被禁用的服务记录");
+        descMap.put("periodic_check", "周期性检查状态");
+        descMap.put("periodic_check_interval", "周期检查间隔(分钟)");
+        descMap.put("periodic_check_wake_idle", "检查时唤醒空闲设备");
+        descMap.put("unlock_crash_check", "解锁检测");
+        descMap.put("unlock_crash_dialog_dismissed", "解锁崩溃提示已忽略");
+        descMap.put("unlock_duplicate_date", "解锁重复检测日期");
+        descMap.put("unlock_duplicate_count", "解锁重复检测次数");
+        descMap.put("unlock_duplicate_detected", "检测到异常重复解锁");
+        descMap.put("ignore_system_crash_trigger", "忽略系统级崩溃触发");
+        descMap.put("notify_title", "保活通知的标题");
+        descMap.put("notify_text", "保活通知的内容");
+        descMap.put("whitelist_global_enable", "全局白名单启用状态");
+        descMap.put("whitelist_services", "白名单服务列表");
+        descMap.put("global_cooldown_enable", "全局冷却时间启用");
+        descMap.put("global_cooldown_time_minutes", "全局冷却时间(分钟)");
+        descMap.put("useronly", "仅显示用户应用");
+        descMap.put("hide", "隐藏最近任务界面");
+        descMap.put("first", "首次运行隐私提示状态");
+        descMap.put("pin_hint_shown", "置顶toast提示");
+        descMap.put("top", "置顶服务列表");
+        descMap.put("favorites", "收藏服务列表");
+        descMap.put("favorites_tab_active", "当前处于收藏标签页");
+        descMap.put("battery_warning_dismissed", "电池优化警告已忽略");
+        descMap.put("current_foreground_pkg", "当前前台应用包名记录");
+        descMap.put("theme", "应用UI主题");
 
         sb.append("--- [data] SharedPreferences ---\n");
         android.content.SharedPreferences sp = getSharedPreferences("data", android.content.Context.MODE_PRIVATE);
         for (java.util.Map.Entry<String, ?> entry : sp.getAll().entrySet()) {
-            sb.append(entry.getKey()).append(": ").append(entry.getValue()).append("\n");
+            String key = entry.getKey();
+            String desc = descMap.get(key);
+            if (desc != null) {
+                sb.append(desc).append(" (").append(key).append("): ").append(entry.getValue()).append("\n");
+            } else {
+                sb.append(key).append(": ").append(entry.getValue()).append("\n");
+            }
         }
 
         sb.append("\n--- [Main] SharedPreferences ---\n");
         android.content.SharedPreferences mainSp = getSharedPreferences("Main", android.content.Context.MODE_PRIVATE);
         for (java.util.Map.Entry<String, ?> entry : mainSp.getAll().entrySet()) {
-            sb.append(entry.getKey()).append(": ").append(entry.getValue()).append("\n");
+            String key = entry.getKey();
+            String desc = descMap.get(key);
+            if (desc != null) {
+                sb.append(desc).append(" (").append(key).append("): ").append(entry.getValue()).append("\n");
+            } else {
+                sb.append(key).append(": ").append(entry.getValue()).append("\n");
+            }
         }
         return sb.toString();
     }
