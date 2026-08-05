@@ -616,11 +616,9 @@ public class daemonService extends Service {
             Log.d("AccMgrDebug", "[TASK-" + taskId + "] daemonList and whitelist empty, return");
             return;
         }
-        LogUtil.log(daemonService.this, "[崩溃检测] 触发来源：" + source);
-
         // 先检查 DUMP 权限
         if (!ShellUtil.hasDumpPermission(this)) {
-            LogUtil.log(daemonService.this, "[崩溃检测] 未授予 DUMP 权限，跳过检测（请通过 ADB 授予：adb shell pm grant " + getPackageName() + " android.permission.DUMP）");
+            LogUtil.log(daemonService.this, "[崩溃检测] 触发来源：" + source + "，未授予 DUMP 权限，跳过检测（请通过 ADB 授予：adb shell pm grant " + getPackageName() + " android.permission.DUMP）");
             Log.d("AccMgrDebug", "[TASK-" + taskId + "] DUMP permission not granted, skip");
             return;
         }
@@ -644,7 +642,7 @@ public class daemonService extends Service {
 
             if (!p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
                 p.destroyForcibly();
-                LogUtil.log(daemonService.this, "[崩溃检测] dumpsys 超时(10s)，强制终止");
+                LogUtil.log(daemonService.this, "[崩溃检测] 触发来源：" + source + "，dumpsys 超时(10s)，强制终止");
                 Log.d("AccMgrDebug", "[TASK-" + taskId + "] waitFor TIMEOUT, destroyed");
                 return;
             }
@@ -660,7 +658,7 @@ public class daemonService extends Service {
                 rawCrashedLine = "Crashed services: (未找到此行)";
             }
             Log.d("AccMgrDebug", "[TASK-" + taskId + "] rawCrashedLine=" + rawCrashedLine);
-            LogUtil.log(daemonService.this, "[崩溃检测] 返回 " + rawCrashedLine);
+            LogUtil.log(daemonService.this, "[崩溃检测] 触发来源：" + source + "，返回 " + rawCrashedLine);
 
             List<String> crashedServicesList = new ArrayList<>();
             Matcher serviceMatcher = Pattern.compile("\\{([^{}]+)\\}").matcher(rawCrashedLine);
@@ -696,7 +694,7 @@ public class daemonService extends Service {
             }
             Log.d("AccMgrDebug", "[TASK-" + taskId + "] NORMAL_EXIT");
         } catch (Exception e) {
-            LogUtil.log(daemonService.this, "[崩溃检测] 异常: " + e.getClass().getName() + ": " + e.getMessage());
+            LogUtil.log(daemonService.this, "[崩溃检测] 触发来源：" + source + "，异常: " + e.getClass().getName() + ": " + e.getMessage());
             Log.d("AccMgrDebug", "[TASK-" + taskId + "] OUTER_CATCH: " + e.getClass().getName() + ": " + e.getMessage());
         }
     }
