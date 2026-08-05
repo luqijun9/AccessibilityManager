@@ -719,7 +719,8 @@ public class daemonService extends Service {
             mHandler.post(() -> Toast.makeText(daemonService.this, "保活崩溃服务失败", Toast.LENGTH_SHORT).show());
             return;
         }
-        LogUtil.log(daemonService.this, "[崩溃修复] 修复后复查仍崩溃，进行重试(" + mFixRetryRemaining + ")：" + cs);
+        int currentRetry = 3 - mFixRetryRemaining;
+        LogUtil.log(daemonService.this, "[崩溃修复] 修复后复查仍崩溃，进行重试(" + currentRetry + "/2)：" + cs);
         mFixRetryRemaining--;
         mLastFixTime.put(cs, System.currentTimeMillis());
         fixCrashedService(cs, true);
