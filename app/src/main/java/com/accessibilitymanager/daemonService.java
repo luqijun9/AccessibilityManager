@@ -380,7 +380,7 @@ public class daemonService extends Service {
                     if (isKeepAliveAction) {
                         // daemon 服务：保活日志显示应用名称
                         logDaemonAdded.append(appLabel).append(" ");
-                        LogUtil.log(daemonService.this, "[保活] 检测到服务缺失：" + normalized + " (" + appLabel + ")");
+                        LogUtil.log(daemonService.this, "[保活] 检测到服务缺失：" + appLabel + " (" + normalized + ")");
                         add1.append(appLabel).append(" ");
                     } else {
                         // 白名单服务：状态同步日志显示包名
@@ -706,7 +706,20 @@ public class daemonService extends Service {
         if (lastFix != null && System.currentTimeMillis() - lastFix < 8000) {
             return;
         }
-        LogUtil.log(daemonService.this, "[崩溃检测] 检测到保活服务崩溃：" + cs);
+        String appLabel = cs;
+        int slashIdx = cs.indexOf('/');
+        if (slashIdx > 0) {
+            try {
+                android.content.pm.PackageManager packageManager = getPackageManager();
+                android.content.pm.ApplicationInfo applicationInfo = packageManager.getApplicationInfo(cs.substring(0, slashIdx), android.content.pm.PackageManager.GET_META_DATA);
+                CharSequence label = applicationInfo.loadLabel(packageManager);
+                if (label != null) {
+                    appLabel = label.toString();
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        LogUtil.log(daemonService.this, "[崩溃检测] 检测到保活服务崩溃：" + appLabel + " (" + cs + ")");
         mFixRetryRemaining = 2;
         mLastFixTime.put(cs, System.currentTimeMillis());
         fixCrashedService(cs, false);
