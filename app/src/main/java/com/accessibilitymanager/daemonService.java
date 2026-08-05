@@ -722,7 +722,7 @@ public class daemonService extends Service {
         LogUtil.log(daemonService.this, "[崩溃检测] 检测到保活服务崩溃：" + appLabel + " (" + cs + ")");
         mFixRetryRemaining = 2;
         mLastFixTime.put(cs, System.currentTimeMillis());
-        fixCrashedService(cs, false);
+        fixCrashedService(cs, 0);
     }
 
     /** 在 daemonExecutor 线程中执行：处理修复后复查的崩溃（重试） */
@@ -733,16 +733,15 @@ public class daemonService extends Service {
             return;
         }
         int currentRetry = 3 - mFixRetryRemaining;
-        LogUtil.log(daemonService.this, "[崩溃修复] 修复后复查仍崩溃，进行重试(" + currentRetry + "/2)：" + cs);
         mFixRetryRemaining--;
         mLastFixTime.put(cs, System.currentTimeMillis());
-        fixCrashedService(cs, true);
+        fixCrashedService(cs, currentRetry);
     }
 
     // ════════════════════════════════════════════════════════════════
     //  崩溃修复（仅在 daemonExecutor 线程中执行）
     // ════════════════════════════════════════════════════════════════
-    private void fixCrashedService(String serviceName, boolean isRetry) {
+    private void fixCrashedService(String serviceName, int retryCount) {
         mIsFixing = true;
         mLastFixStartTime = System.currentTimeMillis();
         cancelPostFixCheck();
@@ -780,10 +779,15 @@ public class daemonService extends Service {
         mCrashedFixServiceName = serviceName;
         mCrashedFixLabel = packageLabel;
 
-        String logPrefix = isRetry ? "[崩溃修复-重试]" : "[崩溃修复]";
+        String logPrefix;
+        if (retryCount > 0) {
+            logPrefix = "[崩溃修复] 修复后复查仍崩溃，进行重试(" + retryCount + "/2) ->";
+        } else {
+            logPrefix = "[崩溃修复]";
+        }
 
         if (useForceStop) {
-            LogUtil.log(daemonService.this, logPrefix + " 强杀进程：" + serviceName + " ← force-stop " + pkgName);
+            LogUtil.log(daemonService.this, logPrefix + " 强杀进程：" + packageLabel + " (" + pkgName + ")");
             boolean forceStopSuccess = false;
             try {
                 Process forceStop = ShellUtil.exec();
@@ -815,10 +819,10 @@ public class daemonService extends Service {
             try { Thread.sleep(500); } catch (InterruptedException ignored) { }
             
             if (!forceStopSuccess) {
-                disableServiceOnly(serviceName, logPrefix, true);
+                disableServiceOnly(serviceName, logPrefix, true, packageLabel, pkgName);
             }
         } else {
-            disableServiceOnly(serviceName, logPrefix, isDegraded);
+            disableServiceOnly(serviceName, logPrefix, isDegraded, packageLabel, pkgName);
         }
 
         // 不再显示崩溃重启通知
@@ -844,11 +848,11 @@ public class daemonService extends Service {
         }
     }
 
-    private void disableServiceOnly(String serviceName, String logPrefix, boolean isDegraded) {
+    private void disableServiceOnly(String serviceName, String logPrefix, boolean isDegraded, String packageLabel, String pkgName) {
         if (isDegraded) {
-            LogUtil.log(daemonService.this, logPrefix + " (强杀失效降级) 仅关闭服务：" + serviceName);
+            LogUtil.log(daemonService.this, logPrefix + " (强杀失效降级) 仅关闭服务：" + packageLabel + " (" + pkgName + ")");
         } else {
-            LogUtil.log(daemonService.this, logPrefix + " 仅关闭服务：" + serviceName);
+            LogUtil.log(daemonService.this, logPrefix + " 仅关闭服务：" + packageLabel + " (" + pkgName + ")");
         }
         String enabled = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         if (enabled == null) enabled = "";
