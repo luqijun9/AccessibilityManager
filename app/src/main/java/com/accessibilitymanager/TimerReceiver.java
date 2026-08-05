@@ -33,7 +33,6 @@ public class TimerReceiver extends BroadcastReceiver {
                     return;
                 }
                 int intervalMinutes = sp.getInt("periodic_check_interval", 10);
-                LogUtil.log(context, "[定时唤醒] AlarmManager 触发");
                 Intent serviceIntent = new Intent(context, daemonService.class);
                 serviceIntent.putExtra("source", "Alarm");
                 try {
@@ -45,13 +44,17 @@ public class TimerReceiver extends BroadcastReceiver {
                 } catch (Exception e) {
                     LogUtil.log(context, "[定时唤醒] 启动服务失败: " + e.getMessage());
                 }
-                scheduleNext(context);
+                scheduleNext(context, true);
                 pendingResult.finish();
             }).start();
         }
     }
 
     public static void scheduleNext(Context context) {
+        scheduleNext(context, false);
+    }
+
+    public static void scheduleNext(Context context, boolean fromAlarm) {
         SharedPreferences sp = context.getSharedPreferences("data", Context.MODE_PRIVATE);
         if (!sp.getBoolean("crashfix", false)) {
             cancel(context, "崩溃修复已关闭");
@@ -84,10 +87,12 @@ public class TimerReceiver extends BroadcastReceiver {
             } else {
                 am.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerTime, pi);
             }
-            LogUtil.log(context, "[定时唤醒] 已调度下次强制检测：" + intervalMinutes + "分钟后");
+            String prefix = fromAlarm ? "alarm触发，" : "已调度";
+            LogUtil.log(context, "[定时唤醒] " + prefix + intervalMinutes + "分钟后再次唤醒 (强制)");
         } else {
             am.set(AlarmManager.ELAPSED_REALTIME, triggerTime, pi);
-            LogUtil.log(context, "[定时唤醒] 已调度下次宽松检测：" + intervalMinutes + "分钟后");
+            String prefix = fromAlarm ? "alarm触发，" : "已调度";
+            LogUtil.log(context, "[定时唤醒] " + prefix + intervalMinutes + "分钟后再次唤醒 (宽松)");
         }
     }
 
