@@ -943,7 +943,9 @@ public class daemonService extends Service {
             return;
         }
 
-        Toast.makeText(daemonService.this, "启动保活", Toast.LENGTH_SHORT).show();
+        if (MainActivity.sIsForeground && sp.getBoolean("toast", true)) {
+            Toast.makeText(daemonService.this, "启动保活", Toast.LENGTH_SHORT).show();
+        }
 
         // 注册 ContentObserver 和 BroadcastReceiver
         mContentOb = new SettingsValueChangeContentObserver();
