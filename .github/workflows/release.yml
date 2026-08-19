@@ -81,9 +81,9 @@ jobs:
           if [ -n "$INPUT_VER" ]; then
             CLEAN_VER="${INPUT_VER#v}"
             CLEAN_VER="${CLEAN_VER#V}"
-            VER="$CLEAN_VER"
+            VER=$(echo "$CLEAN_VER" | tr -d '[:space:]')
           else
-            VER=$(awk -F'"' '/versionName/ {print $2}' app/build.gradle)
+            VER=$(grep -E '^\s*versionName\s+' app/build.gradle | head -n 1 | awk -F'"' '{print $2}' | tr -d '[:space:]')
           fi
           echo "version=$VER" >> $GITHUB_OUTPUT
           echo "tag=v$VER" >> $GITHUB_OUTPUT
