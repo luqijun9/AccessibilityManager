@@ -110,6 +110,22 @@ jobs:
         if: steps.check_build.outputs.should_build == 'true'
         run: ./gradlew assembleRelease
 
+      # ---------- 重命名 APK 为 v版本号.apk ----------
+      - name: Rename APK to version format
+        if: steps.check_build.outputs.should_build == 'true'
+        run: |
+          APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          if [ -n "$APK_PATH" ]; then
+            APK_DIR=$(dirname "$APK_PATH")
+            TARGET_APK="${APK_DIR}/${{ steps.get_version.outputs.tag }}.apk"
+            if [ "$APK_PATH" != "$TARGET_APK" ]; then
+              mv "$APK_PATH" "$TARGET_APK"
+              echo "Renamed $APK_PATH to $TARGET_APK"
+            else
+              echo "APK already named correctly: $TARGET_APK"
+            fi
+          fi
+
       # ---------- 验证 APK 签名 ----------
       - name: Verify APK signature
         if: steps.check_build.outputs.should_build == 'true'

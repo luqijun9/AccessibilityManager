@@ -58,6 +58,14 @@ android {
         buildConfig = true
     }
     namespace 'com.accessibilitymanager'
+
+    applicationVariants.all { variant ->
+        variant.outputs.all {
+            if (variant.buildType.name == 'release') {
+                outputFileName = "v${variant.versionName}.apk"
+            }
+        }
+    }
 }
 
 configurations.configureEach {
