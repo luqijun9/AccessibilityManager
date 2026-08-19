@@ -162,7 +162,8 @@ jobs:
         id: changelog
         if: steps.check_build.outputs.should_build == 'true'
         run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          CURRENT_TAG="${{ steps.get_version.outputs.tag }}"
+          PREV_TAG=$(git tag --sort=-creatordate | grep -v "^${CURRENT_TAG}$" | head -n 1 || echo "")
           if [ -z "$PREV_TAG" ]; then
             CHANGELOG=$(git log --pretty="• %s")
           else
