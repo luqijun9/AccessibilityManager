@@ -4,6 +4,17 @@ on:
   push:
     branches: [ "main" ]
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Release 版本号（例如 18.6.3 或 v18.6.3，留空则自动读取 build.gradle）'
+        required: false
+        default: ''
+        type: string
+      force_rebuild:
+        description: '强制重新构建（即使 Tag 已存在也重新编译发布）'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build:
@@ -62,30 +73,46 @@ jobs:
           # 确认路径环境变量存在
           echo "KEYSTORE_PATH=$KEYSTORE_PATH"
 
-      # ---------- 原有构建步骤 ----------
+      # ---------- 版本解析与检测步骤 ----------
       - name: Get version
         id: get_version
         run: |
-          VER=$(awk -F'"' '/versionName/ {print $2}' app/build.gradle)
+          INPUT_VER="${{ github.event.inputs.release_version }}"
+          if [ -n "$INPUT_VER" ]; then
+            CLEAN_VER="${INPUT_VER#v}"
+            CLEAN_VER="${CLEAN_VER#V}"
+            VER="$CLEAN_VER"
+          else
+            VER=$(awk -F'"' '/versionName/ {print $2}' app/build.gradle)
+          fi
           echo "version=$VER" >> $GITHUB_OUTPUT
           echo "tag=v$VER" >> $GITHUB_OUTPUT
 
-      - name: Check tag exists
-        id: check_tag
+      - name: Check should build
+        id: check_build
         run: |
-          if git show-ref --tags --quiet "${{ steps.get_version.outputs.tag }}"; then
-            echo "exists=true" >> $GITHUB_OUTPUT
+          TAG="${{ steps.get_version.outputs.tag }}"
+          FORCE="${{ github.event.inputs.force_rebuild }}"
+          if git show-ref --tags --quiet "$TAG"; then
+            if [ "$FORCE" = "true" ]; then
+              echo "Tag $TAG exists, but force_rebuild is true. Proceeding..."
+              echo "should_build=true" >> $GITHUB_OUTPUT
+            else
+              echo "Tag $TAG already exists and force_rebuild is false. Skipping..."
+              echo "should_build=false" >> $GITHUB_OUTPUT
+            fi
           else
-            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Tag $TAG does not exist. Proceeding..."
+            echo "should_build=true" >> $GITHUB_OUTPUT
           fi
 
       - name: Build APK
-        if: steps.check_tag.outputs.exists == 'false'
+        if: steps.check_build.outputs.should_build == 'true'
         run: ./gradlew assembleRelease
 
-      # ---------- 新增：验证 APK 签名 ----------
+      # ---------- 验证 APK 签名 ----------
       - name: Verify APK signature
-        if: steps.check_tag.outputs.exists == 'false'
+        if: steps.check_build.outputs.should_build == 'true'
         run: |
           APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
           if [ -z "$APK_PATH" ]; then
@@ -117,7 +144,7 @@ jobs:
 
       - name: Generate changelog
         id: changelog
-        if: steps.check_tag.outputs.exists == 'false'
+        if: steps.check_build.outputs.should_build == 'true'
         run: |
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
           if [ -z "$PREV_TAG" ]; then
@@ -130,7 +157,7 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create Release
-        if: steps.check_tag.outputs.exists == 'false'
+        if: steps.check_build.outputs.should_build == 'true'
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ steps.get_version.outputs.tag }}
@@ -141,5 +168,6 @@ jobs:
             ${{ steps.changelog.outputs.log }}
           draft: false
           prerelease: false
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
