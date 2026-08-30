@@ -290,6 +290,38 @@ public class daemonService extends Service {
             }
         }
 
+        // 检查是否有在系统设置等外部重新开启的 paused_daemon 服务，若有则自动恢复保活
+        String pausedDaemonStr = sp.getString("paused_daemon", "");
+        if (pausedDaemonStr != null && !pausedDaemonStr.isEmpty()) {
+            java.util.Set<String> pausedSet = new java.util.HashSet<>(java.util.Arrays.asList(pausedDaemonStr.split(":")));
+            pausedSet.remove("");
+            boolean pausedChanged = false;
+            for (String p : new java.util.ArrayList<>(pausedSet)) {
+                String normP = normalizeServiceId(p);
+                if (currentServices.contains(normP)) {
+                    daemonSet.add(normP);
+                    managedServices.add(normP);
+                    pausedSet.remove(p);
+                    pausedChanged = true;
+                }
+            }
+            if (pausedChanged) {
+                StringBuilder newDaemon = new StringBuilder();
+                for (String d : daemonSet) {
+                    if (newDaemon.length() > 0) newDaemon.append(":");
+                    newDaemon.append(d);
+                }
+                daemonStr = newDaemon.toString();
+
+                StringBuilder newPaused = new StringBuilder();
+                for (String p : pausedSet) {
+                    if (newPaused.length() > 0) newPaused.append(":");
+                    newPaused.append(p);
+                }
+                sp.edit().putString("daemon", daemonStr).putString("paused_daemon", newPaused.toString()).apply();
+            }
+        }
+
         StringBuilder cleanedDaemon = null;
         StringBuilder cleanedWhitelist = null;
         

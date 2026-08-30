@@ -151,6 +151,25 @@ public class MainActivity extends Activity {
             if (settingValue == null) settingValue = "";
             if (!settingValue.equals(tmpSettingValue)) {
                 tmpSettingValue = settingValue; // 同步内部状态，防止状态反复切换时被忽略
+
+                // 检查是否有在系统设置等外部重新开启的 pausedDaemon 服务，若有则自动恢复保活
+                if (pausedDaemon != null && !pausedDaemon.isEmpty()) {
+                    boolean changed = false;
+                    for (String p : pausedDaemon.split(":")) {
+                        if (!p.isEmpty() && isServiceEnabled(p, settingValue)) {
+                            pausedDaemon = removeServiceFromList(pausedDaemon, ComponentName.unflattenFromString(p));
+                            if (!containsService(daemon, p)) {
+                                daemon = p + ":" + daemon;
+                            }
+                            changed = true;
+                        }
+                    }
+                    if (changed) {
+                        sp.edit().putString("daemon", daemon).putString("paused_daemon", pausedDaemon).apply();
+                        StartForeGroundDaemon();
+                    }
+                }
+
                 runOnUiThread(new Runnable() {
                     public void run() {
                         if (mAdapter == null) return;
@@ -165,11 +184,15 @@ public class MainActivity extends Activity {
                         
                         for (int i = first; i <= last; i++) {
                             if (i >= source.size()) continue;
-                            boolean isChecked = isServiceEnabled(source.get(i).getId(), settingValue);
+                            String serviceId = source.get(i).getId();
+                            boolean isChecked = isServiceEnabled(serviceId, settingValue);
                             View view = layoutManager.findViewByPosition(i);
                             if (view != null) {
-                                View ib = view.findViewById(R.id.ib);
-                                if (ib != null) ib.setVisibility(isChecked ? View.VISIBLE : View.INVISIBLE);
+                                android.widget.ImageButton ib = view.findViewById(R.id.ib);
+                                if (ib != null) {
+                                    ib.setVisibility(isChecked ? View.VISIBLE : View.INVISIBLE);
+                                    ib.setImageResource(containsService(daemon, serviceId) ? R.drawable.lock1 : R.drawable.lock);
+                                }
                                 com.google.android.material.materialswitch.MaterialSwitch sw = view.findViewById(R.id.s);
                                 if (sw != null && sw.isChecked() != isChecked) {
                                     sw.setChecked(isChecked);
@@ -1029,6 +1052,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        sIsForeground = false;
         // 保存当前 Tab 状态
         sp.edit().putBoolean("favorites_tab_active", mIsFavoritesTab).apply();
     }
@@ -1036,6 +1060,31 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        sIsForeground = true;
+        
+        settingValue = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        if (settingValue == null) settingValue = "";
+        daemon = sp.getString("daemon", "");
+        pausedDaemon = sp.getString("paused_daemon", "");
+        if (pausedDaemon != null && !pausedDaemon.isEmpty()) {
+            boolean changed = false;
+            for (String p : pausedDaemon.split(":")) {
+                if (!p.isEmpty() && isServiceEnabled(p, settingValue)) {
+                    pausedDaemon = removeServiceFromList(pausedDaemon, ComponentName.unflattenFromString(p));
+                    if (!containsService(daemon, p)) {
+                        daemon = p + ":" + daemon;
+                    }
+                    changed = true;
+                }
+            }
+            if (changed) {
+                sp.edit().putString("daemon", daemon).putString("paused_daemon", pausedDaemon).apply();
+                StartForeGroundDaemon();
+            }
+        }
+        if (mAdapter != null) {
+            mAdapter.notifyDataSetChanged();
+        }
         
         String savedTheme = getSharedPreferences("Main", Context.MODE_PRIVATE).getString(ThemeUtils.PREF_THEME, ThemeUtils.THEME_BLUE);
         if (mCurrentTheme != null && !mCurrentTheme.equals(savedTheme)) {
