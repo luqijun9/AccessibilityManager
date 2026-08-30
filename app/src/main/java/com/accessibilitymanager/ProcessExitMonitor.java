@@ -16,6 +16,9 @@ public class ProcessExitMonitor {
     private static final String PREF_LAST_RECORDED_EXIT = "last_recorded_exit_timestamp";
     private static final String PREF_LAST_HEARTBEAT = "last_heartbeat_time";
     private static final SimpleDateFormat TIME_FMT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
+    private static final long HEARTBEAT_INTERVAL_MS = 20 * 60 * 1000L; // 20分钟一次心跳
+
+    private static volatile long sLastHeartbeatWriteTime = 0;
 
     /**
      * 在 Application 或 daemonService 启动时调用，检查并记录上次退出原因
@@ -28,7 +31,7 @@ public class ProcessExitMonitor {
                 long lastHeartbeat = sp.getLong(PREF_LAST_HEARTBEAT, 0);
                 long now = System.currentTimeMillis();
 
-                // 优先使用 Android 11+ 官方 ApplicationExitInfo
+                // 优先使用 Android 11+ 官方 ApplicationExitInfo (系统内核记录)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
                     if (am != null) {
@@ -58,16 +61,16 @@ public class ProcessExitMonitor {
                             }
                         }
                     }
-                }
-
-                // Android 11 以下或未查询到新记录时，用心跳时间推算
-                if (lastHeartbeat > 0 && lastRecordedExit == 0) {
-                    long offlineDurationMs = now - lastHeartbeat;
-                    // 如果离线超过 2 分钟，记录一次推算日志
-                    if (offlineDurationMs > 2 * 60 * 1000L) {
-                        String lastTimeStr = TIME_FMT.format(new Date(lastHeartbeat));
-                        long minutes = offlineDurationMs / (60 * 1000);
-                        LogUtil.log(context, "[系统诊断] 上次活跃时间为: " + lastTimeStr + "，离线时长约 " + minutes + " 分钟");
+                } else {
+                    // Android 11 以下版本：使用 20 分钟心跳时间推算
+                    if (lastHeartbeat > 0) {
+                        long offlineDurationMs = now - lastHeartbeat;
+                        // 离线达到或超过心跳间隔（20分钟）时记录推算日志
+                        if (offlineDurationMs >= HEARTBEAT_INTERVAL_MS) {
+                            String lastTimeStr = TIME_FMT.format(new Date(lastHeartbeat));
+                            long minutes = offlineDurationMs / (60 * 1000);
+                            LogUtil.log(context, "[系统诊断] 上次活跃时间为: " + lastTimeStr + "，离线时长约 " + minutes + " 分钟");
+                        }
                     }
                 }
             } catch (Exception ignored) {
@@ -76,12 +79,17 @@ public class ProcessExitMonitor {
     }
 
     /**
-     * 更新心跳时间
+     * 更新心跳时间（节流：每20分钟最多更新写入一次）
      */
     public static void updateHeartbeat(Context context) {
+        long now = System.currentTimeMillis();
+        if (now - sLastHeartbeatWriteTime < HEARTBEAT_INTERVAL_MS) {
+            return; // 不足20分钟，跳过写入，避免频繁写磁盘
+        }
+        sLastHeartbeatWriteTime = now;
         try {
             SharedPreferences sp = context.getSharedPreferences("data", Context.MODE_PRIVATE);
-            sp.edit().putLong(PREF_LAST_HEARTBEAT, System.currentTimeMillis()).apply();
+            sp.edit().putLong(PREF_LAST_HEARTBEAT, now).apply();
         } catch (Exception ignored) {
         }
     }
