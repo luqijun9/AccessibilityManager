@@ -100,7 +100,7 @@ public class ProcessExitMonitor {
                 case ApplicationExitInfo.REASON_LOW_MEMORY:
                     return "系统低内存强杀 (Low Memory Killer)";
                 case ApplicationExitInfo.REASON_USER_REQUESTED:
-                    return "用户主动终止 (多任务划掉或强行停止)";
+                    return "用户主动终止";
                 case ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE:
                     return "资源/功耗超标被系统终止 (CPU/后台超额)";
                 case ApplicationExitInfo.REASON_CRASH:

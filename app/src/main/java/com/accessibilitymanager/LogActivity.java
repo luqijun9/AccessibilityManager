@@ -599,6 +599,7 @@ public class LogActivity extends AppCompatActivity {
         }
 
         private int getLineColor(String line) {
+            if (line.contains("[系统监控]") || line.contains("[系统诊断]") || line.contains("[异常崩溃]")) return 0xFFE53935;
             if (line.contains("[崩溃检测]")) return 0xFFE06D00;
             if (line.contains("[崩溃修复]") || line.contains("[崩溃修复-重试]")) return 0xFF2288DD;
             if (line.contains("[保活]")) return 0xFF22AA22;
