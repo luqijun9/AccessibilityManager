@@ -15,7 +15,7 @@ public class ProcessExitMonitor {
 
     private static final String PREF_LAST_RECORDED_EXIT = "last_recorded_exit_timestamp";
     private static final String PREF_LAST_HEARTBEAT = "last_heartbeat_time";
-    private static final SimpleDateFormat TIME_FMT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
+    private static final SimpleDateFormat TIME_FMT = new SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault());
     private static final long HEARTBEAT_INTERVAL_MS = 20 * 60 * 1000L; // 20分钟一次心跳
 
     private static volatile long sLastHeartbeatWriteTime = 0;
@@ -49,7 +49,7 @@ public class ProcessExitMonitor {
                                 String desc = lastExit.getDescription();
 
                                 StringBuilder msg = new StringBuilder();
-                                msg.append("[系统诊断] 上次管理器于 ").append(timeStr).append(" 被终止，原因: ").append(reasonStr);
+                                msg.append("[系统诊断] 管理器于 ").append(timeStr).append(" 被终止，原因: ").append(reasonStr);
                                 if (pssMb > 0) {
                                     msg.append("，内存占用: ").append(pssMb).append("MB");
                                 }
