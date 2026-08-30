@@ -581,6 +581,7 @@ public class LogActivity extends AppCompatActivity {
                 if (convertView == null) {
                     tv = new TextView(LogActivity.this);
                     tv.setTextSize(12f);
+                    tv.setTextIsSelectable(true);
                     tv.setPadding(0, 0, 0, 2);
                     tv.setLineSpacing(0, 1f);
                     tv.setLayoutParams(new ViewGroup.LayoutParams(
