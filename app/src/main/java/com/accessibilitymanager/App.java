@@ -12,6 +12,20 @@ public class App extends Application {
         super.onCreate();
         DynamicColors.applyToActivitiesIfAvailable(this);
         registerActivityLifecycleCallbacks(new ForegroundLifecycleCallback());
+
+        // 检查上次管理器进程被杀/退出的诊断信息
+        ProcessExitMonitor.checkProcessExit(this);
+
+        // 全局未捕获异常日志记录
+        Thread.UncaughtExceptionHandler defaultHandler = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
+            try {
+                LogUtil.log(App.this, "[异常崩溃] 线程: " + t.getName() + ", 错误: " + e.getMessage());
+            } catch (Exception ignored) {}
+            if (defaultHandler != null) {
+                defaultHandler.uncaughtException(t, e);
+            }
+        });
     }
 
     private static class ForegroundLifecycleCallback implements ActivityLifecycleCallbacks {

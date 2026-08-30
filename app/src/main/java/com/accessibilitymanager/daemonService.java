@@ -252,6 +252,7 @@ public class daemonService extends Service {
 
     /** 调用者必须在 daemonExecutor 线程中 */
     private void doDaemonImpl(String s) {
+        ProcessExitMonitor.updateHeartbeat(daemonService.this);
         final List<String> localL = l;  // 拍快照，本次执行使用同一份完整列表
         String daemonStr = sp.getString("daemon", "");
         String whitelistStr = sp.getString("whitelist_services", "");
@@ -925,6 +926,8 @@ public class daemonService extends Service {
     public void onCreate() {
         super.onCreate();
         sInstance = this;
+        ProcessExitMonitor.checkProcessExit(this);
+        ProcessExitMonitor.updateHeartbeat(this);
         Log.d("AM_DIAG", "[daemonService] onCreate 开始, pid=" + android.os.Process.myPid());
         mHandler = new Handler();
         sp = getSharedPreferences("data", 0);
@@ -1070,5 +1073,12 @@ public class daemonService extends Service {
         }
         mFirstCommandAfterCreate = false;
         return START_STICKY;
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        super.onTaskRemoved(rootIntent);
+        LogUtil.log(this, "[系统监控] 管理器多任务卡片被划掉");
+        ProcessExitMonitor.updateHeartbeat(this);
     }
 }
