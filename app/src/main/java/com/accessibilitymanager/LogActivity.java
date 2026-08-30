@@ -44,6 +44,9 @@ public class LogActivity extends AppCompatActivity {
     private LogAdapter adapter;
     private List<LogUtil.LogEntry> entries;
     private boolean night;
+    private androidx.appcompat.widget.Toolbar toolbar;
+    private boolean mIsMultiSelectMode = false;
+    private final java.util.Set<Integer> mSelectedPositions = new java.util.TreeSet<>();
 
     // ── 实时监听 ──
     private LogUtil.LogListener mLogListener;
@@ -82,11 +85,32 @@ public class LogActivity extends AppCompatActivity {
         listView = findViewById(R.id.recycler_log);
         tvEmpty = findViewById(R.id.tv_empty);
 
-        androidx.appcompat.widget.Toolbar toolbar = findViewById(R.id.toolbar);
+        toolbar = findViewById(R.id.toolbar);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             toolbar.setNavigationIcon(R.drawable.ic_back_arrow);
         }
         toolbar.setNavigationOnClickListener(v -> finish());
+
+        listView.setOnItemLongClickListener((parent, view, position, id) -> {
+            if (entries == null || position < 0 || position >= entries.size()) return false;
+            LogUtil.LogEntry item = entries.get(position);
+            if (item.type != LogUtil.LogEntry.TYPE_LOG_LINE) return false;
+            
+            if (!mIsMultiSelectMode) {
+                enterMultiSelectMode(position);
+            } else {
+                toggleItemSelection(position);
+            }
+            return true;
+        });
+
+        listView.setOnItemClickListener((parent, view, position, id) -> {
+            if (!mIsMultiSelectMode) return;
+            if (entries == null || position < 0 || position >= entries.size()) return;
+            LogUtil.LogEntry item = entries.get(position);
+            if (item.type != LogUtil.LogEntry.TYPE_LOG_LINE) return;
+            toggleItemSelection(position);
+        });
 
         findViewById(R.id.btn_close).setOnClickListener(v -> finish());
         
@@ -137,6 +161,115 @@ public class LogActivity extends AppCompatActivity {
         // 重新加载（可能跨天）
         loadLogs();
         startListening();
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (mIsMultiSelectMode) {
+            exitMultiSelectMode();
+            return;
+        }
+        super.onBackPressed();
+    }
+
+    private void enterMultiSelectMode(int position) {
+        mIsMultiSelectMode = true;
+        mSelectedPositions.clear();
+        mSelectedPositions.add(position);
+        listView.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+        updateMultiSelectToolbar();
+        if (adapter != null) adapter.notifyDataSetChanged();
+    }
+
+    private void toggleItemSelection(int position) {
+        if (mSelectedPositions.contains(position)) {
+            mSelectedPositions.remove(position);
+            if (mSelectedPositions.isEmpty()) {
+                exitMultiSelectMode();
+                return;
+            }
+        } else {
+            mSelectedPositions.add(position);
+        }
+        updateMultiSelectToolbar();
+        if (adapter != null) adapter.notifyDataSetChanged();
+    }
+
+    private void exitMultiSelectMode() {
+        mIsMultiSelectMode = false;
+        mSelectedPositions.clear();
+        toolbar.setTitle("运行日志");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            toolbar.setNavigationIcon(R.drawable.ic_back_arrow);
+        }
+        toolbar.setNavigationOnClickListener(v -> finish());
+        toolbar.getMenu().clear();
+        if (adapter != null) adapter.notifyDataSetChanged();
+    }
+
+    private void updateMultiSelectToolbar() {
+        toolbar.setTitle("已选择 " + mSelectedPositions.size() + " 项");
+        toolbar.setNavigationIcon(R.drawable.ic_close);
+        toolbar.setNavigationOnClickListener(v -> exitMultiSelectMode());
+        toolbar.getMenu().clear();
+
+        android.view.MenuItem itemSelectAll = toolbar.getMenu().add(0, 1, 0, "全选");
+        itemSelectAll.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS);
+
+        android.view.MenuItem itemCopy = toolbar.getMenu().add(0, 2, 1, "复制");
+        itemCopy.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS);
+
+        toolbar.setOnMenuItemClickListener(item -> {
+            if (item.getItemId() == 1) {
+                toggleSelectAll();
+                return true;
+            } else if (item.getItemId() == 2) {
+                copySelectedLogs();
+                return true;
+            }
+            return false;
+        });
+    }
+
+    private void toggleSelectAll() {
+        if (entries == null) return;
+        int totalLogCount = 0;
+        for (int i = 0; i < entries.size(); i++) {
+            if (entries.get(i).type == LogUtil.LogEntry.TYPE_LOG_LINE) totalLogCount++;
+        }
+        if (mSelectedPositions.size() >= totalLogCount) {
+            mSelectedPositions.clear();
+            exitMultiSelectMode();
+        } else {
+            mSelectedPositions.clear();
+            for (int i = 0; i < entries.size(); i++) {
+                if (entries.get(i).type == LogUtil.LogEntry.TYPE_LOG_LINE) {
+                    mSelectedPositions.add(i);
+                }
+            }
+            updateMultiSelectToolbar();
+            if (adapter != null) adapter.notifyDataSetChanged();
+        }
+    }
+
+    private void copySelectedLogs() {
+        if (mSelectedPositions.isEmpty() || entries == null) {
+            exitMultiSelectMode();
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int pos : mSelectedPositions) {
+            if (pos >= 0 && pos < entries.size()) {
+                if (sb.length() > 0) sb.append("\n");
+                sb.append(entries.get(pos).text);
+            }
+        }
+        android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+        if (cm != null) {
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("log", sb.toString()));
+            Toast.makeText(this, "已复制 " + mSelectedPositions.size() + " 条日志", Toast.LENGTH_SHORT).show();
+        }
+        exitMultiSelectMode();
     }
 
     // ── 实时监听 ──
@@ -581,9 +714,8 @@ public class LogActivity extends AppCompatActivity {
                 if (convertView == null) {
                     tv = new TextView(LogActivity.this);
                     tv.setTextSize(12f);
-                    tv.setTextIsSelectable(true);
-                    tv.setPadding(0, 0, 0, 2);
-                    tv.setLineSpacing(0, 1f);
+                    tv.setPadding(16, 6, 16, 6);
+                    tv.setLineSpacing(0, 1.15f);
                     tv.setLayoutParams(new ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
                 } else {
@@ -595,6 +727,15 @@ public class LogActivity extends AppCompatActivity {
                 ssb.setSpan(new ForegroundColorSpan(color), 0, line.length(),
                         Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 tv.setText(ssb);
+
+                if (mSelectedPositions.contains(position)) {
+                    android.graphics.drawable.GradientDrawable selBg = new android.graphics.drawable.GradientDrawable();
+                    selBg.setColor(night ? 0x33FFFFFF : 0x22000000);
+                    selBg.setCornerRadius(10f);
+                    tv.setBackground(selBg);
+                } else {
+                    tv.setBackground(null);
+                }
                 return tv;
             }
         }

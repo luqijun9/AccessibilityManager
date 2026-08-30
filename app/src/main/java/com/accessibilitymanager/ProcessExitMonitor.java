@@ -119,6 +119,16 @@ public class ProcessExitMonitor {
                     return "其他系统原因";
                 case ApplicationExitInfo.REASON_EXIT_SELF:
                     return "应用自身正常退出";
+                case 16: // ApplicationExitInfo.REASON_PACKAGE_UPDATED
+                    return "应用覆盖安装/更新";
+                case 14: // ApplicationExitInfo.REASON_FREEZER
+                    return "后台冻结终止";
+                case 15: // ApplicationExitInfo.REASON_PACKAGE_STATE_CHANGE
+                    return "应用状态改变";
+                case 2:  // ApplicationExitInfo.REASON_SIGNALED
+                    return "系统底层信号终止";
+                case 11: // ApplicationExitInfo.REASON_USER_STOPPED
+                    return "用户切换/停止";
                 default:
                     return "未知原因(" + reason + ")";
             }
