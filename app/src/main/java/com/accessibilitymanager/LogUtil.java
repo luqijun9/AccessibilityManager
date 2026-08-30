@@ -60,21 +60,17 @@ public class LogUtil {
                 sCurrentDate = today;
                 sLastLogTime = 0;
 
-                boolean fileExists = logFile.exists() && logFile.length() > 0;
-                if (!fileExists) {
-                    String displayDate = DISPLAY_DATE_FMT.format(new Date(now));
-                    FileOutputStream fos = new FileOutputStream(logFile, true);
-                    OutputStreamWriter writer = new OutputStreamWriter(fos, "UTF-8");
-                    String dateLine = DATE_SEPARATOR_PREFIX + displayDate;
-                    writer.write(dateLine + "\n");
-                    writer.flush();
-                    writer.close();
-
-                    // 通知日期分隔行
-                    notifyListeners(LogEntry.TYPE_DATE_SEPARATOR, displayDate);
-                }
+                String displayDate = DISPLAY_DATE_FMT.format(new Date(now));
+                FileOutputStream fos = new FileOutputStream(logFile, true);
+                OutputStreamWriter writer = new OutputStreamWriter(fos, "UTF-8");
+                String dateLine = DATE_SEPARATOR_PREFIX + displayDate;
+                writer.write(dateLine + "\n");
+                writer.flush();
+                writer.close();
 
                 cleanupOldLogs(dir);
+                // 通知日期分隔行
+                notifyListeners(LogEntry.TYPE_DATE_SEPARATOR, displayDate);
             }
 
             String timestamp = TIME_FMT.format(new Date(now));
