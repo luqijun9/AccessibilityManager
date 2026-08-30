@@ -86,7 +86,7 @@ public class MainActivity extends Activity {
     androidx.recyclerview.widget.RecyclerView listView;//列表视图
     ServiceListAdapter mAdapter;
     SharedPreferences sp;//共享偏好设置
-    String settingValue, tmpSettingValue, daemon, top;  //当前设置项值，临时设置项值，守护进程名称，顶部进程名称
+    String settingValue, tmpSettingValue, daemon, pausedDaemon, top;  //当前设置项值，临时设置项值，守护进程名称，暂挂守护进程名称，顶部进程名称
     boolean night = true;//是否为夜间模式
     PackageManager pm;//包管理器
     boolean perm = false;//是否获取了权限
@@ -307,6 +307,7 @@ public class MainActivity extends Activity {
         }
 
         daemon = sp.getString("daemon", "");
+        pausedDaemon = sp.getString("paused_daemon", "");
         top = sp.getString("top", "");
         Sort();
 
@@ -646,6 +647,18 @@ public class MainActivity extends Activity {
             if (target.equals(entryCn)) return true;
         }
         return false;
+    }
+
+    private String removeServiceFromList(String list, ComponentName serviceComponent) {
+        if (list == null || list.isEmpty() || serviceComponent == null) return "";
+        String[] entries = list.split(":");
+        StringBuilder newList = new StringBuilder();
+        for (String entry : entries) {
+            if (entry.isEmpty() || serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
+            if (newList.length() > 0) newList.append(":");
+            newList.append(entry);
+        }
+        return newList.toString();
     }
 
     private String normalizeServiceId(String serviceId) {
@@ -1781,6 +1794,7 @@ public class MainActivity extends Activity {
                     Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             if (settingValue == null) settingValue = "";
             daemon = sp.getString("daemon", "");
+            pausedDaemon = sp.getString("paused_daemon", "");
 
             // 刷新列表显示
             runOnUiThread(() -> updateAdapter(tmp));
@@ -1902,18 +1916,15 @@ public class MainActivity extends Activity {
                     return;
                 }
                 if (containsService(daemon, serviceName)) {
-                    String[] entries = daemon.split(":");
-                    StringBuilder newList = new StringBuilder();
-                    for (String entry : entries) {
-                        if (entry.isEmpty() || serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
-                        if (newList.length() > 0) newList.append(":");
-                        newList.append(entry);
-                    }
-                    daemon = newList.toString();
+                    // 用户主动点击锁图标解锁：从活跃保活和暂挂记忆列表中彻底移除
+                    daemon = removeServiceFromList(daemon, serviceComponent);
+                    pausedDaemon = removeServiceFromList(pausedDaemon, serviceComponent);
                 } else {
+                    // 用户主动加锁：加入 daemon，并从 paused_daemon 移除
                     daemon = serviceName + ":" + daemon;
+                    pausedDaemon = removeServiceFromList(pausedDaemon, serviceComponent);
                 }
-                sp.edit().putString("daemon", daemon).apply();
+                sp.edit().putString("daemon", daemon).putString("paused_daemon", pausedDaemon).apply();
                 holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
                 StartForeGroundDaemon();
             });
@@ -1930,9 +1941,36 @@ public class MainActivity extends Activity {
                     if (s == null) s = "";
 
                     if (holder.sw.isChecked()) {
+                        // === 用户在管理器中主动开启服务 ===
+                        // 如果此前在暂挂列表中，自动恢复其保活状态
+                        if (containsService(pausedDaemon, serviceName)) {
+                            pausedDaemon = removeServiceFromList(pausedDaemon, serviceComponent);
+                            if (!containsService(daemon, serviceName)) {
+                                daemon = serviceName + ":" + daemon;
+                            }
+                            sp.edit().putString("daemon", daemon).putString("paused_daemon", pausedDaemon).commit();
+                            holder.ib.setImageResource(R.drawable.lock1);
+                            StartForeGroundDaemon();
+                        } else {
+                            holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
+                        }
+
                         if (!isServiceEnabled(serviceName, s)) tmpSettingValue = serviceName + ":" + s;
                         else tmpSettingValue = s;
+                        Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
+                        holder.ib.setVisibility(View.VISIBLE);
                     } else {
+                        // === 用户在管理器中主动关闭服务 ===
+                        // 如果处于保活列表中，暂挂其保活配置（移入 paused_daemon，从 daemon 移除），防止后台立即拉起冲突
+                        if (containsService(daemon, serviceName)) {
+                            daemon = removeServiceFromList(daemon, serviceComponent);
+                            if (!containsService(pausedDaemon, serviceName)) {
+                                pausedDaemon = serviceName + ":" + pausedDaemon;
+                            }
+                            sp.edit().putString("daemon", daemon).putString("paused_daemon", pausedDaemon).commit();
+                            StartForeGroundDaemon();
+                        }
+
                         StringBuilder sb = new StringBuilder();
                         for (String entry : s.split(":")) {
                             if (entry.isEmpty() || serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
@@ -1940,9 +1978,9 @@ public class MainActivity extends Activity {
                             sb.append(entry);
                         }
                         tmpSettingValue = sb.toString();
+                        Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
+                        holder.ib.setVisibility(View.INVISIBLE);
                     }
-                    Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
-                    holder.ib.setVisibility(holder.sw.isChecked() ? View.VISIBLE : View.INVISIBLE);
                 }
             });
 
@@ -2330,6 +2368,7 @@ public class MainActivity extends Activity {
             updateToolbarMenu();
             favorites = sp.getString("favorites", "");
             daemon = sp.getString("daemon", "");
+            pausedDaemon = sp.getString("paused_daemon", "");
             top = sp.getString("top", "");
             Sort();
             runOnUiThread(() -> {

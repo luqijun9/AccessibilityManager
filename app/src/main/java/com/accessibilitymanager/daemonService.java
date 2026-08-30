@@ -398,6 +398,7 @@ public class daemonService extends Service {
         // Cleanup stale services from SharedPreferences
         if (cleanedDaemon != null) {
             cleanupStaleServices("daemon", daemonStr, cleanedDaemon.toString());
+            cleanupStaleServices("paused_daemon", sp.getString("paused_daemon", ""), cleanedDaemon.toString());
         }
         if (cleanedWhitelist != null) {
             cleanupStaleServices("whitelist_services", whitelistStr, cleanedWhitelist.toString());
