@@ -43,7 +43,8 @@ public class SettingsActivity extends AppCompatActivity {
     private final android.util.LruCache<String, android.graphics.drawable.Drawable> mIconCache = new android.util.LruCache<>(30);
 
     // 子项视图引用
-    private MaterialSwitch switchBoot, switchToast, switchUserOnly, switchHide, switchDelayDaemon;
+    private MaterialSwitch switchBoot, switchToast, switchUserOnly, switchHide, switchDelayDaemon, switchManualCloseDaemon;
+    private View manualCloseDaemonLayout;
     private MaterialSwitch switchCrashFix, switchUnlockCrashCheck, switchFixMode, switchGlobalCooldown;
     private MaterialSwitch switchPeriodicCheck, switchWakeIdle, switchIgnoreSystemCrash;
     private MaterialSwitch switchAutoUpdate;
@@ -120,6 +121,14 @@ public class SettingsActivity extends AppCompatActivity {
         initViews();
         loadValues();
         setupListeners();
+
+        if (getIntent().getBooleanExtra("scroll_to_crash_fix", false)) {
+            View targetView = findViewById(R.id.section_crash_fix);
+            android.widget.ScrollView scrollView = findViewById(R.id.settings_scroll_view);
+            if (targetView != null && scrollView != null) {
+                scrollView.post(() -> scrollView.smoothScrollTo(0, targetView.getTop()));
+            }
+        }
     }
 
     @Override
@@ -200,6 +209,8 @@ public class SettingsActivity extends AppCompatActivity {
         switchUserOnly = findViewById(R.id.useronly);
         switchHide = findViewById(R.id.hide);
         switchDelayDaemon = findViewById(R.id.delay_daemon);
+        switchManualCloseDaemon = findViewById(R.id.manual_close_daemon);
+        manualCloseDaemonLayout = findViewById(R.id.manual_close_daemon_layout);
         switchCrashFix = findViewById(R.id.crashfix);
         switchGlobalCooldown = findViewById(R.id.global_cooldown_enable);
         globalCooldownEnableLayout = findViewById(R.id.global_cooldown_enable_layout);
@@ -235,6 +246,7 @@ public class SettingsActivity extends AppCompatActivity {
         switchUserOnly.setChecked(sp.getBoolean("useronly", false));
         switchHide.setChecked(sp.getBoolean("hide", false));
         switchDelayDaemon.setChecked(sp.getBoolean("delay_daemon", false));
+        switchManualCloseDaemon.setChecked(sp.getBoolean("manual_close_daemon", false));
         switchCrashFix.setChecked(sp.getBoolean("crashfix", false));
         boolean globalCooldownEnabled = sp.getBoolean("global_cooldown_enable", false);
         switchGlobalCooldown.setChecked(globalCooldownEnabled);
@@ -293,6 +305,13 @@ public class SettingsActivity extends AppCompatActivity {
 
         switchDelayDaemon
                 .setOnCheckedChangeListener((btn, checked) -> sp.edit().putBoolean("delay_daemon", checked).apply());
+
+        switchManualCloseDaemon
+                .setOnCheckedChangeListener((btn, checked) -> sp.edit().putBoolean("manual_close_daemon", checked).apply());
+
+        if (manualCloseDaemonLayout != null) {
+            manualCloseDaemonLayout.setOnClickListener(v -> switchManualCloseDaemon.toggle());
+        }
 
         // 崩溃服务检测总开关
         final MaterialSwitch crashFixRef = switchCrashFix;

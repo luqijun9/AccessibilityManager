@@ -500,6 +500,7 @@ public class MainActivity extends Activity {
                                 p.waitFor();
                                 if (p.exitValue() == 0) {
                                     Toast.makeText(MainActivity.this, "成功激活", Toast.LENGTH_SHORT).show();
+                                    runOnUiThread(() -> checkAndShowCrashFixIntroDialog());
                                 }
                             } catch (IOException | InterruptedException ignored) {
                                 Toast.makeText(MainActivity.this, "激活失败", Toast.LENGTH_SHORT).show();
@@ -1057,6 +1058,7 @@ public class MainActivity extends Activity {
         }
         
         checkBatteryOptimization();
+        checkAndShowCrashFixIntroDialog();
         if (sp.getBoolean("auto_update", true)) {
             long now = System.currentTimeMillis();
             if (now - mLastAutoUpdateCheckTime < 10_000) {
@@ -1202,6 +1204,7 @@ public class MainActivity extends Activity {
                 p.waitFor();
                 if (p.exitValue() == 0) {
                     Toast.makeText(this, "成功激活", Toast.LENGTH_SHORT).show();
+                    runOnUiThread(this::checkAndShowCrashFixIntroDialog);
                 }
             } catch (IOException | InterruptedException ioException) {
                 Toast.makeText(this, "激活失败", Toast.LENGTH_SHORT).show();
@@ -1226,6 +1229,33 @@ public class MainActivity extends Activity {
             LogUtil.log(this, "[权限] Shizuku未运行，显示权限不足对话框");
             showNoPermissionDialog(true);
         }
+    }
+
+    /** 引导开启崩溃检测的提示弹窗（遵循首次引导、尊重用户意图原则） */
+    private void checkAndShowCrashFixIntroDialog() {
+        if (isFinishing() || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && isDestroyed())) return;
+        if (sp.getBoolean("crashfix_intro_shown", false)) return;
+        // 如果 SharedPreferences 中已存在 crashfix 的配置记录（覆盖安装或已手动配置过），直接标记已展示并退出
+        if (sp.contains("crashfix")) {
+            sp.edit().putBoolean("crashfix_intro_shown", true).apply();
+            return;
+        }
+        if (!ShellUtil.hasDumpPermission(this)) return;
+
+        sp.edit().putBoolean("crashfix_intro_shown", true).apply();
+
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+                .setTitle("建议开启崩溃检测")
+                .setMessage("如果是因为无障碍已开启却无法使用的问题而下载管理器，建议开启崩溃检测，以在检测到无障碍服务运行异常时能够自动重启服务。")
+                .setPositiveButton("开启并配置", (dialog, which) -> {
+                    enableCrashFix(true);
+                    Intent intent = new Intent(MainActivity.this, SettingsActivity.class);
+                    intent.putExtra("scroll_to_crash_fix", true);
+                    startActivityForResult(intent, REQUEST_SETTINGS);
+                    overridePendingTransition(R.anim.slide_in_right, R.anim.slide_out_left);
+                })
+                .setNegativeButton("暂不开启", null)
+                .show();
     }
 
     private void enableCrashFix() {
@@ -1931,6 +1961,7 @@ public class MainActivity extends Activity {
                     daemon = removeServiceFromList(daemon, serviceComponent);
                 } else {
                     daemon = serviceName + ":" + daemon;
+                    checkAndShowCrashFixIntroDialog();
                 }
                 sp.edit().putString("daemon", daemon).apply();
                 holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
@@ -1957,12 +1988,14 @@ public class MainActivity extends Activity {
                         holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
                     } else {
                         // === 用户在管理器中关闭服务 ===
-                        // 如果处于保活列表中，同时解除保活（从 daemon 中移除），防止后台立即拉起
-                        if (containsService(daemon, serviceName)) {
-                            daemon = removeServiceFromList(daemon, serviceComponent);
-                            sp.edit().putString("daemon", daemon).apply();
-                            holder.ib.setImageResource(R.drawable.lock);
-                            StartForeGroundDaemon();
+                        // 如果开启了“可在管理器手动关闭保活服务”：处于保活列表中时同时解除保活，再次开启需重新手动加锁
+                        if (sp.getBoolean("manual_close_daemon", false)) {
+                            if (containsService(daemon, serviceName)) {
+                                daemon = removeServiceFromList(daemon, serviceComponent);
+                                sp.edit().putString("daemon", daemon).apply();
+                                holder.ib.setImageResource(R.drawable.lock);
+                                StartForeGroundDaemon();
+                            }
                         }
 
                         StringBuilder sb = new StringBuilder();
@@ -2194,6 +2227,7 @@ public class MainActivity extends Activity {
                                 p.waitFor();
                                 if (p.exitValue() == 0) {
                                     Toast.makeText(MainActivity.this, "成功激活", Toast.LENGTH_SHORT).show();
+                                    runOnUiThread(() -> checkAndShowCrashFixIntroDialog());
                                 }
                             } catch (java.io.IOException | InterruptedException ignored) {
                                 Toast.makeText(MainActivity.this, "激活失败", Toast.LENGTH_SHORT).show();
