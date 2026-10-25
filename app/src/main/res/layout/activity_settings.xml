@@ -537,17 +537,9 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="LSPosed 模块模式（实验性）"
+                            android:text="LSPosed 模块模式"
                             android:textColor="@color/text_primary"
                             android:textSize="16sp" />
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="由 system_server 模块接管崩溃检测和关→开，不再使用 Shizuku/dumpsys"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="13sp"
-                            android:layout_marginTop="2dp" />
 
                         <TextView
                             android:id="@+id/lsposed_module_status"
@@ -555,8 +547,8 @@
                             android:layout_height="wrap_content"
                             android:text="检测中..."
                             android:textColor="@color/text_secondary"
-                            android:textSize="12sp"
-                            android:layout_marginTop="4dp" />
+                            android:textSize="13sp"
+                            android:layout_marginTop="2dp" />
                     </LinearLayout>
 
                     <com.google.android.material.materialswitch.MaterialSwitch

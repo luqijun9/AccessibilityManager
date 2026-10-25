@@ -2,11 +2,17 @@ package com.accessibilitymanager;
 
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.database.ContentObserver;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.widget.Toast;
+
+import androidx.appcompat.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -390,5 +396,61 @@ public final class ModuleConfig {
             LogUtil.log(context, "[模块] 写入 " + key + " 失败: " + t);
             return false;
         }
+    }
+
+    /** 尝试打开已安装的 LSPosed 管理器应用 */
+    public static boolean openLsposedManager(Context context) {
+        if (context == null) return false;
+        String[] packages = new String[] {
+                "org.lsposed.manager",
+                "org.lsposed.manager.core",
+                "io.github.vvb2060.magisk",
+                "com.topjohnwu.magisk"
+        };
+        PackageManager pm = context.getPackageManager();
+        for (String pkg : packages) {
+            try {
+                Intent intent = pm.getLaunchIntentForPackage(pkg);
+                if (intent != null) {
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    context.startActivity(intent);
+                    return true;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        try {
+            Intent intent = new Intent("org.lsposed.manager.ACTION_LAUNCH");
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+            return true;
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
+    /** 弹出 LSPosed 模块未激活提示与引导对话框 */
+    public static void showLsposedNotActivatedDialog(Context context, Runnable onFallbackToNormal) {
+        if (context == null) return;
+        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(context)
+                .setTitle("LSPosed 模块未激活")
+                .setMessage("当前尚未检测到本模块在 LSPosed 中激活或生效。\n\n"
+                        + "激活步骤：\n"
+                        + "1. 打开【LSPosed 管理器】\n"
+                        + "2. 在模块列表中找到并勾选【无障碍管理器】\n"
+                        + "3. 推荐勾选作用域：系统框架 (Android 系统)\n"
+                        + "4. 重启手机（或执行软重启）使模块生效\n\n"
+                        + "激活生效后即可享受系统底层被动实时监听与 0 轮询保活。")
+                .setPositiveButton("打开 LSPosed", (dialog, which) -> {
+                    if (!openLsposedManager(context)) {
+                        Toast.makeText(context, "未找到 LSPosed 管理器，请手动前往打开", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("知道了", null);
+
+        if (onFallbackToNormal != null) {
+            builder.setNeutralButton("改用普通模式", (dialog, which) -> onFallbackToNormal.run());
+        }
+        builder.show();
     }
 }

@@ -5,6 +5,7 @@ import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.AlertDialog;
+import android.app.Dialog;
 import android.app.NotificationManager;
 import android.app.Service;
 import android.content.ClipData;
@@ -21,6 +22,7 @@ import android.content.res.Configuration;
 import android.database.ContentObserver;
 import android.content.res.TypedArray;
 import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Build;
@@ -33,6 +35,7 @@ import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
+import android.util.DisplayMetrics;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -41,6 +44,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsetsController;
+import android.view.WindowManager;
 import android.view.accessibility.AccessibilityManager;
 import android.widget.BaseAdapter;
 import android.widget.EditText;
@@ -2038,31 +2042,22 @@ public class MainActivity extends Activity {
             holder.sw.setEnabled(true);
             holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
             holder.ib.setOnClickListener(view -> {
-                boolean lsposed = sp.getBoolean("lsposed_mode", false);
-                if (!lsposed && checkPermission()) {
-                    createPermissionDialog();
+                if (!isModeEstablished()) {
+                    showModeSelectDialog(() -> performLockToggle(serviceName, serviceComponent, holder));
                     return;
                 }
-                if (containsService(daemon, serviceName)) {
-                    daemon = removeServiceFromList(daemon, serviceComponent);
-                } else {
-                    daemon = serviceName + ":" + daemon;
-                    if (!lsposed) checkAndShowCrashFixIntroDialog();
-                }
-                sp.edit().putString("daemon", daemon).apply();
-                syncModuleServicesIfNeeded();
-                holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
-                if (lsposed && !ModuleConfig.isRemoteConfigAvailable()) {
-                    Toast.makeText(MainActivity.this, "模块配置通道未连接，锁定列表可能未同步",
-                            Toast.LENGTH_SHORT).show();
-                }
-                if (!lsposed) StartForeGroundDaemon();
+                performLockToggle(serviceName, serviceComponent, holder);
             });
 
             holder.sw.setChecked(isServiceEnabled(serviceName, settingValue));
             holder.ib.setVisibility(holder.sw.isChecked() ? View.VISIBLE : View.INVISIBLE);
             
             holder.sw.setOnClickListener(view -> {
+                if (!isModeEstablished()) {
+                    holder.sw.setChecked(!holder.sw.isChecked());
+                    showModeSelectDialog(() -> updateAdapter(tmp));
+                    return;
+                }
                 if (sp.getBoolean("lsposed_mode", false)) {
                     boolean enable = holder.sw.isChecked();
                     if (!enable && sp.getBoolean("manual_close_daemon", false)
@@ -2327,48 +2322,148 @@ public class MainActivity extends Activity {
             }
         }
 
-        private void createPermissionDialog() {
-            String pkg = getPackageName();
-            String cmd = "adb shell \"pm grant " + pkg + " android.permission.WRITE_SECURE_SETTINGS; pm grant " + pkg + " android.permission.DUMP\"";
-            String rootCmd = "pm grant " + pkg + " android.permission.WRITE_SECURE_SETTINGS; pm grant " + pkg + " android.permission.DUMP";
-            new com.google.android.material.dialog.MaterialAlertDialogBuilder(MainActivity.this)
-                    .setMessage("安卓5.1和更低版本的设备，需将本APP转换为系统应用。\n\n安卓6.0及更高版本的设备，在下面三个方法中任选一个均可：\n1.连接电脑USB调试后在电脑CMD执行以下命令：\n" + cmd + "\n\n2.root激活。\n\n3.Shizuku激活。")
-                    .setTitle("需要授予权限")
-                    .setPositiveButton("复制命令", new DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface dialogInterface, int i) {
-                            ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("c", cmd));
-                            Toast.makeText(MainActivity.this, "命令已复制到剪切板", Toast.LENGTH_SHORT).show();
-                        }
-                    })
-                    .setNegativeButton("root激活", new DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface dialoginterface, int i) {
-                            Process p;
-                            try {
-                                p = Runtime.getRuntime().exec("su");
-                                java.io.DataOutputStream o = new java.io.DataOutputStream(p.getOutputStream());
-                                o.writeBytes(rootCmd + "\nexit\n");
-                                o.flush();
-                                o.close();
-                                p.waitFor();
-                                if (p.exitValue() == 0) {
-                                    Toast.makeText(MainActivity.this, "成功激活", Toast.LENGTH_SHORT).show();
-                                    runOnUiThread(() -> checkAndShowCrashFixIntroDialog());
-                                }
-                            } catch (java.io.IOException | InterruptedException ignored) {
-                                Toast.makeText(MainActivity.this, "激活失败", Toast.LENGTH_SHORT).show();
-                            }
-                        }
-                    })
-                    .setNeutralButton("Shizuku激活", new DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface dialogInterface, int i) {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) check();
-                        }
-                    })
-                    .create().show();
+        private void performLockToggle(String serviceName, ComponentName serviceComponent, ItemViewHolder holder) {
+            boolean lsposed = sp.getBoolean("lsposed_mode", false);
+            if (!lsposed && checkPermission()) {
+                createPermissionDialog();
+                return;
+            }
+            if (containsService(daemon, serviceName)) {
+                daemon = removeServiceFromList(daemon, serviceComponent);
+            } else {
+                daemon = serviceName + ":" + daemon;
+                if (!lsposed) checkAndShowCrashFixIntroDialog();
+            }
+            sp.edit().putString("daemon", daemon).apply();
+            syncModuleServicesIfNeeded();
+            holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
+            if (lsposed && !ModuleConfig.isRemoteConfigAvailable()) {
+                Toast.makeText(MainActivity.this, "模块配置通道未连接，锁定列表可能未同步",
+                        Toast.LENGTH_SHORT).show();
+            }
+            if (!lsposed) StartForeGroundDaemon();
         }
+
+        void createPermissionDialog() {
+            MainActivity.this.createPermissionDialog();
+        }
+    }
+
+    /** 判断是否已经确立了工作模式（用户已主动选择模式，或者已开启 LSPosed 模式，或者已拥有安全设置写入权限） */
+    boolean isModeEstablished() {
+        if (sp == null) sp = getSharedPreferences("data", 0);
+        return sp.getBoolean("mode_chosen", false)
+                || sp.getBoolean("lsposed_mode", false)
+                || !checkPermission();
+    }
+
+    /** 弹出工作模式选择弹窗（全新安装点击保活锁时优先展示） */
+    void showModeSelectDialog(Runnable onModeReady) {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        View dv = getLayoutInflater().inflate(R.layout.dialog_select_mode, null);
+        dialog.setContentView(dv);
+        Window w = dialog.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            DisplayMetrics dm = getResources().getDisplayMetrics();
+            int marginPx = (int) (16 * dm.density + 0.5f);
+            WindowManager.LayoutParams lp = w.getAttributes();
+            lp.width = dm.widthPixels - marginPx * 2;
+            lp.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            w.setAttributes(lp);
+        }
+
+        TextView tvStatus = dv.findViewById(R.id.tv_lsposed_status);
+        boolean loaded = ModuleConfig.isModuleLoaded(this);
+        if (loaded) {
+            tvStatus.setText("● 已激活");
+            tvStatus.setTextColor(mColorPrimary);
+        } else {
+            tvStatus.setText("○ 未激活");
+            tvStatus.setTextColor(Color.GRAY);
+        }
+
+        // 选择 LSPosed 模块模式
+        dv.findViewById(R.id.card_lsposed).setOnClickListener(v -> {
+            boolean isLoaded = ModuleConfig.isModuleLoaded(MainActivity.this);
+            if (isLoaded) {
+                dialog.dismiss();
+                sp.edit().putBoolean("lsposed_mode", true)
+                        .putBoolean("crashfix", false)
+                        .putBoolean("mode_chosen", true)
+                        .apply();
+                ModuleConfig.setEnabled(MainActivity.this, true);
+                ModuleConfig.setDryRun(MainActivity.this, false);
+                syncModuleServicesIfNeeded("选择LSPosed模式");
+                ModuleConfig.startLogSync(MainActivity.this);
+                Toast.makeText(MainActivity.this, "已开启 LSPosed 模块模式 (系统级被动实时监听)", Toast.LENGTH_SHORT).show();
+                if (onModeReady != null) {
+                    onModeReady.run();
+                }
+            } else {
+                dialog.dismiss();
+                ModuleConfig.showLsposedNotActivatedDialog(MainActivity.this, () -> {
+                    chooseNormalMode(onModeReady);
+                });
+            }
+        });
+
+        // 选择普通检测模式
+        dv.findViewById(R.id.card_normal).setOnClickListener(v -> {
+            dialog.dismiss();
+            chooseNormalMode(onModeReady);
+        });
+
+        dv.findViewById(R.id.btn_cancel).setOnClickListener(v -> dialog.dismiss());
+
+        dialog.show();
+    }
+
+    void chooseNormalMode(Runnable onModeReady) {
+        sp.edit().putBoolean("lsposed_mode", false)
+                .putBoolean("mode_chosen", true)
+                .apply();
+        if (checkPermission()) {
+            createPermissionDialog();
+        } else {
+            if (onModeReady != null) {
+                onModeReady.run();
+            }
+        }
+    }
+
+    void createPermissionDialog() {
+        String pkg = getPackageName();
+        String cmd = "adb shell \"pm grant " + pkg + " android.permission.WRITE_SECURE_SETTINGS; pm grant " + pkg + " android.permission.DUMP\"";
+        String rootCmd = "pm grant " + pkg + " android.permission.WRITE_SECURE_SETTINGS; pm grant " + pkg + " android.permission.DUMP";
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(MainActivity.this)
+                .setMessage("安卓5.1和更低版本的设备，需将本APP转换为系统应用。\n\n安卓6.0及更高版本的设备，在下面三个方法中任选一个均可：\n1.连接电脑USB调试后在电脑CMD执行以下命令：\n" + cmd + "\n\n2.root激活。\n\n3.Shizuku激活。")
+                .setTitle("需要授予权限")
+                .setPositiveButton("复制命令", (dialogInterface, i) -> {
+                    ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("c", cmd));
+                    Toast.makeText(MainActivity.this, "命令已复制到剪切板", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("root激活", (dialoginterface, i) -> {
+                    try {
+                        Process p = Runtime.getRuntime().exec("su");
+                        java.io.DataOutputStream o = new java.io.DataOutputStream(p.getOutputStream());
+                        o.writeBytes(rootCmd + "\nexit\n");
+                        o.flush();
+                        o.close();
+                        p.waitFor();
+                        if (p.exitValue() == 0) {
+                            Toast.makeText(MainActivity.this, "成功激活", Toast.LENGTH_SHORT).show();
+                            runOnUiThread(this::checkAndShowCrashFixIntroDialog);
+                        }
+                    } catch (Exception ignored) {
+                        Toast.makeText(MainActivity.this, "激活失败", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNeutralButton("Shizuku激活", (dialogInterface, i) -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) check();
+                })
+                .create().show();
     }
 
 

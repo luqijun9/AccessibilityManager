@@ -941,7 +941,7 @@ public class SettingsActivity extends AppCompatActivity {
                 if (mModuleModeListener != null) {
                     switchLsposedMode.setOnCheckedChangeListener(mModuleModeListener);
                 }
-                Toast.makeText(this, "LSPosed 模块未激活或未生效，请先在 LSPosed 中勾选本模块并重启手机", Toast.LENGTH_LONG).show();
+                ModuleConfig.showLsposedNotActivatedDialog(this, null);
                 return;
             }
 
@@ -1008,12 +1008,12 @@ public class SettingsActivity extends AppCompatActivity {
         boolean loaded = ModuleConfig.isModuleLoaded(this);
         if (mode) {
             lsposedModuleStatus.setText(loaded
-                    ? "已启用：系统级实时监听与自动修复"
+                    ? "已启用：系统级被动实时监听与自动修复"
                     : "未生效：模块未加载，请在 LSPosed 启用后重启");
         } else if (!loaded) {
             lsposedModuleStatus.setText("未激活：需在 LSPosed 勾选并重启手机生效");
         } else {
-            lsposedModuleStatus.setText("已激活：开启后由底层模块接管崩溃监听与修复");
+            lsposedModuleStatus.setText("已激活：开启后由底层被动实时监听，0 轮询开销");
         }
 
         if (lsposedFixmodeLayout != null) {
