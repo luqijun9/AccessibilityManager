@@ -70,6 +70,8 @@ public class AutoRepairEntry extends XposedModule {
     // 关闭补回配置
     private static final long CLOSE_MIN_INTERVAL_MS = 250L;
     private static final long RECONCILE_CONFIG_DELAY_MS = 500L;
+    // 补回写入后延迟检查是否真正绑定（force-stop 后可能“列表已恢复但未绑定”）
+    private static final long BIND_VERIFY_DELAY_MS = 2000L;
     private static final long REPAIR_REMOVE_WINDOW_MS = TOGGLE_OFF_MS + 1500L;
     private static final long BOOT_GRACE_MS = 60000L;
 
@@ -108,6 +110,7 @@ public class AutoRepairEntry extends XposedModule {
 
     private static boolean sReconcilePending;
     private static boolean sReconcileRetryPending;
+    private static boolean sBindVerifyPending;
     private static long sLastReconcileWriteAt;
     private static final Map<String, Long> sSelfRemovedUntil = new HashMap<>();
 
@@ -533,6 +536,62 @@ public class AutoRepairEntry extends XposedModule {
         event("保活", "补回已关闭服务 (" + count + "): " + added + " [" + reason + "]");
         if (!writeEnabled(desired)) {
             event("失败", "补回写入失败: " + added);
+            return;
+        }
+        scheduleBindVerify(reason);
+    }
+
+    /** 补回后等待 AMS 绑定，再确认是否真的起来了；force-stop 后可能只写了列表但没绑定 */
+    private static void scheduleBindVerify(String reason) {
+        if (sBindVerifyPending) {
+            return;
+        }
+        sBindVerifyPending = true;
+        sHandler.postDelayed(() -> {
+            sBindVerifyPending = false;
+            try {
+                verifyBindings(reason);
+            } catch (Throwable t) {
+                log("bind verify error: " + t);
+            }
+        }, BIND_VERIFY_DELAY_MS);
+    }
+
+    private static void verifyBindings(String reason) {
+        if (sContext == null || !isModuleEnabled() || !hasConnectionState()) {
+            return;
+        }
+        String managed = readSecure(KEY_SERVICES);
+        String enabled = readEnabled();
+        if (managed == null || managed.isEmpty() || enabled == null) {
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        int unbound = 0;
+        for (String raw : managed.split(":")) {
+            ComponentName component = ComponentName.unflattenFromString(raw);
+            if (component == null) {
+                continue;
+            }
+            String key = component.flattenToString();
+            if (!containsComponent(enabled, component)) {
+                continue; // 已被关闭，交给对账路径
+            }
+            Long own = sSelfRemovedUntil.get(key);
+            if (own != null && now < own) {
+                continue; // 崩溃修复自己的临时移除
+            }
+            if (findBoundConnection(component) != null) {
+                continue;
+            }
+            if (!sBoundCheckAvailable) {
+                return;
+            }
+            unbound++;
+            scheduleCheck(component, key, SETTLE_MS);
+        }
+        if (unbound > 0) {
+            event("检测", "补回后仍未绑定 " + unbound + " 个，准备修复 (" + reason + ")");
         }
     }
 
