@@ -494,7 +494,8 @@ public class WhitelistActivity extends AppCompatActivity {
         ModuleConfig.syncManagedServices(this,
                 sp.getString("daemon", ""),
                 sp.getString("whitelist_services", ""),
-                sp.getBoolean("whitelist_global_enable", false));
+                sp.getBoolean("whitelist_global_enable", false),
+                "白名单配置变更");
     }
 
     private void showWhitelistEnableDialog(final CompoundButton switchButton, final CompoundButton.OnCheckedChangeListener listener) {

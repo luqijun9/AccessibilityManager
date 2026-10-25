@@ -1874,7 +1874,7 @@ public class MainActivity extends Activity {
             }
             String resultDaemon = newDaemon.toString();
             sp.edit().putString("daemon", resultDaemon).apply();
-            syncModuleServicesIfNeeded();
+            syncModuleServicesIfNeeded("服务加锁/解锁");
 
             // 从已开启的无障碍服务列表中移除
             String sv = Settings.Secure.getString(getContentResolver(),
@@ -2549,6 +2549,10 @@ public class MainActivity extends Activity {
 
     /** LSPosed 模块模式下把受管列表同步给模块 */
     private void syncModuleServicesIfNeeded() {
+        syncModuleServicesIfNeeded(null);
+    }
+
+    private void syncModuleServicesIfNeeded(String reason) {
         if (sp == null) {
             sp = getSharedPreferences("data", 0);
         }
@@ -2567,7 +2571,8 @@ public class MainActivity extends Activity {
         ModuleConfig.syncManagedServices(this,
                 sp.getString("daemon", ""),
                 sp.getString("whitelist_services", ""),
-                sp.getBoolean("whitelist_global_enable", false));
+                sp.getBoolean("whitelist_global_enable", false),
+                reason);
     }
 
     /** 打开管理器时补读模块事件，避免后台被冻结期间漏日志 */

@@ -103,6 +103,7 @@ public class AutoRepairEntry extends XposedModule {
     private static long sRepairStartedAt;
     private static String sRepairKey;
     private static final Map<String, Long> sLastDied = new HashMap<>();
+    private static final Map<String, Long> sLastInit = new HashMap<>();
     private static final Map<String, Runnable> sPendingCheck = new HashMap<>();
     private static final Map<String, Runnable> sVerifyRun = new HashMap<>();
     private static final Map<String, Long> sSuppressUntil = new HashMap<>();
@@ -859,11 +860,11 @@ public class AutoRepairEntry extends XposedModule {
         sLastDied.put(key, now);
 
         if (!isManaged(component)) {
-            log("unmanaged died ignored (crashed=" + crashed + "): " + key);
+            event("监听", "非受管服务挂掉(忽略): " + key + " (crashed=" + crashed + ")");
             return;
         }
         if (!crashed) {
-            log("died event ignored (crashed=false): " + key);
+            event("监听", "受管服务正常断开(忽略非崩溃): " + key);
             return;
         }
         if (sContext == null) {
@@ -919,6 +920,12 @@ public class AutoRepairEntry extends XposedModule {
     private static void onInitializeService(ComponentName component, boolean crashed,
             boolean hasInterface, Object connection) {
         String key = component.flattenToString();
+        long now = SystemClock.elapsedRealtime();
+        Long lastInit = sLastInit.get(key);
+        if (lastInit != null && now - lastInit < DEDUPE_MS) {
+            return;
+        }
+        sLastInit.put(key, now);
         boolean managed = isManaged(component);
 
         if (!crashed && hasInterface) {
@@ -928,22 +935,28 @@ public class AutoRepairEntry extends XposedModule {
                 sHandler.removeCallbacks(verify);
             }
             sSuppressUntil.remove(key);
-            sAttempts.remove(key);
+            Integer attempts = sAttempts.remove(key);
+            boolean wasRepairing = (attempts != null && attempts > 0) || key.equals(sRepairKey);
             sLastAttemptAt.remove(key);
             finishRepair(key);
             clearCrashedMarker(connection, component);
             if (managed) {
-                event("检测", "已恢复" + (cancelled ? "（取消待执行的修复）" : "")
-                        + ": " + key);
+                if (cancelled) {
+                    event("检测", "系统已自愈（取消待执行的修复）: " + key);
+                } else if (wasRepairing) {
+                    event("修复", "恢复成功: " + key);
+                } else {
+                    event("服务", "服务已就绪: " + key);
+                }
             } else {
-                log("recovered (unmanaged): " + key);
+                event("监听", "非受管服务连接(忽略): " + key);
             }
             return;
         }
 
         if (!managed) {
-            log("unmanaged init ignored (crashed=" + crashed
-                    + ", iface=" + hasInterface + "): " + key);
+            event("监听", "非受管服务重绑失败(忽略): " + key + " (crashed=" + crashed
+                    + ", iface=" + hasInterface + ")");
             return;
         }
         event("检测", "重绑失败 (crashed=" + crashed + ", iface=" + hasInterface

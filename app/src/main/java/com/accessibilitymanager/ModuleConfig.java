@@ -56,7 +56,8 @@ public final class ModuleConfig {
                     syncManagedServices(context,
                             sp.getString("daemon", ""),
                             sp.getString("whitelist_services", ""),
-                            sp.getBoolean("whitelist_global_enable", false));
+                            sp.getBoolean("whitelist_global_enable", false),
+                            "模块服务连接");
                 } else if (isRemoteModuleEnabled(context)) {
                     // 已切回普通模式：确保模块侧停止动作
                     setEnabled(context, false);
@@ -165,11 +166,22 @@ public final class ModuleConfig {
 
     public static void syncManagedServices(Context context, String daemon,
             String whitelist, boolean globalWhitelist) {
+        syncManagedServices(context, daemon, whitelist, globalWhitelist, null);
+    }
+
+    public static void syncManagedServices(Context context, String daemon,
+            String whitelist, boolean globalWhitelist, String reason) {
         String desired = buildManaged(daemon, whitelist, globalWhitelist);
+        String current = getManagedServices(context);
+        String reasonSuffix = (reason != null && !reason.isEmpty()) ? " (" + reason + ")" : "";
+        if (desired.equals(current)) {
+            LogUtil.log(context, "[模块] 锁定服务已同步" + reasonSuffix);
+            return;
+        }
         if (put(context, KEY_SERVICES, desired)) {
-            LogUtil.log(context, "[模块] 锁定服务已同步: " + desired);
+            LogUtil.log(context, "[模块] 锁定服务已同步" + reasonSuffix + ": " + desired);
         } else {
-            LogUtil.log(context, "[模块] 锁定服务写入失败（模块未连接且未授予 WRITE_SECURE_SETTINGS）");
+            LogUtil.log(context, "[模块] 锁定服务写入失败" + reasonSuffix + "（模块未连接且未授予 WRITE_SECURE_SETTINGS）");
         }
     }
 

@@ -256,12 +256,8 @@ public class daemonService extends Service {
     /** 调用者必须在 daemonExecutor 线程中执行 */
     private void doDaemonImpl(String s) {
         ProcessExitMonitor.updateHeartbeat(daemonService.this);
-        // LSPosed 模式：保活与白名单全部交给模块，管理器只同步受管列表
+        // LSPosed 模式：保活与白名单全部交给模块
         if (sp.getBoolean("lsposed_mode", false)) {
-            ModuleConfig.syncManagedServices(this,
-                    sp.getString("daemon", ""),
-                    sp.getString("whitelist_services", ""),
-                    sp.getBoolean("whitelist_global_enable", false));
             tmpSettingValue = s == null ? "" : s;
             mCrashedFixServiceName = null;
             mCrashedFixLabel = null;

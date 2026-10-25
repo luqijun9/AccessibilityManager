@@ -906,7 +906,8 @@ public class SettingsActivity extends AppCompatActivity {
             ModuleConfig.syncManagedServices(this,
                     sp.getString("daemon", ""),
                     sp.getString("whitelist_services", ""),
-                    sp.getBoolean("whitelist_global_enable", false));
+                    sp.getBoolean("whitelist_global_enable", false),
+                    "开启模块模式");
             ModuleConfig.triggerScan(this);
             ModuleConfig.startLogSync(this);
             ModuleConfig.drainLogs(this);
