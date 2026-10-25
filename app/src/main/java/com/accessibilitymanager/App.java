@@ -21,20 +21,23 @@ public class App extends Application {
         ProcessExitMonitor.checkProcessExit(this);
 
         // LSPosed 服务：用于 Remote Preferences 配置通道（无需 WRITE_SECURE_SETTINGS）
-        try {
-            XposedServiceHelper.registerListener(new XposedServiceHelper.OnServiceListener() {
-                @Override
-                public void onServiceBind(XposedService service) {
-                    ModuleConfig.onXposedServiceBind(App.this, service);
-                }
+        // 库要求 Android 8.0+，低版本系统不加载该通道，继续走 Settings.Secure
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                XposedServiceHelper.registerListener(new XposedServiceHelper.OnServiceListener() {
+                    @Override
+                    public void onServiceBind(XposedService service) {
+                        ModuleConfig.onXposedServiceBind(App.this, service);
+                    }
 
-                @Override
-                public void onServiceDied(XposedService service) {
-                    ModuleConfig.onXposedServiceDied(service);
-                }
-            });
-        } catch (Throwable t) {
-            LogUtil.log(this, "[模块] XposedService 监听注册失败: " + t);
+                    @Override
+                    public void onServiceDied(XposedService service) {
+                        ModuleConfig.onXposedServiceDied(service);
+                    }
+                });
+            } catch (Throwable t) {
+                LogUtil.log(this, "[模块] XposedService 监听注册失败: " + t);
+            }
         }
 
         // Shizuku 授权状态依赖服务端，服务断开时进程内的权限缓存不会自动失效，
