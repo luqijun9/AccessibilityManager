@@ -5,10 +5,8 @@ import android.content.ComponentName;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
 import android.database.ContentObserver;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Process;
@@ -47,6 +45,9 @@ public class AutoRepairEntry extends XposedModule {
     private static final String KEY_SCAN = "a11y_module_scan";
     private static final String KEY_DEBUG = "a11y_module_debug";
     private static final String KEY_DEBUG_KILL = "a11y_module_debug_kill";
+    private static final String KEY_CMD_SEQ = "a11y_cmd_seq";
+    private static final String KEY_CMD_PREFIX = "a11y_cmd_";
+    private static final String KEY_CMD_ACK = "a11y_module_cmd_ack";
     private static final String KEY_LOADED = "a11y_module_loaded";
     private static final String KEY_EVENTS = "a11y_module_events";
     private static final String REMOTE_GROUP = "a11y_config";
@@ -116,8 +117,12 @@ public class AutoRepairEntry extends XposedModule {
     private static boolean sReconcilePending;
     private static boolean sReconcileRetryPending;
     private static boolean sBindVerifyPending;
+    private static boolean sCommandDrainPending;
+    private static boolean sCommandAckInitialized;
+    private static long sLastAckSeq;
     private static long sLastReconcileWriteAt;
     private static final Map<String, Long> sSelfRemovedUntil = new HashMap<>();
+    private static final Map<String, Long> sManualHiddenUntil = new HashMap<>();
 
     // 反射缓存
     private static final Map<String, Field> sFieldCache = new ConcurrentHashMap<>();
@@ -146,11 +151,6 @@ public class AutoRepairEntry extends XposedModule {
         sInstalled = true;
         sModuleInstance = this;
         try {
-            Context sysCtx = getSystemContext(classLoader);
-            if (sysCtx != null && sContext == null) {
-                sContext = sysCtx;
-                tryGrantPermissionsDirectly(sysCtx);
-            }
             installHooks(classLoader);
         } catch (Throwable t) {
             log("install failed: " + t);
@@ -162,7 +162,6 @@ public class AutoRepairEntry extends XposedModule {
         thread.start();
         sHandler = new Handler(thread.getLooper());
         initRemoteConfig();
-        installPermissionHooks(classLoader);
 
         try {
             Class<?> connClass = classLoader.loadClass(CONNECTION_CLASS);
@@ -335,9 +334,10 @@ public class AutoRepairEntry extends XposedModule {
         if (sContext == null || sHandler == null) {
             return;
         }
-        tryGrantPermissionsDirectly(sContext);
         writeHeartbeatOnce();
         flushEvents();
+        initCommandAck();
+        scheduleCommandDrain();
         if (sObserver != null) {
             return;
         }
@@ -353,6 +353,10 @@ public class AutoRepairEntry extends XposedModule {
                     }
                     if (KEY_DEBUG_KILL.equals(key)) {
                         scheduleDebugKill();
+                        return;
+                    }
+                    if (isCommandKey(key)) {
+                        scheduleCommandDrain();
                         return;
                     }
                     if (KEY_ENABLE.equals(key)) {
@@ -510,6 +514,13 @@ public class AutoRepairEntry extends XposedModule {
                 }
                 sSelfRemovedUntil.remove(key);
             }
+            Long manual = sManualHiddenUntil.get(key);
+            if (manual != null) {
+                if (now < manual) {
+                    continue;
+                }
+                sManualHiddenUntil.remove(key);
+            }
             if (!isPackageInstalled(component.getPackageName())) {
                 log("skip uninstalled: " + key);
                 continue;
@@ -594,6 +605,10 @@ public class AutoRepairEntry extends XposedModule {
             if (own != null && now < own) {
                 continue; // 崩溃修复自己的临时移除
             }
+            Long manual = sManualHiddenUntil.get(key);
+            if (manual != null && now < manual) {
+                continue; // 用户手动关闭后的短暂豁免
+            }
             if (findBoundConnection(component) != null) {
                 continue;
             }
@@ -634,6 +649,131 @@ public class AutoRepairEntry extends XposedModule {
             return true;
         } catch (Throwable t) {
             return false;
+        }
+    }
+
+    private static boolean isCommandKey(String key) {
+        return KEY_CMD_SEQ.equals(key) || (key != null && key.startsWith(KEY_CMD_PREFIX));
+    }
+
+    /** 命令队列：App 递增 seq，模块按顺序处理所有未确认命令并写回执 */
+    private static void scheduleCommandDrain() {
+        Handler handler = sHandler;
+        if (handler == null || sCommandDrainPending) {
+            return;
+        }
+        sCommandDrainPending = true;
+        handler.post(() -> {
+            sCommandDrainPending = false;
+            try {
+                drainCommands();
+            } catch (Throwable t) {
+                event("失败", "命令队列处理异常: " + t);
+            }
+        });
+    }
+
+    private static void initCommandAck() {
+        if (sCommandAckInitialized || sContext == null) {
+            return;
+        }
+        sCommandAckInitialized = true;
+        String ack = readSecure(KEY_CMD_ACK);
+        if (ack == null || ack.isEmpty()) {
+            return;
+        }
+        try {
+            sLastAckSeq = Long.parseLong(ack);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void drainCommands() {
+        SharedPreferences prefs = sRemotePrefs;
+        if (prefs == null || sContext == null || !isModuleEnabled()) {
+            return;
+        }
+        long seq;
+        try {
+            seq = Long.parseLong(prefs.getString(KEY_CMD_SEQ, "0"));
+        } catch (Throwable t) {
+            return;
+        }
+        if (seq <= 0) {
+            return;
+        }
+        if (seq < sLastAckSeq) {
+            event("配置", "命令序号回退，重置回执: " + sLastAckSeq + " -> 0");
+            sLastAckSeq = 0;
+        }
+        if (seq <= sLastAckSeq) {
+            return;
+        }
+
+        SharedPreferences.Editor editor = prefs.edit();
+        long ack = sLastAckSeq;
+        for (long i = sLastAckSeq + 1; i <= seq; i++) {
+            String key = KEY_CMD_PREFIX + i;
+            String payload = prefs.getString(key, null);
+            if (payload == null) {
+                log("command missing: seq=" + i);
+            } else {
+                applyServiceCommand(payload);
+                editor.remove(key);
+            }
+            ack = i;
+        }
+        editor.commit();
+        sLastAckSeq = ack;
+        try {
+            Settings.Secure.putString(sContext.getContentResolver(), KEY_CMD_ACK,
+                    String.valueOf(ack));
+        } catch (Throwable t) {
+            event("失败", "命令回执写入失败: " + t);
+        }
+    }
+
+    private static void applyServiceCommand(String value) {
+        if (value == null || value.isEmpty()) {
+            return;
+        }
+        int hash = value.lastIndexOf('#');
+        String body = hash > 0 ? value.substring(0, hash) : value;
+        int colon = body.indexOf(':');
+        if (colon <= 0) {
+            return;
+        }
+        String action = body.substring(0, colon);
+        String component = body.substring(colon + 1);
+        ComponentName target = ComponentName.unflattenFromString(component);
+        if (target == null) {
+            return;
+        }
+        boolean enable = "enable".equals(action);
+        if (!enable && !"disable".equals(action)) {
+            return;
+        }
+        String targetKey = target.flattenToString();
+        if (!enable) {
+            // 用户手动关闭：给 KEY_SERVICES 的跨进程同步留出短暂窗口
+            sManualHiddenUntil.put(targetKey, SystemClock.elapsedRealtime() + 2000L);
+        } else {
+            sManualHiddenUntil.remove(targetKey);
+        }
+        String current = readEnabled();
+        if (current == null) {
+            return;
+        }
+        boolean present = containsComponent(current, target);
+        if (enable == present) {
+            log("manual command no-op: " + component);
+            return;
+        }
+        String updated = enable ? addComponent(current, target) : removeComponent(current, target);
+        if (writeEnabled(updated)) {
+            event("保活", "手动" + (enable ? "开启" : "关闭") + ": " + component);
+        } else {
+            event("失败", "手动" + (enable ? "开启" : "关闭") + "写入失败: " + component);
         }
     }
 
@@ -1242,6 +1382,8 @@ public class AutoRepairEntry extends XposedModule {
                 });
             });
             log("remote prefs ready: " + REMOTE_GROUP);
+            initCommandAck();
+            scheduleCommandDrain();
         } catch (Throwable t) {
             log("remote prefs unavailable: " + t);
         }
@@ -1257,11 +1399,18 @@ public class AutoRepairEntry extends XposedModule {
             scheduleDebugKill();
             return;
         }
+        if (isCommandKey(key)) {
+            scheduleCommandDrain();
+            return;
+        }
         if (KEY_ENABLE.equals(key)) {
             if (isModuleEnabled()) {
                 scheduleReconcile("enable", RECONCILE_CONFIG_DELAY_MS);
+                scheduleCommandDrain();
             }
         } else if (KEY_SERVICES.equals(key)) {
+            // 锁定列表变化后，手动关闭豁免立即失效：重新加锁必须优先补回
+            sManualHiddenUntil.clear();
             scheduleReconcile("services", RECONCILE_CONFIG_DELAY_MS);
         }
         if (!KEY_DEBUG.equals(key)) {
@@ -1272,13 +1421,12 @@ public class AutoRepairEntry extends XposedModule {
     private static String readConfig(String key) {
         SharedPreferences prefs = sRemotePrefs;
         if (prefs != null) {
+            // Remote Preferences 可用时以它为准，避免回退到可能更旧的 Settings.Secure
             try {
-                String value = prefs.getString(key, null);
-                if (value != null) {
-                    return value;
-                }
+                return prefs.getString(key, null);
             } catch (Throwable t) {
                 log("read remote config failed: " + t);
+                return null;
             }
         }
         return readSecure(key);
@@ -1429,224 +1577,6 @@ public class AutoRepairEntry extends XposedModule {
                 inst.log(Log.INFO, TAG, message);
             }
         } catch (Throwable ignored) {
-        }
-    }
-
-    // ========== 权限豁免 (解决 App 写 Settings.Secure 权限) ==========
-
-    private static final String TARGET_PACKAGE = "com.accessibilitymanager";
-    private static volatile int sTargetAppId = -1;
-
-    private static boolean isTargetPermission(String permission) {
-        return "android.permission.WRITE_SECURE_SETTINGS".equals(permission)
-                || "android.permission.DUMP".equals(permission);
-    }
-
-    private static boolean isTargetUid(int uid) {
-        if (uid < 10000) {
-            return false;
-        }
-        int appId = uid % 100000;
-        if (sTargetAppId > 0) {
-            return appId == sTargetAppId;
-        }
-        Context context = sContext;
-        if (context != null) {
-            try {
-                PackageManager pm = context.getPackageManager();
-                int targetUid = pm.getPackageUid(TARGET_PACKAGE, 0);
-                sTargetAppId = targetUid % 100000;
-                return appId == sTargetAppId;
-            } catch (Throwable ignored) {
-                try {
-                    String[] pkgs = context.getPackageManager().getPackagesForUid(uid);
-                    if (pkgs != null) {
-                        for (String pkg : pkgs) {
-                            if (TARGET_PACKAGE.equals(pkg)) {
-                                sTargetAppId = appId;
-                                return true;
-                            }
-                        }
-                    }
-                } catch (Throwable ignored2) {
-                }
-            }
-        }
-        return false;
-    }
-
-    private static Context getSystemContext(ClassLoader classLoader) {
-        try {
-            Class<?> atClass = classLoader.loadClass("android.app.ActivityThread");
-            Method currentAt = atClass.getDeclaredMethod("currentActivityThread");
-            Object at = currentAt.invoke(null);
-            Method getSysCtx = atClass.getDeclaredMethod("getSystemContext");
-            return (Context) getSysCtx.invoke(at);
-        } catch (Throwable t) {
-            return null;
-        }
-    }
-
-    private static void tryGrantPermissionsDirectly(Context context) {
-        if (context == null) {
-            return;
-        }
-        try {
-            PackageManager pm = context.getPackageManager();
-            int targetUid = pm.getPackageUid(TARGET_PACKAGE, 0);
-            sTargetAppId = targetUid % 100000;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                try {
-                    Method grant = pm.getClass().getMethod("grantRuntimePermission",
-                            String.class, String.class, android.os.UserHandle.class);
-                    grant.invoke(pm, TARGET_PACKAGE,
-                            "android.permission.WRITE_SECURE_SETTINGS", Process.myUserHandle());
-                    grant.invoke(pm, TARGET_PACKAGE,
-                            "android.permission.DUMP", Process.myUserHandle());
-                    log("granted permissions directly via PMS");
-                } catch (Throwable ignored) {
-                }
-            }
-        } catch (Throwable t) {
-            log("tryGrantPermissionsDirectly: " + t);
-        }
-    }
-
-    private void installPermissionHooks(ClassLoader classLoader) {
-        // 1. Hook ActivityManager.checkComponentPermission
-        try {
-            Class<?> amClass = classLoader.loadClass("android.app.ActivityManager");
-            Method m = findMethod(amClass, "checkComponentPermission",
-                    String.class, int.class, int.class, boolean.class);
-            if (m != null) {
-                hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                        .intercept(chain -> {
-                            List<Object> args = chain.getArgs();
-                            if (args != null && args.size() >= 2) {
-                                Object pObj = args.get(0);
-                                Object uObj = args.get(1);
-                                if (pObj instanceof String && uObj instanceof Integer) {
-                                    if (isTargetPermission((String) pObj) && isTargetUid((Integer) uObj)) {
-                                        return PackageManager.PERMISSION_GRANTED;
-                                    }
-                                }
-                            }
-                            return chain.proceed();
-                        });
-                log("hooked ActivityManager.checkComponentPermission");
-            }
-        } catch (Throwable t) {
-            log("hook ActivityManager.checkComponentPermission failed: " + t);
-        }
-
-        // 2. Hook ActivityManagerService.checkPermission
-        try {
-            Class<?> amsClass = classLoader.loadClass("com.android.server.am.ActivityManagerService");
-            Method m = findMethod(amsClass, "checkPermission",
-                    String.class, int.class, int.class);
-            if (m != null) {
-                hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                        .intercept(chain -> {
-                            List<Object> args = chain.getArgs();
-                            if (args != null && args.size() >= 3) {
-                                Object pObj = args.get(0);
-                                Object uObj = args.get(2);
-                                if (pObj instanceof String && uObj instanceof Integer) {
-                                    if (isTargetPermission((String) pObj) && isTargetUid((Integer) uObj)) {
-                                        return PackageManager.PERMISSION_GRANTED;
-                                    }
-                                }
-                            }
-                            return chain.proceed();
-                        });
-                log("hooked ActivityManagerService.checkPermission");
-            }
-        } catch (Throwable t) {
-            log("hook ActivityManagerService.checkPermission failed: " + t);
-        }
-
-        // 3. Hook PackageManagerService.checkUidPermission
-        try {
-            Class<?> pmsClass = classLoader.loadClass("com.android.server.pm.PackageManagerService");
-            for (Method m : pmsClass.getDeclaredMethods()) {
-                if ("checkUidPermission".equals(m.getName())) {
-                    Class<?>[] pTypes = m.getParameterTypes();
-                    if (pTypes.length >= 2 && pTypes[0] == String.class && pTypes[1] == int.class) {
-                        hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                                .intercept(chain -> {
-                                    List<Object> args = chain.getArgs();
-                                    if (args != null && args.size() >= 2) {
-                                        Object pObj = args.get(0);
-                                        Object uObj = args.get(1);
-                                        if (pObj instanceof String && uObj instanceof Integer) {
-                                            if (isTargetPermission((String) pObj) && isTargetUid((Integer) uObj)) {
-                                                return PackageManager.PERMISSION_GRANTED;
-                                            }
-                                        }
-                                    }
-                                    return chain.proceed();
-                                });
-                        log("hooked PackageManagerService." + m.getName());
-                    }
-                }
-            }
-        } catch (Throwable t) {
-            log("hook PackageManagerService.checkUidPermission failed: " + t);
-        }
-
-        // 4. Hook PermissionManagerService (Android 12+)
-        try {
-            Class<?> pmsiClass = null;
-            try {
-                pmsiClass = classLoader.loadClass("com.android.server.pm.permission.PermissionManagerServiceImpl");
-            } catch (ClassNotFoundException e) {
-                try {
-                    pmsiClass = classLoader.loadClass("com.android.server.pm.permission.PermissionManagerService");
-                } catch (ClassNotFoundException ignored) {
-                }
-            }
-            if (pmsiClass != null) {
-                for (Method m : pmsiClass.getDeclaredMethods()) {
-                    if ("checkUidPermission".equals(m.getName()) || "checkPermission".equals(m.getName())) {
-                        Class<?>[] pTypes = m.getParameterTypes();
-                        if (pTypes.length >= 2 && pTypes[0] == int.class && pTypes[1] == String.class) {
-                            hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                                    .intercept(chain -> {
-                                        List<Object> args = chain.getArgs();
-                                        if (args != null && args.size() >= 2) {
-                                            Object uObj = args.get(0);
-                                            Object pObj = args.get(1);
-                                            if (pObj instanceof String && uObj instanceof Integer) {
-                                                if (isTargetPermission((String) pObj) && isTargetUid((Integer) uObj)) {
-                                                    return PackageManager.PERMISSION_GRANTED;
-                                                }
-                                            }
-                                        }
-                                        return chain.proceed();
-                                    });
-                            log("hooked PermissionManagerService." + m.getName() + "(int, String)");
-                        } else if (pTypes.length >= 2 && pTypes[0] == String.class && pTypes[1] == int.class) {
-                            hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                                    .intercept(chain -> {
-                                        List<Object> args = chain.getArgs();
-                                        if (args != null && args.size() >= 2) {
-                                            Object pObj = args.get(0);
-                                            Object uObj = args.get(1);
-                                            if (pObj instanceof String && uObj instanceof Integer) {
-                                                if (isTargetPermission((String) pObj) && isTargetUid((Integer) uObj)) {
-                                                    return PackageManager.PERMISSION_GRANTED;
-                                                }
-                                            }
-                                        }
-                                        return chain.proceed();
-                                    });
-                            log("hooked PermissionManagerService." + m.getName() + "(String, int)");
-                        }
-                    }
-                }
-            }
-        } catch (Throwable t) {
-            log("hook PermissionManagerService failed: " + t);
         }
     }
 }

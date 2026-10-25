@@ -149,48 +149,71 @@ public class MainActivity extends Activity {
             super.onChange(selfChange);
             settingValue = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             if (settingValue == null) settingValue = "";
-            if (!settingValue.equals(tmpSettingValue)) {
-                tmpSettingValue = settingValue; // 同步内部状态，防止状态反复切换时被忽略
+            tmpSettingValue = settingValue;
+            // 即使最终值与之前相同（例如模块先移除又补回），也要刷新开关状态
+            runOnUiThread(MainActivity.this::refreshVisibleServiceSwitches);
+        }
+    }
 
-                runOnUiThread(new Runnable() {
-                    public void run() {
-                        if (mAdapter == null) return;
-                        androidx.recyclerview.widget.LinearLayoutManager layoutManager = (androidx.recyclerview.widget.LinearLayoutManager) listView.getLayoutManager();
-                        if (layoutManager == null) return;
-                        int first = layoutManager.findFirstVisibleItemPosition();
-                        int last = layoutManager.findLastVisibleItemPosition();
-                        if (first < 0 || last < 0) return;
-                        
-                        List<AccessibilityServiceInfo> source = mIsFavoritesTab ? mFavoritesList : ((mFilteredList != null) ? mFilteredList : tmp);
-                        if (source == null || source.isEmpty()) return;
-                        
-                        for (int i = first; i <= last; i++) {
-                            AccessibilityServiceInfo info = mAdapter.getItem(i);
-                            if (info == null) continue;
-                            String serviceId = normalizeServiceId(info.getId());
-                            boolean isChecked = isServiceEnabled(serviceId, settingValue);
-                            View view = layoutManager.findViewByPosition(i);
-                            if (view != null) {
-                                android.widget.ImageButton ib = view.findViewById(R.id.ib);
-                                if (ib != null) {
-                                    ib.setVisibility(isChecked ? View.VISIBLE : View.INVISIBLE);
-                                    ib.setImageResource(containsService(daemon, serviceId) ? R.drawable.lock1 : R.drawable.lock);
-                                }
-                                com.google.android.material.materialswitch.MaterialSwitch sw = view.findViewById(R.id.s);
-                                if (sw != null && sw.isChecked() != isChecked) {
-                                    sw.setChecked(isChecked);
-                                }
-                            }
-                        }
-                    }
-                });
+    /** 只刷新当前可见列表项的开关/锁图标，避免整表重建 */
+    private void refreshVisibleServiceSwitches() {
+        if (mAdapter == null || listView == null) {
+            return;
+        }
+        androidx.recyclerview.widget.LinearLayoutManager layoutManager =
+                (androidx.recyclerview.widget.LinearLayoutManager) listView.getLayoutManager();
+        if (layoutManager == null) {
+            return;
+        }
+        int first = layoutManager.findFirstVisibleItemPosition();
+        int last = layoutManager.findLastVisibleItemPosition();
+        if (first < 0 || last < 0) {
+            return;
+        }
+        for (int i = first; i <= last; i++) {
+            AccessibilityServiceInfo info = mAdapter.getItem(i);
+            if (info == null) {
+                continue;
+            }
+            String serviceId = normalizeServiceId(info.getId());
+            boolean isChecked = isServiceEnabled(serviceId, settingValue);
+            View view = layoutManager.findViewByPosition(i);
+            if (view == null) {
+                continue;
+            }
+            android.widget.ImageButton ib = view.findViewById(R.id.ib);
+            if (ib != null) {
+                ib.setVisibility(isChecked ? View.VISIBLE : View.INVISIBLE);
+                ib.setImageResource(containsService(daemon, serviceId)
+                        ? R.drawable.lock1 : R.drawable.lock);
+            }
+            com.google.android.material.materialswitch.MaterialSwitch sw =
+                    view.findViewById(R.id.s);
+            if (sw != null && sw.isChecked() != isChecked) {
+                sw.setChecked(isChecked);
             }
         }
+    }
+
+    /** 重新读取启用列表并刷新开关，用于模块异步写入后的状态纠正 */
+    private void refreshEnabledServiceStates() {
+        if (isFinishing()) {
+            return;
+        }
+        String s = Settings.Secure.getString(getContentResolver(),
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        if (s == null) {
+            s = "";
+        }
+        settingValue = s;
+        tmpSettingValue = s;
+        runOnUiThread(this::refreshVisibleServiceSwitches);
     }
 
 
     private String mCurrentTheme;
     private int mColorPrimary;
+    private final java.util.Set<String> mLockedDisableToastShown = new java.util.HashSet<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -301,6 +324,8 @@ public class MainActivity extends Activity {
         //注册设置项改变的监听器，用于实时更新APP内显示的各个无障碍服务的状态
         mContentOb = new SettingsValueChangeContentObserver();
         getContentResolver().registerContentObserver(Settings.Secure.getUriFor(Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES), true, mContentOb);
+        // 模块处理完命令后写回执，用它精确刷新开关状态，替代固定延迟猜测
+        getContentResolver().registerContentObserver(Settings.Secure.getUriFor(ModuleConfig.KEY_CMD_ACK), false, mContentOb);
 
         //获取本机安装的无障碍服务列表，包括开启的和未开启的都有
         l = ((AccessibilityManager) getSystemService(Context.ACCESSIBILITY_SERVICE)).getInstalledAccessibilityServiceList();
@@ -2027,6 +2052,10 @@ public class MainActivity extends Activity {
                 sp.edit().putString("daemon", daemon).apply();
                 syncModuleServicesIfNeeded();
                 holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
+                if (lsposed && !ModuleConfig.isRemoteConfigAvailable()) {
+                    Toast.makeText(MainActivity.this, "模块配置通道未连接，锁定列表可能未同步",
+                            Toast.LENGTH_SHORT).show();
+                }
                 if (!lsposed) StartForeGroundDaemon();
             });
 
@@ -2034,49 +2063,78 @@ public class MainActivity extends Activity {
             holder.ib.setVisibility(holder.sw.isChecked() ? View.VISIBLE : View.INVISIBLE);
             
             holder.sw.setOnClickListener(view -> {
+                if (sp.getBoolean("lsposed_mode", false)) {
+                    boolean enable = holder.sw.isChecked();
+                    if (!enable && sp.getBoolean("manual_close_daemon", false)
+                            && containsService(daemon, serviceName)) {
+                        daemon = removeServiceFromList(daemon, serviceComponent);
+                        sp.edit().putString("daemon", daemon).apply();
+                        syncModuleServicesIfNeeded();
+                        holder.ib.setImageResource(R.drawable.lock);
+                        holder.ib.setVisibility(View.INVISIBLE);
+                    }
+                    boolean lockedAfter = containsService(daemon, serviceName);
+                    if (!enable && lockedAfter) {
+                        // 已锁定且不允许手动关闭：直接拦截，保持开启，不向模块发送关闭指令，避免开关反复闪烁与服务无意义重启
+                        holder.sw.setChecked(true);
+                        if (mLockedDisableToastShown.add(serviceName)) {
+                            Toast.makeText(MainActivity.this, "该服务已锁定，模块会保持开启",
+                                    Toast.LENGTH_SHORT).show();
+                        }
+                        return;
+                    }
+                    boolean sent = ModuleConfig.sendServiceCommand(
+                            MainActivity.this, enable, serviceName);
+                    if (!sent) {
+                        holder.sw.setChecked(!enable);
+                        Toast.makeText(MainActivity.this, ModuleConfig.isRemoteConfigAvailable()
+                                        ? "命令发送失败，请重试"
+                                        : "模块未连接，LSPosed 模式下无法手动开关服务",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    holder.ib.setVisibility(enable ? View.VISIBLE : View.INVISIBLE);
+                    // 正常由启用列表观察器 + 命令回执观察器确认；3 秒兜底只应对模块异常/重启
+                    listView.postDelayed(MainActivity.this::refreshEnabledServiceStates, 3000L);
+                    return;
+                }
                 if (checkPermission()) {
                     createPermissionDialog();
                     holder.sw.setChecked(!holder.sw.isChecked());
-                    return;
-                }
-                String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-                if (s == null) s = "";
-
-                if (holder.sw.isChecked()) {
-                    // === 用户在管理器中开启服务 ===
-                    if (!isServiceEnabled(serviceName, s)) tmpSettingValue = serviceName + ":" + s;
-                    else tmpSettingValue = s;
-                    Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
-                    holder.ib.setVisibility(View.VISIBLE);
-                    holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
                 } else {
-                    // === 用户在管理器中关闭服务 ===
-                    boolean isLocked = containsService(daemon, serviceName);
-                    if (isLocked) {
-                        if (sp.getBoolean("manual_close_daemon", false)) {
-                            // 允许手动关闭保活服务：处于保活列表中时同时解除保活，再次开启需重新手动加锁
-                            daemon = removeServiceFromList(daemon, serviceComponent);
-                            sp.edit().putString("daemon", daemon).apply();
-                            syncModuleServicesIfNeeded();
-                            holder.ib.setImageResource(R.drawable.lock);
-                            if (!sp.getBoolean("lsposed_mode", false)) StartForeGroundDaemon();
-                        } else {
-                            // 未开启手动关闭保活服务，且服务已处于保活列表：直接拦截，弹回开启状态
-                            holder.sw.setChecked(true);
-                            Toast.makeText(MainActivity.this, "该服务已锁定，请先解锁或在设置中允许手动关闭", Toast.LENGTH_SHORT).show();
-                            return;
-                        }
-                    }
+                    String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+                    if (s == null) s = "";
 
-                    StringBuilder sb = new StringBuilder();
-                    for (String entry : s.split(":")) {
-                        if (entry.isEmpty() || serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
-                        if (sb.length() > 0) sb.append(":");
-                        sb.append(entry);
+                    if (holder.sw.isChecked()) {
+                        // === 用户在管理器中开启服务 ===
+                        if (!isServiceEnabled(serviceName, s)) tmpSettingValue = serviceName + ":" + s;
+                        else tmpSettingValue = s;
+                        Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
+                        holder.ib.setVisibility(View.VISIBLE);
+                        holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
+                    } else {
+                        // === 用户在管理器中关闭服务 ===
+                        // 如果开启了“可在管理器手动关闭保活服务”：处于保活列表中时同时解除保活，再次开启需重新手动加锁
+                        if (sp.getBoolean("manual_close_daemon", false)) {
+                            if (containsService(daemon, serviceName)) {
+                                daemon = removeServiceFromList(daemon, serviceComponent);
+                                sp.edit().putString("daemon", daemon).apply();
+                syncModuleServicesIfNeeded();
+                                holder.ib.setImageResource(R.drawable.lock);
+                                StartForeGroundDaemon();
+                            }
+                        }
+
+                        StringBuilder sb = new StringBuilder();
+                        for (String entry : s.split(":")) {
+                            if (entry.isEmpty() || serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
+                            if (sb.length() > 0) sb.append(":");
+                            sb.append(entry);
+                        }
+                        tmpSettingValue = sb.toString();
+                        Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
+                        holder.ib.setVisibility(View.INVISIBLE);
                     }
-                    tmpSettingValue = sb.toString();
-                    Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
-                    holder.ib.setVisibility(View.INVISIBLE);
                 }
             });
 
@@ -2495,6 +2553,11 @@ public class MainActivity extends Activity {
             sp = getSharedPreferences("data", 0);
         }
         if (!sp.getBoolean("lsposed_mode", false)) {
+            // 已切回普通模式：若模块侧仍处于启用状态，主动关闭，避免它继续恢复服务
+            if (ModuleConfig.isRemoteConfigAvailable()
+                    && ModuleConfig.isRemoteModuleEnabled(this)) {
+                ModuleConfig.setEnabled(this, false);
+            }
             return;
         }
         ModuleConfig.syncManagedServices(this,

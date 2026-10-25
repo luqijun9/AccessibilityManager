@@ -27,8 +27,13 @@ public final class ModuleConfig {
     public static final String KEY_EVENTS = "a11y_module_events";
     public static final String KEY_DEBUG = "a11y_module_debug";
     public static final String KEY_DEBUG_KILL = "a11y_module_debug_kill";
+    // 服务开关命令队列：App 递增序号写 payload，模块按序处理并写回执
+    public static final String KEY_CMD_SEQ = "a11y_cmd_seq";
+    public static final String KEY_CMD_PREFIX = "a11y_cmd_";
+    public static final String KEY_CMD_ACK = "a11y_module_cmd_ack";
 
     private static final Object sLogLock = new Object();
+    private static final Object sCmdLock = new Object();
     private static ContentObserver sLogObserver;
     private static Context sLogContext;
 
@@ -50,6 +55,9 @@ public final class ModuleConfig {
                             sp.getString("daemon", ""),
                             sp.getString("whitelist_services", ""),
                             sp.getBoolean("whitelist_global_enable", false));
+                } else if (isRemoteModuleEnabled(context)) {
+                    // 已切回普通模式：确保模块侧停止动作
+                    setEnabled(context, false);
                 }
             } catch (Throwable t) {
                 LogUtil.log(context, "[模块] 绑定后自动同步失败: " + t);
@@ -100,6 +108,10 @@ public final class ModuleConfig {
         return put(context, KEY_ENABLE, enabled ? "1" : "0");
     }
 
+    public static boolean isRemoteModuleEnabled(Context context) {
+        return "1".equals(get(context, KEY_ENABLE));
+    }
+
     public static boolean setDryRun(Context context, boolean dryRun) {
         return put(context, KEY_DRY_RUN, dryRun ? "1" : "0");
     }
@@ -110,6 +122,34 @@ public final class ModuleConfig {
 
     public static boolean setDebugEnabled(Context context, boolean enabled) {
         return put(context, KEY_DEBUG, enabled ? "1" : "0");
+    }
+
+    /** 让模块代为开启/关闭无障碍服务（LSPosed 模式无需 WRITE_SECURE_SETTINGS） */
+    public static boolean sendServiceCommand(Context context, boolean enable, String component) {
+        if (context == null || component == null || component.isEmpty()
+                || !isRemoteConfigAvailable()) {
+            return false;
+        }
+        synchronized (sCmdLock) {
+            try {
+                SharedPreferences prefs = sXposedService.getRemotePreferences(REMOTE_GROUP);
+                long seq = 0;
+                try {
+                    seq = Long.parseLong(prefs.getString(KEY_CMD_SEQ, "0"));
+                } catch (Throwable ignored) {
+                }
+                seq++;
+                String payload = (enable ? "enable:" : "disable:") + component;
+                // payload 与 seq 放在同一次 commit，避免应用进程中途退出留下孤立的 payload
+                return prefs.edit()
+                        .putString(KEY_CMD_PREFIX + seq, payload)
+                        .putString(KEY_CMD_SEQ, String.valueOf(seq))
+                        .commit();
+            } catch (Throwable t) {
+                LogUtil.log(context, "[模块] 发送服务命令失败: " + t);
+                return false;
+            }
+        }
     }
 
     /** 让模块杀掉目标组件所属应用的进程，模拟一次真实崩溃 */
@@ -285,12 +325,10 @@ public final class ModuleConfig {
         if (isRemoteConfigAvailable()) {
             try {
                 SharedPreferences prefs = sXposedService.getRemotePreferences(REMOTE_GROUP);
-                String value = prefs.getString(key, null);
-                if (value != null) {
-                    return value;
-                }
+                return prefs.getString(key, null);
             } catch (Throwable t) {
                 LogUtil.log(context, "[模块] 读 RemotePreferences 失败: " + t);
+                return null;
             }
         }
         try {
@@ -302,19 +340,13 @@ public final class ModuleConfig {
 
     private static boolean put(Context context, String key, String value) {
         if (isRemoteConfigAvailable()) {
+            // Remote Preferences 可用时以它为准，避免与 Settings.Secure 出现新旧不一致
             try {
                 SharedPreferences prefs = sXposedService.getRemotePreferences(REMOTE_GROUP);
-                if (prefs.edit().putString(key, value).commit()) {
-                    // 兼容回退：模块侧若无法使用 RemotePreferences，仍可从 Settings.Secure 读到同一份配置
-                    try {
-                        Settings.Secure.putString(context.getContentResolver(), key, value);
-                    } catch (Throwable ignored) {
-                    }
-                    return true;
-                }
-                LogUtil.log(context, "[模块] RemotePreferences 写入失败: " + key);
+                return prefs.edit().putString(key, value).commit();
             } catch (Throwable t) {
                 LogUtil.log(context, "[模块] RemotePreferences 写入异常: " + t);
+                return false;
             }
         }
         try {
