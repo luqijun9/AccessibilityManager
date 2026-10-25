@@ -1035,11 +1035,11 @@ public class SettingsActivity extends AppCompatActivity {
             DebugServiceItem item = items.get(i);
             entries[i] = item.batch
                     ? "[批量] " + item.label
-                    : (item.managed ? "[受管] " : "[未受管] ")
+                    : (item.managed ? "[已锁定] " : "[未锁定] ")
                             + item.label + "\n" + item.component;
         }
         new MaterialAlertDialogBuilder(this)
-                .setTitle("模拟服务崩溃（[受管] 会尝试修复）")
+                .setTitle("模拟服务崩溃（[已锁定] 会尝试修复）")
                 .setItems(entries, (dialog, which) -> {
                     DebugServiceItem item = items.get(which);
                     if (item.batch) {
@@ -1083,7 +1083,7 @@ public class SettingsActivity extends AppCompatActivity {
                 .setTitle("批量模拟崩溃")
                 .setMessage("将依次杀掉 " + packages.size()
                         + " 个第三方应用的进程，间隔 1.5 秒。\n\n"
-                        + list + "\n\n未受管服务需要系统自己恢复。")
+                        + list + "\n\n未锁定服务需要系统自己恢复。")
                 .setPositiveButton("开始", (dialog, which) -> triggerDebugKillAll(packages))
                 .setNegativeButton("取消", null)
                 .show();
@@ -1139,7 +1139,7 @@ public class SettingsActivity extends AppCompatActivity {
                 .setMessage("将杀掉「" + item.label
                         + "」所属应用的整个进程，可能影响该应用的所有功能。\n\n"
                         + item.component + "\n\n当前状态："
-                        + (item.managed ? "受管，模块会尝试修复" : "未受管，模块只记录崩溃")
+                        + (item.managed ? "已锁定，模块会尝试修复" : "未锁定，模块只记录崩溃")
                         + "\n\n选择“保持 15 秒”会反复杀进程，方便观察崩溃状态。")
                 .setPositiveButton("模拟崩溃", (dialog, which) -> {
                     ModuleConfig.setDebugEnabled(this, true);

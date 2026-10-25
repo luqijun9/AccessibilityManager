@@ -413,7 +413,7 @@ public class AutoRepairEntry extends XposedModule {
         }
         String managed = readSecure(KEY_SERVICES);
         if (managed == null || managed.isEmpty()) {
-            event("配置", "扫描跳过：受管列表为空 (" + reason + ")");
+            event("配置", "扫描跳过：锁定服务列表为空 (" + reason + ")");
             return;
         }
         String enabled = readEnabled();
@@ -425,8 +425,8 @@ public class AutoRepairEntry extends XposedModule {
             event("配置", "扫描跳过：尚未收到服务连接事件 (" + reason + ")");
             return;
         }
-        event("配置", "扫描开始 (" + reason + "): dryRun=" + isDryRun()
-                + " managed=" + managed.split(":").length);
+        event("配置", "扫描开始 (" + reason + "): 演练模式=" + (isDryRun() ? "开" : "关")
+                + " 锁定服务=" + managed.split(":").length);
 
         int candidates = 0;
         for (String raw : managed.split(":")) {
@@ -512,7 +512,7 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
         if (isDryRun()) {
-            event("保活", "演练：将补回 " + count + " 个: " + added);
+            event("保活", "演练模式：将补回 " + count + " 个: " + added + "（不实际写入）");
             return;
         }
 
@@ -753,8 +753,9 @@ public class AutoRepairEntry extends XposedModule {
         }
 
         boolean enabled = isModuleEnabled();
-        event("检测", "崩溃: " + key + " (enable=" + enabled
-                + ", dryRun=" + isDryRun() + ", iface=" + hasInterface + ")");
+        event("检测", "崩溃: " + key + " (已启用=" + enabled
+                + ", 演练模式=" + (isDryRun() ? "开" : "关")
+                + ", 接口=" + hasInterface + ")");
         if (!enabled) {
             return;
         }
@@ -836,7 +837,7 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
         if (!isManaged(component)) {
-            event("检测", "无需修复（已不在受管列表）: " + key);
+            event("检测", "无需修复（已不在锁定列表）: " + key);
             return;
         }
         if (!isModuleEnabled()) {
@@ -887,7 +888,7 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
         if (isDryRun()) {
-            event("修复", "演练：将关开 " + key);
+            event("修复", "演练模式：将关开 " + key + "（不实际执行）");
             return;
         }
 

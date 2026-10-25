@@ -48,8 +48,13 @@ public class LogUtil {
     private static long sLastLogTime = 0;
 
     public static synchronized void log(Context ctx, String msg) {
+        logAt(ctx, System.currentTimeMillis(), msg);
+    }
+
+    /** 使用指定时间写日志，补读模块事件时保持原始时间且不重复加时间戳 */
+    public static synchronized void logAt(Context ctx, long time, String msg) {
         try {
-            long now = System.currentTimeMillis();
+            long now = time;
             String today = FILE_DATE_FMT.format(new Date(now));
             File dir = new File(ctx.getFilesDir(), LOG_DIR);
             if (!dir.exists()) dir.mkdirs();

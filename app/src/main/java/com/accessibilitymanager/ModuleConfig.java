@@ -8,10 +8,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 
-import java.text.SimpleDateFormat;
-import java.util.Date;
 import java.util.LinkedHashSet;
-import java.util.Locale;
 import java.util.Set;
 
 /** LSPosed 自动恢复模块的配置通道（Settings.Secure） */
@@ -27,8 +24,6 @@ public final class ModuleConfig {
     public static final String KEY_DEBUG_KILL = "a11y_module_debug_kill";
 
     private static final Object sLogLock = new Object();
-    private static final SimpleDateFormat EVENT_TIME_FMT =
-            new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
     private static ContentObserver sLogObserver;
     private static Context sLogContext;
 
@@ -92,9 +87,9 @@ public final class ModuleConfig {
             return;
         }
         if (put(context, KEY_SERVICES, desired)) {
-            LogUtil.log(context, "[模块] 受管服务已同步: " + desired);
+            LogUtil.log(context, "[模块] 锁定服务已同步: " + desired);
         } else {
-            LogUtil.log(context, "[模块] 受管服务写入失败（需要 WRITE_SECURE_SETTINGS）");
+            LogUtil.log(context, "[模块] 锁定服务写入失败（需要 WRITE_SECURE_SETTINGS）");
         }
     }
 
@@ -197,8 +192,8 @@ public final class ModuleConfig {
                     }
                     maxSeq = seq;
                     String message = parts[3];
-                    LogUtil.log(app, "[模块] "
-                            + EVENT_TIME_FMT.format(new Date(time)) + " " + message);
+                    // 使用事件原始时间，避免“日志时间 + 模块时间”重复
+                    LogUtil.logAt(app, time, "[模块] " + message);
                 }
 
                 if (!session.equals(lastSession) || maxSeq != lastSeq) {
