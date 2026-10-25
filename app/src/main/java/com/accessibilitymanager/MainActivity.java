@@ -2563,6 +2563,7 @@ public class MainActivity extends Activity {
         if (!ModuleConfig.isRemoteModuleEnabled(this)) {
             ModuleConfig.setEnabled(this, true);
         }
+        ModuleConfig.setDryRun(this, false);
         ModuleConfig.syncManagedServices(this,
                 sp.getString("daemon", ""),
                 sp.getString("whitelist_services", ""),

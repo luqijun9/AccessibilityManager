@@ -51,6 +51,8 @@ public final class ModuleConfig {
             try {
                 SharedPreferences sp = context.getSharedPreferences("data", 0);
                 if (sp.getBoolean("lsposed_mode", false)) {
+                    setEnabled(context, true);
+                    setDryRun(context, false);
                     syncManagedServices(context,
                             sp.getString("daemon", ""),
                             sp.getString("whitelist_services", ""),

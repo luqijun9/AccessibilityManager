@@ -360,15 +360,16 @@ public class AutoRepairEntry extends XposedModule {
                         scheduleCommandDrain();
                         return;
                     }
+                    if (KEY_SCAN.equals(key)) {
+                        scheduleScan(0L, "manual scan");
+                        return;
+                    }
                     if (KEY_ENABLE.equals(key)) {
                         if (isModuleEnabled()) {
                             scheduleReconcile("enable", RECONCILE_CONFIG_DELAY_MS);
                         }
                     } else if (KEY_SERVICES.equals(key)) {
                         scheduleReconcile("services", RECONCILE_CONFIG_DELAY_MS);
-                    }
-                    if (!KEY_DEBUG.equals(key)) {
-                        scheduleScan(SCAN_CONFIG_DELAY_MS, "config " + uri);
                     }
                 }
             };
@@ -422,29 +423,17 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static void runScan(String reason) {
-        if (sContext == null) {
-            return;
-        }
-        if (!isModuleEnabled()) {
-            event("配置", "扫描跳过：模块未启用 (" + reason + ")");
+        if (sContext == null || !isModuleEnabled()) {
             return;
         }
         String managed = readConfig(KEY_SERVICES);
         if (managed == null || managed.isEmpty()) {
-            event("配置", "扫描跳过：锁定服务列表为空 (" + reason + ")");
             return;
         }
         String enabled = readEnabled();
-        if (enabled == null || enabled.isEmpty()) {
-            event("配置", "扫描跳过：无障碍启用列表为空 (" + reason + ")");
+        if (enabled == null || enabled.isEmpty() || !hasConnectionState()) {
             return;
         }
-        if (!hasConnectionState()) {
-            event("配置", "扫描跳过：尚未收到服务连接事件 (" + reason + ")");
-            return;
-        }
-        event("配置", "扫描开始 (" + reason + "): 演练模式=" + (isDryRun() ? "开" : "关")
-                + " 锁定服务=" + managed.split(":").length);
 
         int candidates = 0;
         for (String raw : managed.split(":")) {
@@ -454,7 +443,7 @@ public class AutoRepairEntry extends XposedModule {
             }
             String key = component.flattenToString();
             if (!containsComponent(enabled, component)) {
-                event("检测", "已关闭，跳过: " + key);
+                // 已关闭的服务不属于异常崩溃，无需打印跳过日志
                 continue;
             }
             Object boundConnection = findBoundConnection(component);
@@ -463,14 +452,15 @@ public class AutoRepairEntry extends XposedModule {
                 continue;
             }
             if (!sBoundCheckAvailable) {
-                event("失败", "无法确认绑定状态，扫描中止");
                 return;
             }
             candidates++;
-            event("检测", "扫描发现崩溃: " + key);
+            event("检测", "扫描发现未绑定服务: " + key);
             scheduleCheck(component, key, SETTLE_MS);
         }
-        event("扫描", "扫描完成 (" + reason + ")，发现 " + candidates + " 个");
+        if (candidates > 0 || "manual scan".equals(reason)) {
+            event("扫描", "扫描完成 (" + reason + ")，发现 " + candidates + " 个异常服务");
+        }
     }
 
     private static void onEnabledListChanged() {
@@ -1198,7 +1188,7 @@ public class AutoRepairEntry extends XposedModule {
 
     private static boolean isDryRun() {
         String value = readConfig(KEY_DRY_RUN);
-        return value == null || value.isEmpty() || "1".equals(value);
+        return "1".equals(value);
     }
 
     private static Object findBoundConnection(ComponentName target) {
@@ -1402,6 +1392,10 @@ public class AutoRepairEntry extends XposedModule {
             scheduleCommandDrain();
             return;
         }
+        if (KEY_SCAN.equals(key)) {
+            scheduleScan(0L, "manual scan");
+            return;
+        }
         if (KEY_ENABLE.equals(key)) {
             if (isModuleEnabled()) {
                 scheduleReconcile("enable", RECONCILE_CONFIG_DELAY_MS);
@@ -1418,9 +1412,6 @@ public class AutoRepairEntry extends XposedModule {
                 }
             }
             scheduleReconcile("services", RECONCILE_CONFIG_DELAY_MS);
-        }
-        if (!KEY_DEBUG.equals(key)) {
-            scheduleScan(SCAN_CONFIG_DELAY_MS, "remote config " + key);
         }
     }
 
