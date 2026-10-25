@@ -83,6 +83,7 @@ public class AutoRepairEntry extends XposedModule {
     private static volatile AutoRepairEntry sModuleInstance;
     private static volatile Context sContext;
     private static volatile SharedPreferences sRemotePrefs;
+    private static volatile SharedPreferences.OnSharedPreferenceChangeListener sPrefChangeListener;
     private static Handler sHandler;
     private static boolean sInstalled;
     private static volatile ContentObserver sObserver;
@@ -690,7 +691,7 @@ public class AutoRepairEntry extends XposedModule {
 
     private static void drainCommands() {
         SharedPreferences prefs = sRemotePrefs;
-        if (prefs == null || sContext == null || !isModuleEnabled()) {
+        if (prefs == null || sContext == null) {
             return;
         }
         long seq;
@@ -1365,7 +1366,7 @@ public class AutoRepairEntry extends XposedModule {
                 return;
             }
             sRemotePrefs = prefs;
-            prefs.registerOnSharedPreferenceChangeListener((p, key) -> {
+            sPrefChangeListener = (p, key) -> {
                 Handler handler = sHandler;
                 if (handler == null) {
                     return;
@@ -1377,7 +1378,8 @@ public class AutoRepairEntry extends XposedModule {
                         event("失败", "远程配置处理异常: " + t);
                     }
                 });
-            });
+            };
+            prefs.registerOnSharedPreferenceChangeListener(sPrefChangeListener);
             log("remote prefs ready: " + REMOTE_GROUP);
             initCommandAck();
             scheduleCommandDrain();

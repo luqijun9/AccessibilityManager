@@ -164,13 +164,6 @@ public final class ModuleConfig {
     public static void syncManagedServices(Context context, String daemon,
             String whitelist, boolean globalWhitelist) {
         String desired = buildManaged(daemon, whitelist, globalWhitelist);
-        String current = get(context, KEY_SERVICES);
-        if (current == null) {
-            current = "";
-        }
-        if (desired.equals(current)) {
-            return;
-        }
         if (put(context, KEY_SERVICES, desired)) {
             LogUtil.log(context, "[模块] 锁定服务已同步: " + desired);
         } else {

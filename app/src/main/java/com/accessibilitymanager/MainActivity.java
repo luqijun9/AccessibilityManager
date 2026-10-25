@@ -2560,6 +2560,9 @@ public class MainActivity extends Activity {
             }
             return;
         }
+        if (!ModuleConfig.isRemoteModuleEnabled(this)) {
+            ModuleConfig.setEnabled(this, true);
+        }
         ModuleConfig.syncManagedServices(this,
                 sp.getString("daemon", ""),
                 sp.getString("whitelist_services", ""),
