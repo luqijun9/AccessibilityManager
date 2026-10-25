@@ -45,6 +45,8 @@ public class AutoRepairEntry extends XposedModule {
     private static final String KEY_SCAN = "a11y_module_scan";
     private static final String KEY_DEBUG = "a11y_module_debug";
     private static final String KEY_DEBUG_KILL = "a11y_module_debug_kill";
+    private static final String KEY_FIX_MODE = "a11y_module_fix_mode";
+    private static final String KEY_FIX_DISABLED = "a11y_module_fix_disabled";
     private static final String KEY_CMD_SEQ = "a11y_cmd_seq";
     private static final String KEY_CMD_PREFIX = "a11y_cmd_";
     private static final String KEY_CMD_ACK = "a11y_module_cmd_ack";
@@ -125,6 +127,9 @@ public class AutoRepairEntry extends XposedModule {
     private static long sLastReconcileWriteAt;
     private static final Map<String, Long> sSelfRemovedUntil = new HashMap<>();
     private static final Map<String, Long> sManualHiddenUntil = new HashMap<>();
+    private static volatile String sManagedServicesCache;
+    private static volatile String sFixModeCache;
+    private static volatile String sFixDisabledCache;
 
     // 反射缓存
     private static final Map<String, Field> sFieldCache = new ConcurrentHashMap<>();
@@ -735,6 +740,39 @@ public class AutoRepairEntry extends XposedModule {
         }
         String action = body.substring(0, colon);
         String component = body.substring(colon + 1);
+
+        if ("sync_services".equals(action)) {
+            sManagedServicesCache = component;
+            sManualHiddenUntil.clear();
+            if (sContext != null) {
+                try {
+                    Settings.Secure.putString(sContext.getContentResolver(), KEY_SERVICES, component);
+                } catch (Throwable ignored) {
+                }
+            }
+            scheduleReconcile("sync_services cmd", RECONCILE_CONFIG_DELAY_MS);
+            scheduleScan(SCAN_CONFIG_DELAY_MS, "sync_services cmd");
+            event("配置", "模块已生效最新锁定列表: " + component);
+            return;
+        }
+
+        if ("sync_fixmode".equals(action)) {
+            int sep = component.indexOf('#');
+            String modeStr = sep >= 0 ? component.substring(0, sep) : component;
+            String disabled = sep >= 0 ? component.substring(sep + 1) : "";
+            sFixModeCache = modeStr;
+            sFixDisabledCache = disabled;
+            if (sContext != null) {
+                try {
+                    Settings.Secure.putString(sContext.getContentResolver(), KEY_FIX_MODE, modeStr);
+                    Settings.Secure.putString(sContext.getContentResolver(), KEY_FIX_DISABLED, disabled);
+                } catch (Throwable ignored) {
+                }
+            }
+            event("配置", "模块已生效强杀配置: fixmode=" + modeStr);
+            return;
+        }
+
         ComponentName target = ComponentName.unflattenFromString(component);
         if (target == null) {
             return;
@@ -838,12 +876,55 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
         log("debug kill: " + pkg + " uid=" + uid + " pids=" + pids);
+        killAppProcesses(pkg);
+    }
+
+    private static void killAppProcesses(String pkg) {
+        if (sContext == null || pkg == null || pkg.isEmpty()) {
+            return;
+        }
+        final int uid;
+        try {
+            uid = sContext.getPackageManager().getApplicationInfo(pkg, 0).uid;
+        } catch (Throwable t) {
+            log("killAppProcesses: package not found: " + pkg);
+            return;
+        }
+
+        Set<Integer> pids = new LinkedHashSet<>();
+        try {
+            ActivityManager am =
+                    (ActivityManager) sContext.getSystemService(Context.ACTIVITY_SERVICE);
+            if (am != null) {
+                List<ActivityManager.RunningAppProcessInfo> processes =
+                        am.getRunningAppProcesses();
+                if (processes != null) {
+                    for (ActivityManager.RunningAppProcessInfo info : processes) {
+                        if (info != null && info.uid == uid) {
+                            pids.add(info.pid);
+                        }
+                    }
+                }
+                List<ActivityManager.RunningServiceInfo> services =
+                        am.getRunningServices(Integer.MAX_VALUE);
+                if (services != null) {
+                    for (ActivityManager.RunningServiceInfo info : services) {
+                        if (info != null && info.uid == uid && info.pid > 0) {
+                            pids.add(info.pid);
+                        }
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            log("killAppProcesses enumerate failed: " + t);
+        }
+
         for (int pid : pids) {
             try {
                 Process.killProcess(pid);
-                log("debug killed pid " + pid);
+                log("killAppProcesses: killed pid " + pid + " for " + pkg);
             } catch (Throwable t) {
-                log("debug kill pid " + pid + " failed: " + t);
+                log("killAppProcesses: kill pid " + pid + " failed: " + t);
             }
         }
     }
@@ -1078,6 +1159,21 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
 
+        boolean fixMode = sFixModeCache != null
+                ? "1".equals(sFixModeCache)
+                : "1".equals(readConfig(KEY_FIX_MODE));
+        String disabled = sFixDisabledCache != null
+                ? sFixDisabledCache
+                : readConfig(KEY_FIX_DISABLED);
+        boolean allowKill = fixMode
+                && (disabled == null || !disabled.contains(component.flattenToString()))
+                && sContext != null && !component.getPackageName().equals(sContext.getPackageName());
+
+        if (allowKill) {
+            killAppProcesses(component.getPackageName());
+            event("修复", "强杀应用进程后重启: " + component.getPackageName());
+        }
+
         sHandler.postDelayed(() -> {
             try {
                 String current = readEnabled();
@@ -1184,7 +1280,7 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static boolean isManaged(ComponentName target) {
-        String list = readConfig(KEY_SERVICES);
+        String list = sManagedServicesCache != null ? sManagedServicesCache : readConfig(KEY_SERVICES);
         if (list == null || list.isEmpty()) {
             return false;
         }

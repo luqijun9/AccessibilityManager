@@ -53,6 +53,8 @@ public final class ModuleConfig {
                 if (sp.getBoolean("lsposed_mode", false)) {
                     setEnabled(context, true);
                     setDryRun(context, false);
+                    setFixMode(context, sp.getBoolean("fixmode", false),
+                            sp.getString("fixmode_disabled_services", ""));
                     syncManagedServices(context,
                             sp.getString("daemon", ""),
                             sp.getString("whitelist_services", ""),
@@ -129,7 +131,14 @@ public final class ModuleConfig {
 
     /** 让模块代为开启/关闭无障碍服务（LSPosed 模式无需 WRITE_SECURE_SETTINGS） */
     public static boolean sendServiceCommand(Context context, boolean enable, String component) {
-        if (context == null || component == null || component.isEmpty()
+        if (component == null || component.isEmpty()) {
+            return false;
+        }
+        return sendServiceCommandPayload(context, (enable ? "enable:" : "disable:") + component);
+    }
+
+    public static boolean sendServiceCommandPayload(Context context, String payload) {
+        if (context == null || payload == null || payload.isEmpty()
                 || !isRemoteConfigAvailable()) {
             return false;
         }
@@ -142,8 +151,6 @@ public final class ModuleConfig {
                 } catch (Throwable ignored) {
                 }
                 seq++;
-                String payload = (enable ? "enable:" : "disable:") + component;
-                // payload 与 seq 放在同一次 commit，避免应用进程中途退出留下孤立的 payload
                 return prefs.edit()
                         .putString(KEY_CMD_PREFIX + seq, payload)
                         .putString(KEY_CMD_SEQ, String.valueOf(seq))
@@ -164,6 +171,17 @@ public final class ModuleConfig {
                 component + "#" + System.currentTimeMillis());
     }
 
+    public static final String KEY_FIX_MODE = "a11y_module_fix_mode";
+    public static final String KEY_FIX_DISABLED = "a11y_module_fix_disabled";
+
+    public static boolean setFixMode(Context context, boolean fixMode, String disabledServices) {
+        put(context, KEY_FIX_MODE, fixMode ? "1" : "0");
+        put(context, KEY_FIX_DISABLED, disabledServices != null ? disabledServices : "");
+        sendServiceCommandPayload(context, "sync_fixmode:" + (fixMode ? "1" : "0") + "#"
+                + (disabledServices != null ? disabledServices : ""));
+        return true;
+    }
+
     public static void syncManagedServices(Context context, String daemon,
             String whitelist, boolean globalWhitelist) {
         syncManagedServices(context, daemon, whitelist, globalWhitelist, null);
@@ -176,10 +194,13 @@ public final class ModuleConfig {
         String reasonSuffix = (reason != null && !reason.isEmpty()) ? " (" + reason + ")" : "";
         if (desired.equals(current)) {
             LogUtil.log(context, "[模块] 锁定服务已同步" + reasonSuffix);
+            // 额外通过命令队列下发一次，确保 system_server 内部内存与系统设置瞬间同步
+            sendServiceCommandPayload(context, "sync_services:" + desired);
             return;
         }
         if (put(context, KEY_SERVICES, desired)) {
             LogUtil.log(context, "[模块] 锁定服务已同步" + reasonSuffix + ": " + desired);
+            sendServiceCommandPayload(context, "sync_services:" + desired);
         } else {
             LogUtil.log(context, "[模块] 锁定服务写入失败" + reasonSuffix + "（模块未连接且未授予 WRITE_SECURE_SETTINGS）");
         }

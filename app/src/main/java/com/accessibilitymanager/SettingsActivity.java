@@ -56,6 +56,8 @@ public class SettingsActivity extends AppCompatActivity {
     private MaterialSwitch switchLsposedMode;
     private View lsposedModeRow;
     private TextView lsposedModuleStatus;
+    private View lsposedFixmodeLayout, lsposedFixmodeRow, lsposedFixmodeServicesLayout;
+    private MaterialSwitch switchLsposedFixMode;
     private View debugToolsRow;
     private TextView debugToolsStatus;
     private android.widget.CompoundButton.OnCheckedChangeListener mCrashFixListener;
@@ -276,6 +278,10 @@ public class SettingsActivity extends AppCompatActivity {
         fixmodeWrapper = findViewById(R.id.fixmode_wrapper);
         globalCooldownWrapper = findViewById(R.id.global_cooldown_wrapper);
         periodicWrapper = findViewById(R.id.periodic_wrapper);
+        lsposedFixmodeLayout = findViewById(R.id.lsposed_fixmode_layout);
+        lsposedFixmodeRow = findViewById(R.id.lsposed_fixmode_row);
+        switchLsposedFixMode = findViewById(R.id.lsposed_switch_fixmode);
+        lsposedFixmodeServicesLayout = findViewById(R.id.lsposed_fixmode_services_layout);
     }
 
     private void loadValues() {
@@ -295,7 +301,11 @@ public class SettingsActivity extends AppCompatActivity {
         globalCooldownWrapper.setBackgroundResource(globalCooldownEnabled ? R.drawable.bg_nested_setting : 0);
         globalCooldownTimeLabel.setText(sp.getInt("global_cooldown_time_minutes", 15) + "分钟");
         switchUnlockCrashCheck.setChecked(sp.getBoolean("unlock_crash_check", false));
-        switchFixMode.setChecked(sp.getBoolean("fixmode", false));
+        boolean fixMode = sp.getBoolean("fixmode", false);
+        switchFixMode.setChecked(fixMode);
+        if (switchLsposedFixMode != null) {
+            switchLsposedFixMode.setChecked(fixMode);
+        }
         switchPeriodicCheck.setChecked(sp.getBoolean("periodic_check", false));
         switchWakeIdle.setChecked(sp.getBoolean("periodic_check_wake_idle", true));
         switchIgnoreSystemCrash.setChecked(sp.getBoolean("ignore_system_crash_trigger", true));
@@ -518,9 +528,37 @@ public class SettingsActivity extends AppCompatActivity {
                 }
             }
             sp.edit().putBoolean("fixmode", checked).apply();
+            if (switchLsposedFixMode != null && switchLsposedFixMode.isChecked() != checked) {
+                switchLsposedFixMode.setChecked(checked);
+            }
+            ModuleConfig.setFixMode(SettingsActivity.this, checked, sp.getString("fixmode_disabled_services", ""));
             refreshCrashFixDependent();
         };
         switchFixMode.setOnCheckedChangeListener(fixModeListenerHolder[0]);
+
+        if (switchLsposedFixMode != null) {
+            switchLsposedFixMode.setOnCheckedChangeListener((btn, checked) -> {
+                sp.edit().putBoolean("fixmode", checked).apply();
+                if (switchFixMode != null && switchFixMode.isChecked() != checked) {
+                    switchFixMode.setChecked(checked);
+                }
+                if (lsposedFixmodeServicesLayout != null) {
+                    lsposedFixmodeServicesLayout.setVisibility(checked ? View.VISIBLE : View.GONE);
+                }
+                ModuleConfig.setFixMode(SettingsActivity.this, checked, sp.getString("fixmode_disabled_services", ""));
+                refreshCrashFixDependent();
+            });
+        }
+        if (lsposedFixmodeRow != null) {
+            lsposedFixmodeRow.setOnClickListener(v -> {
+                if (switchLsposedFixMode != null) {
+                    switchLsposedFixMode.toggle();
+                }
+            });
+        }
+        if (lsposedFixmodeServicesLayout != null) {
+            lsposedFixmodeServicesLayout.setOnClickListener(v -> showFixmodeServicesDialog());
+        }
 
         fixmodeServicesLayout.setOnClickListener(v -> showFixmodeServicesDialog());
         fixmodeServicesBtn.setOnClickListener(v -> showFixmodeServicesDialog());
@@ -895,6 +933,18 @@ public class SettingsActivity extends AppCompatActivity {
     private void handleLsposedModeChanged(boolean checked) {
         if (checked) {
             boolean loaded = ModuleConfig.isModuleLoaded(this);
+            if (!loaded) {
+                if (mModuleModeListener != null) {
+                    switchLsposedMode.setOnCheckedChangeListener(null);
+                }
+                switchLsposedMode.setChecked(false);
+                if (mModuleModeListener != null) {
+                    switchLsposedMode.setOnCheckedChangeListener(mModuleModeListener);
+                }
+                Toast.makeText(this, "LSPosed 模块未激活或未生效，请先在 LSPosed 中勾选本模块并重启手机", Toast.LENGTH_LONG).show();
+                return;
+            }
+
             sp.edit().putBoolean("lsposed_mode", true)
                     .putBoolean("crashfix", false)
                     .putBoolean("crashfix_auto_disabled", false)
@@ -908,6 +958,8 @@ public class SettingsActivity extends AppCompatActivity {
                     sp.getString("whitelist_services", ""),
                     sp.getBoolean("whitelist_global_enable", false),
                     "开启模块模式");
+            ModuleConfig.setFixMode(this, sp.getBoolean("fixmode", false),
+                    sp.getString("fixmode_disabled_services", ""));
             ModuleConfig.triggerScan(this);
             ModuleConfig.startLogSync(this);
             ModuleConfig.drainLogs(this);
@@ -916,10 +968,7 @@ public class SettingsActivity extends AppCompatActivity {
             LogUtil.log(this, "[模块] 开启 LSPosed 模式 loaded=" + loaded
                     + " enableWritten=" + written
                     + " managed=" + ModuleConfig.getManagedServices(this));
-            Toast.makeText(this, loaded
-                    ? "LSPosed 模块模式已开启，崩溃修复由模块接管"
-                    : "已开启，但模块本次开机未加载，请在 LSPosed 中启用后重启",
-                    Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "LSPosed 模块模式已开启，崩溃修复由模块接管", Toast.LENGTH_SHORT).show();
         } else {
             sp.edit().putBoolean("lsposed_mode", false).apply();
             ModuleConfig.setEnabled(this, false);
@@ -958,17 +1007,24 @@ public class SettingsActivity extends AppCompatActivity {
 
         boolean loaded = ModuleConfig.isModuleLoaded(this);
         if (mode) {
-            String channel = ModuleConfig.isRemoteConfigAvailable()
-                    ? "配置通道：Remote Preferences（无需 Shizuku）"
-                    : "配置通道：Settings.Secure（需要授权）";
-            lsposedModuleStatus.setText((loaded
-                    ? "已启用：模块已加载，崩溃检测/修复由模块接管"
-                    : "已启用：模块本次开机未加载，请在 LSPosed 中启用本应用后重启")
-                    + "\n" + channel);
+            lsposedModuleStatus.setText(loaded
+                    ? "已启用：系统级实时监听与自动修复"
+                    : "未生效：模块未加载，请在 LSPosed 启用后重启");
         } else if (!loaded) {
-            lsposedModuleStatus.setText("本应用已集成模块，需在 LSPosed 启用并重启后生效");
+            lsposedModuleStatus.setText("未激活：需在 LSPosed 勾选并重启手机生效");
         } else {
-            lsposedModuleStatus.setText("模块已加载，开启后不再使用 Shizuku/dumpsys 检测");
+            lsposedModuleStatus.setText("已激活：开启后由底层模块接管崩溃监听与修复");
+        }
+
+        if (lsposedFixmodeLayout != null) {
+            lsposedFixmodeLayout.setVisibility(mode ? View.VISIBLE : View.GONE);
+            boolean fixModeOn = sp.getBoolean("fixmode", false);
+            if (switchLsposedFixMode != null && switchLsposedFixMode.isChecked() != fixModeOn) {
+                switchLsposedFixMode.setChecked(fixModeOn);
+            }
+            if (lsposedFixmodeServicesLayout != null) {
+                lsposedFixmodeServicesLayout.setVisibility(fixModeOn ? View.VISIBLE : View.GONE);
+            }
         }
 
         if (debugToolsRow != null) {
@@ -1191,7 +1247,7 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void showFixmodeServicesDialog() {
-        if (!switchFixMode.isChecked())
+        if (!sp.getBoolean("fixmode", false))
             return;
 
         java.util.List<android.accessibilityservice.AccessibilityServiceInfo> list = new java.util.ArrayList<>(
@@ -1336,7 +1392,9 @@ public class SettingsActivity extends AppCompatActivity {
                             sb.append(item.serviceId);
                         }
                     }
-                    sp.edit().putString("fixmode_disabled_services", sb.toString()).apply();
+                    String disabledServices = sb.toString();
+                    sp.edit().putString("fixmode_disabled_services", disabledServices).apply();
+                    ModuleConfig.setFixMode(SettingsActivity.this, sp.getBoolean("fixmode", false), disabledServices);
                 })
                 .setNegativeButton("取消", null)
                 .setNeutralButton("全选/全不选", null)
