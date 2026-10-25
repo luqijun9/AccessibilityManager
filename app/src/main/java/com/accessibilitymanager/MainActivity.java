@@ -165,8 +165,9 @@ public class MainActivity extends Activity {
                         if (source == null || source.isEmpty()) return;
                         
                         for (int i = first; i <= last; i++) {
-                            if (i >= source.size()) continue;
-                            String serviceId = source.get(i).getId();
+                            AccessibilityServiceInfo info = mAdapter.getItem(i);
+                            if (info == null) continue;
+                            String serviceId = normalizeServiceId(info.getId());
                             boolean isChecked = isServiceEnabled(serviceId, settingValue);
                             View view = layoutManager.findViewByPosition(i);
                             if (view != null) {
@@ -1059,6 +1060,7 @@ public class MainActivity extends Activity {
         
         checkBatteryOptimization();
         syncModuleLogsIfNeeded();
+        syncModuleServicesIfNeeded();
         checkAndShowCrashFixIntroDialog();
         if (sp.getBoolean("auto_update", true)) {
             long now = System.currentTimeMillis();
@@ -1919,6 +1921,13 @@ public class MainActivity extends Activity {
             this.mList = new java.util.ArrayList<>(list);
         }
 
+        public AccessibilityServiceInfo getItem(int position) {
+            if (position >= 0 && position < mList.size()) {
+                return mList.get(position);
+            }
+            return null;
+        }
+
         public void updateData(List<AccessibilityServiceInfo> newList) {
             androidx.recyclerview.widget.DiffUtil.DiffResult diffResult = androidx.recyclerview.widget.DiffUtil.calculateDiff(new androidx.recyclerview.widget.DiffUtil.Callback() {
                 @Override
@@ -2004,7 +2013,8 @@ public class MainActivity extends Activity {
             holder.sw.setEnabled(true);
             holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
             holder.ib.setOnClickListener(view -> {
-                if (checkPermission()) {
+                boolean lsposed = sp.getBoolean("lsposed_mode", false);
+                if (!lsposed && checkPermission()) {
                     createPermissionDialog();
                     return;
                 }
@@ -2012,12 +2022,12 @@ public class MainActivity extends Activity {
                     daemon = removeServiceFromList(daemon, serviceComponent);
                 } else {
                     daemon = serviceName + ":" + daemon;
-                    checkAndShowCrashFixIntroDialog();
+                    if (!lsposed) checkAndShowCrashFixIntroDialog();
                 }
                 sp.edit().putString("daemon", daemon).apply();
                 syncModuleServicesIfNeeded();
                 holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
-                StartForeGroundDaemon();
+                if (!lsposed) StartForeGroundDaemon();
             });
 
             holder.sw.setChecked(isServiceEnabled(serviceName, settingValue));
@@ -2027,40 +2037,46 @@ public class MainActivity extends Activity {
                 if (checkPermission()) {
                     createPermissionDialog();
                     holder.sw.setChecked(!holder.sw.isChecked());
+                    return;
+                }
+                String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+                if (s == null) s = "";
+
+                if (holder.sw.isChecked()) {
+                    // === 用户在管理器中开启服务 ===
+                    if (!isServiceEnabled(serviceName, s)) tmpSettingValue = serviceName + ":" + s;
+                    else tmpSettingValue = s;
+                    Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
+                    holder.ib.setVisibility(View.VISIBLE);
+                    holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
                 } else {
-                    String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-                    if (s == null) s = "";
-
-                    if (holder.sw.isChecked()) {
-                        // === 用户在管理器中开启服务 ===
-                        if (!isServiceEnabled(serviceName, s)) tmpSettingValue = serviceName + ":" + s;
-                        else tmpSettingValue = s;
-                        Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
-                        holder.ib.setVisibility(View.VISIBLE);
-                        holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
-                    } else {
-                        // === 用户在管理器中关闭服务 ===
-                        // 如果开启了“可在管理器手动关闭保活服务”：处于保活列表中时同时解除保活，再次开启需重新手动加锁
+                    // === 用户在管理器中关闭服务 ===
+                    boolean isLocked = containsService(daemon, serviceName);
+                    if (isLocked) {
                         if (sp.getBoolean("manual_close_daemon", false)) {
-                            if (containsService(daemon, serviceName)) {
-                                daemon = removeServiceFromList(daemon, serviceComponent);
-                                sp.edit().putString("daemon", daemon).apply();
-                syncModuleServicesIfNeeded();
-                                holder.ib.setImageResource(R.drawable.lock);
-                                StartForeGroundDaemon();
-                            }
+                            // 允许手动关闭保活服务：处于保活列表中时同时解除保活，再次开启需重新手动加锁
+                            daemon = removeServiceFromList(daemon, serviceComponent);
+                            sp.edit().putString("daemon", daemon).apply();
+                            syncModuleServicesIfNeeded();
+                            holder.ib.setImageResource(R.drawable.lock);
+                            if (!sp.getBoolean("lsposed_mode", false)) StartForeGroundDaemon();
+                        } else {
+                            // 未开启手动关闭保活服务，且服务已处于保活列表：直接拦截，弹回开启状态
+                            holder.sw.setChecked(true);
+                            Toast.makeText(MainActivity.this, "该服务已锁定，请先解锁或在设置中允许手动关闭", Toast.LENGTH_SHORT).show();
+                            return;
                         }
-
-                        StringBuilder sb = new StringBuilder();
-                        for (String entry : s.split(":")) {
-                            if (entry.isEmpty() || serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
-                            if (sb.length() > 0) sb.append(":");
-                            sb.append(entry);
-                        }
-                        tmpSettingValue = sb.toString();
-                        Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
-                        holder.ib.setVisibility(View.INVISIBLE);
                     }
+
+                    StringBuilder sb = new StringBuilder();
+                    for (String entry : s.split(":")) {
+                        if (entry.isEmpty() || serviceComponent.equals(ComponentName.unflattenFromString(entry))) continue;
+                        if (sb.length() > 0) sb.append(":");
+                        sb.append(entry);
+                    }
+                    tmpSettingValue = sb.toString();
+                    Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
+                    holder.ib.setVisibility(View.INVISIBLE);
                 }
             });
 

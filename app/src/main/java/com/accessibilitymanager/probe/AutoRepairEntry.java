@@ -5,8 +5,10 @@ import android.content.ComponentName;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.database.ContentObserver;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Process;
@@ -144,6 +146,11 @@ public class AutoRepairEntry extends XposedModule {
         sInstalled = true;
         sModuleInstance = this;
         try {
+            Context sysCtx = getSystemContext(classLoader);
+            if (sysCtx != null && sContext == null) {
+                sContext = sysCtx;
+                tryGrantPermissionsDirectly(sysCtx);
+            }
             installHooks(classLoader);
         } catch (Throwable t) {
             log("install failed: " + t);
@@ -155,6 +162,7 @@ public class AutoRepairEntry extends XposedModule {
         thread.start();
         sHandler = new Handler(thread.getLooper());
         initRemoteConfig();
+        installPermissionHooks(classLoader);
 
         try {
             Class<?> connClass = classLoader.loadClass(CONNECTION_CLASS);
@@ -327,6 +335,7 @@ public class AutoRepairEntry extends XposedModule {
         if (sContext == null || sHandler == null) {
             return;
         }
+        tryGrantPermissionsDirectly(sContext);
         writeHeartbeatOnce();
         flushEvents();
         if (sObserver != null) {
@@ -1420,6 +1429,224 @@ public class AutoRepairEntry extends XposedModule {
                 inst.log(Log.INFO, TAG, message);
             }
         } catch (Throwable ignored) {
+        }
+    }
+
+    // ========== 权限豁免 (解决 App 写 Settings.Secure 权限) ==========
+
+    private static final String TARGET_PACKAGE = "com.accessibilitymanager";
+    private static volatile int sTargetAppId = -1;
+
+    private static boolean isTargetPermission(String permission) {
+        return "android.permission.WRITE_SECURE_SETTINGS".equals(permission)
+                || "android.permission.DUMP".equals(permission);
+    }
+
+    private static boolean isTargetUid(int uid) {
+        if (uid < 10000) {
+            return false;
+        }
+        int appId = uid % 100000;
+        if (sTargetAppId > 0) {
+            return appId == sTargetAppId;
+        }
+        Context context = sContext;
+        if (context != null) {
+            try {
+                PackageManager pm = context.getPackageManager();
+                int targetUid = pm.getPackageUid(TARGET_PACKAGE, 0);
+                sTargetAppId = targetUid % 100000;
+                return appId == sTargetAppId;
+            } catch (Throwable ignored) {
+                try {
+                    String[] pkgs = context.getPackageManager().getPackagesForUid(uid);
+                    if (pkgs != null) {
+                        for (String pkg : pkgs) {
+                            if (TARGET_PACKAGE.equals(pkg)) {
+                                sTargetAppId = appId;
+                                return true;
+                            }
+                        }
+                    }
+                } catch (Throwable ignored2) {
+                }
+            }
+        }
+        return false;
+    }
+
+    private static Context getSystemContext(ClassLoader classLoader) {
+        try {
+            Class<?> atClass = classLoader.loadClass("android.app.ActivityThread");
+            Method currentAt = atClass.getDeclaredMethod("currentActivityThread");
+            Object at = currentAt.invoke(null);
+            Method getSysCtx = atClass.getDeclaredMethod("getSystemContext");
+            return (Context) getSysCtx.invoke(at);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static void tryGrantPermissionsDirectly(Context context) {
+        if (context == null) {
+            return;
+        }
+        try {
+            PackageManager pm = context.getPackageManager();
+            int targetUid = pm.getPackageUid(TARGET_PACKAGE, 0);
+            sTargetAppId = targetUid % 100000;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                try {
+                    Method grant = pm.getClass().getMethod("grantRuntimePermission",
+                            String.class, String.class, android.os.UserHandle.class);
+                    grant.invoke(pm, TARGET_PACKAGE,
+                            "android.permission.WRITE_SECURE_SETTINGS", Process.myUserHandle());
+                    grant.invoke(pm, TARGET_PACKAGE,
+                            "android.permission.DUMP", Process.myUserHandle());
+                    log("granted permissions directly via PMS");
+                } catch (Throwable ignored) {
+                }
+            }
+        } catch (Throwable t) {
+            log("tryGrantPermissionsDirectly: " + t);
+        }
+    }
+
+    private void installPermissionHooks(ClassLoader classLoader) {
+        // 1. Hook ActivityManager.checkComponentPermission
+        try {
+            Class<?> amClass = classLoader.loadClass("android.app.ActivityManager");
+            Method m = findMethod(amClass, "checkComponentPermission",
+                    String.class, int.class, int.class, boolean.class);
+            if (m != null) {
+                hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                        .intercept(chain -> {
+                            List<Object> args = chain.getArgs();
+                            if (args != null && args.size() >= 2) {
+                                Object pObj = args.get(0);
+                                Object uObj = args.get(1);
+                                if (pObj instanceof String && uObj instanceof Integer) {
+                                    if (isTargetPermission((String) pObj) && isTargetUid((Integer) uObj)) {
+                                        return PackageManager.PERMISSION_GRANTED;
+                                    }
+                                }
+                            }
+                            return chain.proceed();
+                        });
+                log("hooked ActivityManager.checkComponentPermission");
+            }
+        } catch (Throwable t) {
+            log("hook ActivityManager.checkComponentPermission failed: " + t);
+        }
+
+        // 2. Hook ActivityManagerService.checkPermission
+        try {
+            Class<?> amsClass = classLoader.loadClass("com.android.server.am.ActivityManagerService");
+            Method m = findMethod(amsClass, "checkPermission",
+                    String.class, int.class, int.class);
+            if (m != null) {
+                hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                        .intercept(chain -> {
+                            List<Object> args = chain.getArgs();
+                            if (args != null && args.size() >= 3) {
+                                Object pObj = args.get(0);
+                                Object uObj = args.get(2);
+                                if (pObj instanceof String && uObj instanceof Integer) {
+                                    if (isTargetPermission((String) pObj) && isTargetUid((Integer) uObj)) {
+                                        return PackageManager.PERMISSION_GRANTED;
+                                    }
+                                }
+                            }
+                            return chain.proceed();
+                        });
+                log("hooked ActivityManagerService.checkPermission");
+            }
+        } catch (Throwable t) {
+            log("hook ActivityManagerService.checkPermission failed: " + t);
+        }
+
+        // 3. Hook PackageManagerService.checkUidPermission
+        try {
+            Class<?> pmsClass = classLoader.loadClass("com.android.server.pm.PackageManagerService");
+            for (Method m : pmsClass.getDeclaredMethods()) {
+                if ("checkUidPermission".equals(m.getName())) {
+                    Class<?>[] pTypes = m.getParameterTypes();
+                    if (pTypes.length >= 2 && pTypes[0] == String.class && pTypes[1] == int.class) {
+                        hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                                .intercept(chain -> {
+                                    List<Object> args = chain.getArgs();
+                                    if (args != null && args.size() >= 2) {
+                                        Object pObj = args.get(0);
+                                        Object uObj = args.get(1);
+                                        if (pObj instanceof String && uObj instanceof Integer) {
+                                            if (isTargetPermission((String) pObj) && isTargetUid((Integer) uObj)) {
+                                                return PackageManager.PERMISSION_GRANTED;
+                                            }
+                                        }
+                                    }
+                                    return chain.proceed();
+                                });
+                        log("hooked PackageManagerService." + m.getName());
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            log("hook PackageManagerService.checkUidPermission failed: " + t);
+        }
+
+        // 4. Hook PermissionManagerService (Android 12+)
+        try {
+            Class<?> pmsiClass = null;
+            try {
+                pmsiClass = classLoader.loadClass("com.android.server.pm.permission.PermissionManagerServiceImpl");
+            } catch (ClassNotFoundException e) {
+                try {
+                    pmsiClass = classLoader.loadClass("com.android.server.pm.permission.PermissionManagerService");
+                } catch (ClassNotFoundException ignored) {
+                }
+            }
+            if (pmsiClass != null) {
+                for (Method m : pmsiClass.getDeclaredMethods()) {
+                    if ("checkUidPermission".equals(m.getName()) || "checkPermission".equals(m.getName())) {
+                        Class<?>[] pTypes = m.getParameterTypes();
+                        if (pTypes.length >= 2 && pTypes[0] == int.class && pTypes[1] == String.class) {
+                            hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                                    .intercept(chain -> {
+                                        List<Object> args = chain.getArgs();
+                                        if (args != null && args.size() >= 2) {
+                                            Object uObj = args.get(0);
+                                            Object pObj = args.get(1);
+                                            if (pObj instanceof String && uObj instanceof Integer) {
+                                                if (isTargetPermission((String) pObj) && isTargetUid((Integer) uObj)) {
+                                                    return PackageManager.PERMISSION_GRANTED;
+                                                }
+                                            }
+                                        }
+                                        return chain.proceed();
+                                    });
+                            log("hooked PermissionManagerService." + m.getName() + "(int, String)");
+                        } else if (pTypes.length >= 2 && pTypes[0] == String.class && pTypes[1] == int.class) {
+                            hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                                    .intercept(chain -> {
+                                        List<Object> args = chain.getArgs();
+                                        if (args != null && args.size() >= 2) {
+                                            Object pObj = args.get(0);
+                                            Object uObj = args.get(1);
+                                            if (pObj instanceof String && uObj instanceof Integer) {
+                                                if (isTargetPermission((String) pObj) && isTargetUid((Integer) uObj)) {
+                                                    return PackageManager.PERMISSION_GRANTED;
+                                                }
+                                            }
+                                        }
+                                        return chain.proceed();
+                                    });
+                            log("hooked PermissionManagerService." + m.getName() + "(String, int)");
+                        }
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            log("hook PermissionManagerService failed: " + t);
         }
     }
 }

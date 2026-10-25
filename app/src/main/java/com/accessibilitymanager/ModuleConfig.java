@@ -42,6 +42,19 @@ public final class ModuleConfig {
                 + (service == null ? "null" : service.getFrameworkName()
                         + " " + service.getFrameworkVersion())
                 + ", RemotePreferences=" + remote);
+        if (remote && context != null) {
+            try {
+                SharedPreferences sp = context.getSharedPreferences("data", 0);
+                if (sp.getBoolean("lsposed_mode", false)) {
+                    syncManagedServices(context,
+                            sp.getString("daemon", ""),
+                            sp.getString("whitelist_services", ""),
+                            sp.getBoolean("whitelist_global_enable", false));
+                }
+            } catch (Throwable t) {
+                LogUtil.log(context, "[模块] 绑定后自动同步失败: " + t);
+            }
+        }
     }
 
     public static void onXposedServiceDied(XposedService service) {
