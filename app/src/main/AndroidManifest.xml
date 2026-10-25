@@ -16,7 +16,7 @@
         android:name="android.permission.DUMP"
         tools:ignore="ProtectedPermissions" />
 
-    <uses-sdk tools:overrideLibrary="rikka.shizuku.provider,rikka.shizuku.api,rikka.shizuku.shared,rikka.shizuku.aidl" />
+    <uses-sdk tools:overrideLibrary="rikka.shizuku.provider,rikka.shizuku.api,rikka.shizuku.shared,rikka.shizuku.aidl,io.github.libxposed.service,io.github.libxposed.service.interfaces" />
 
     <application
         android:name=".App"

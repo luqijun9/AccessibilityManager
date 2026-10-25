@@ -11,8 +11,13 @@ import android.provider.Settings;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-/** LSPosed 自动恢复模块的配置通道（Settings.Secure） */
+import io.github.libxposed.service.XposedService;
+
+/** LSPosed 自动恢复模块的配置通道（优先 Remote Preferences，回退 Settings.Secure） */
 public final class ModuleConfig {
+
+    private static final String REMOTE_GROUP = "a11y_config";
+    private static volatile XposedService sXposedService;
 
     public static final String KEY_ENABLE = "a11y_module_enable";
     public static final String KEY_SERVICES = "a11y_module_services";
@@ -28,6 +33,33 @@ public final class ModuleConfig {
     private static Context sLogContext;
 
     private ModuleConfig() {
+    }
+
+    public static void onXposedServiceBind(Context context, XposedService service) {
+        sXposedService = service;
+        boolean remote = isRemoteConfigAvailable();
+        LogUtil.log(context, "[模块] XposedService 已连接: "
+                + (service == null ? "null" : service.getFrameworkName()
+                        + " " + service.getFrameworkVersion())
+                + ", RemotePreferences=" + remote);
+    }
+
+    public static void onXposedServiceDied(XposedService service) {
+        if (sXposedService == service) {
+            sXposedService = null;
+        }
+    }
+
+    public static boolean isRemoteConfigAvailable() {
+        XposedService service = sXposedService;
+        if (service == null) {
+            return false;
+        }
+        try {
+            return (service.getFrameworkProperties() & XposedService.PROP_CAP_REMOTE) != 0;
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     /** 模块会在本次开机加载后写 bootCount|version */
@@ -89,7 +121,7 @@ public final class ModuleConfig {
         if (put(context, KEY_SERVICES, desired)) {
             LogUtil.log(context, "[模块] 锁定服务已同步: " + desired);
         } else {
-            LogUtil.log(context, "[模块] 锁定服务写入失败（需要 WRITE_SECURE_SETTINGS）");
+            LogUtil.log(context, "[模块] 锁定服务写入失败（模块未连接且未授予 WRITE_SECURE_SETTINGS）");
         }
     }
 
@@ -237,6 +269,17 @@ public final class ModuleConfig {
     }
 
     private static String get(Context context, String key) {
+        if (isRemoteConfigAvailable()) {
+            try {
+                SharedPreferences prefs = sXposedService.getRemotePreferences(REMOTE_GROUP);
+                String value = prefs.getString(key, null);
+                if (value != null) {
+                    return value;
+                }
+            } catch (Throwable t) {
+                LogUtil.log(context, "[模块] 读 RemotePreferences 失败: " + t);
+            }
+        }
         try {
             return Settings.Secure.getString(context.getContentResolver(), key);
         } catch (Throwable t) {
@@ -245,6 +288,22 @@ public final class ModuleConfig {
     }
 
     private static boolean put(Context context, String key, String value) {
+        if (isRemoteConfigAvailable()) {
+            try {
+                SharedPreferences prefs = sXposedService.getRemotePreferences(REMOTE_GROUP);
+                if (prefs.edit().putString(key, value).commit()) {
+                    // 兼容回退：模块侧若无法使用 RemotePreferences，仍可从 Settings.Secure 读到同一份配置
+                    try {
+                        Settings.Secure.putString(context.getContentResolver(), key, value);
+                    } catch (Throwable ignored) {
+                    }
+                    return true;
+                }
+                LogUtil.log(context, "[模块] RemotePreferences 写入失败: " + key);
+            } catch (Throwable t) {
+                LogUtil.log(context, "[模块] RemotePreferences 写入异常: " + t);
+            }
+        }
         try {
             return Settings.Secure.putString(context.getContentResolver(), key, value);
         } catch (Throwable t) {

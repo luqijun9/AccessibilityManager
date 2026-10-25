@@ -957,9 +957,13 @@ public class SettingsActivity extends AppCompatActivity {
 
         boolean loaded = ModuleConfig.isModuleLoaded(this);
         if (mode) {
-            lsposedModuleStatus.setText(loaded
+            String channel = ModuleConfig.isRemoteConfigAvailable()
+                    ? "配置通道：Remote Preferences（无需 Shizuku）"
+                    : "配置通道：Settings.Secure（需要授权）";
+            lsposedModuleStatus.setText((loaded
                     ? "已启用：模块已加载，崩溃检测/修复由模块接管"
-                    : "已启用：模块本次开机未加载，请在 LSPosed 中启用本应用后重启");
+                    : "已启用：模块本次开机未加载，请在 LSPosed 中启用本应用后重启")
+                    + "\n" + channel);
         } else if (!loaded) {
             lsposedModuleStatus.setText("本应用已集成模块，需在 LSPosed 启用并重启后生效");
         } else {
@@ -1148,7 +1152,7 @@ public class SettingsActivity extends AppCompatActivity {
                             + " written=" + written);
                     Toast.makeText(this, written
                                     ? "已请求模块模拟崩溃，结果会写入管理器日志"
-                                    : "写入失败，需要 WRITE_SECURE_SETTINGS 权限",
+                                    : "写入失败：模块未连接，或未授予 WRITE_SECURE_SETTINGS",
                             Toast.LENGTH_LONG).show();
                 })
                 .setNeutralButton("保持 15 秒", (dialog, which) ->

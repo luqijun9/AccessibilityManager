@@ -4,6 +4,7 @@ import android.app.ActivityManager;
 import android.content.ComponentName;
 import android.content.ContentResolver;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.database.ContentObserver;
 import android.net.Uri;
 import android.os.Handler;
@@ -46,6 +47,7 @@ public class AutoRepairEntry extends XposedModule {
     private static final String KEY_DEBUG_KILL = "a11y_module_debug_kill";
     private static final String KEY_LOADED = "a11y_module_loaded";
     private static final String KEY_EVENTS = "a11y_module_events";
+    private static final String REMOTE_GROUP = "a11y_config";
     private static final int EVENT_LIMIT = 40;
     private static final String SETTING_ENABLED =
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES;
@@ -77,6 +79,7 @@ public class AutoRepairEntry extends XposedModule {
 
     private static volatile AutoRepairEntry sModuleInstance;
     private static volatile Context sContext;
+    private static volatile SharedPreferences sRemotePrefs;
     private static Handler sHandler;
     private static boolean sInstalled;
     private static volatile ContentObserver sObserver;
@@ -151,6 +154,7 @@ public class AutoRepairEntry extends XposedModule {
         HandlerThread thread = new HandlerThread("A11yAutoRepair");
         thread.start();
         sHandler = new Handler(thread.getLooper());
+        initRemoteConfig();
 
         try {
             Class<?> connClass = classLoader.loadClass(CONNECTION_CLASS);
@@ -411,7 +415,7 @@ public class AutoRepairEntry extends XposedModule {
             event("配置", "扫描跳过：模块未启用 (" + reason + ")");
             return;
         }
-        String managed = readSecure(KEY_SERVICES);
+        String managed = readConfig(KEY_SERVICES);
         if (managed == null || managed.isEmpty()) {
             event("配置", "扫描跳过：锁定服务列表为空 (" + reason + ")");
             return;
@@ -472,7 +476,7 @@ public class AutoRepairEntry extends XposedModule {
             log("reconcile skipped (boot grace): " + reason);
             return;
         }
-        String managed = readSecure(KEY_SERVICES);
+        String managed = readConfig(KEY_SERVICES);
         String enabled = readEnabled();
         if (managed == null || managed.isEmpty() || enabled == null) {
             return;
@@ -561,7 +565,7 @@ public class AutoRepairEntry extends XposedModule {
         if (sContext == null || !isModuleEnabled() || !hasConnectionState()) {
             return;
         }
-        String managed = readSecure(KEY_SERVICES);
+        String managed = readConfig(KEY_SERVICES);
         String enabled = readEnabled();
         if (managed == null || managed.isEmpty() || enabled == null) {
             return;
@@ -638,11 +642,11 @@ public class AutoRepairEntry extends XposedModule {
         if (sContext == null) {
             return;
         }
-        if (!"1".equals(readSecure(KEY_DEBUG))) {
+        if (!"1".equals(readConfig(KEY_DEBUG))) {
             log("debug kill skipped (debug disabled)");
             return;
         }
-        String value = readSecure(KEY_DEBUG_KILL);
+        String value = readConfig(KEY_DEBUG_KILL);
         if (value == null || value.isEmpty()) {
             return;
         }
@@ -1029,7 +1033,7 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static boolean isManaged(ComponentName target) {
-        String list = readSecure(KEY_SERVICES);
+        String list = readConfig(KEY_SERVICES);
         if (list == null || list.isEmpty()) {
             return false;
         }
@@ -1042,11 +1046,11 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static boolean isModuleEnabled() {
-        return "1".equals(readSecure(KEY_ENABLE));
+        return "1".equals(readConfig(KEY_ENABLE));
     }
 
     private static boolean isDryRun() {
-        String value = readSecure(KEY_DRY_RUN);
+        String value = readConfig(KEY_DRY_RUN);
         return value == null || value.isEmpty() || "1".equals(value);
     }
 
@@ -1204,6 +1208,71 @@ public class AutoRepairEntry extends XposedModule {
             log("write enabled failed: " + t);
             return false;
         }
+    }
+
+    /** Remote Preferences 配置通道；不可用时回退 Settings.Secure */
+    private void initRemoteConfig() {
+        try {
+            SharedPreferences prefs = getRemotePreferences(REMOTE_GROUP);
+            if (prefs == null) {
+                log("remote prefs unavailable: null");
+                return;
+            }
+            sRemotePrefs = prefs;
+            prefs.registerOnSharedPreferenceChangeListener((p, key) -> {
+                Handler handler = sHandler;
+                if (handler == null) {
+                    return;
+                }
+                handler.post(() -> {
+                    try {
+                        onConfigChanged(key);
+                    } catch (Throwable t) {
+                        event("失败", "远程配置处理异常: " + t);
+                    }
+                });
+            });
+            log("remote prefs ready: " + REMOTE_GROUP);
+        } catch (Throwable t) {
+            log("remote prefs unavailable: " + t);
+        }
+    }
+
+    private static void onConfigChanged(String key) {
+        if (key == null) {
+            scheduleReconcile("remote config", RECONCILE_CONFIG_DELAY_MS);
+            scheduleScan(SCAN_CONFIG_DELAY_MS, "remote config");
+            return;
+        }
+        if (KEY_DEBUG_KILL.equals(key)) {
+            scheduleDebugKill();
+            return;
+        }
+        if (KEY_ENABLE.equals(key)) {
+            if (isModuleEnabled()) {
+                scheduleReconcile("enable", RECONCILE_CONFIG_DELAY_MS);
+            }
+        } else if (KEY_SERVICES.equals(key)) {
+            scheduleReconcile("services", RECONCILE_CONFIG_DELAY_MS);
+        }
+        if (!KEY_DEBUG.equals(key)) {
+            scheduleScan(SCAN_CONFIG_DELAY_MS, "remote config " + key);
+        }
+    }
+
+    private static String readConfig(String key) {
+        SharedPreferences prefs = sRemotePrefs;
+        if (prefs != null) {
+            try {
+                String value = prefs.getString(key, null);
+                if (value != null) {
+                    return value;
+                }
+            } catch (Throwable t) {
+                log("read remote config failed: " + t);
+            }
+        }
+        return readSecure(key);
     }
 
     private static String readSecure(String key) {
