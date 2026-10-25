@@ -13,6 +13,8 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.text.InputType;
 import android.text.SpannableString;
@@ -24,11 +26,14 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.WindowInsetsController;
+import android.view.accessibility.AccessibilityManager;
+import android.accessibilityservice.AccessibilityServiceInfo;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import com.google.android.material.materialswitch.MaterialSwitch;
 import android.widget.TextView;
 import android.widget.Toast;
+import java.util.Collections;
 import java.util.List;
 import java.util.ArrayList;
 import android.widget.ListView;
@@ -48,6 +53,13 @@ public class SettingsActivity extends AppCompatActivity {
     private MaterialSwitch switchCrashFix, switchUnlockCrashCheck, switchFixMode, switchGlobalCooldown;
     private MaterialSwitch switchPeriodicCheck, switchWakeIdle, switchIgnoreSystemCrash;
     private MaterialSwitch switchAutoUpdate;
+    private MaterialSwitch switchLsposedMode;
+    private View lsposedModeRow;
+    private TextView lsposedModuleStatus;
+    private View debugToolsRow;
+    private TextView debugToolsStatus;
+    private android.widget.CompoundButton.OnCheckedChangeListener mCrashFixListener;
+    private android.widget.CompoundButton.OnCheckedChangeListener mModuleModeListener;
     private LinearLayout crashDependentLayout, fixmodeServicesLayout, periodicSubLayout, globalCooldownTimeLayout,
             globalCooldownEnableLayout, globalCooldownSubLayout;
     private View fixmodeServicesBtn;
@@ -64,29 +76,51 @@ public class SettingsActivity extends AppCompatActivity {
 
     private final Shizuku.OnRequestPermissionResultListener mShizukuListener = (requestCode, grantResult) -> {
         LogUtil.log(this, "[权限] SettingsActivity Shizuku回调, grantResult=" + grantResult
+                + (grantResult == PackageManager.PERMISSION_GRANTED ? "(授权成功)" : "(拒绝)")
+                + ", " + ShellUtil.shizukuDiag()
                 + ", pendingCrashFix=" + mPendingCrashFixRequest
                 + ", pendingFixMode=" + mPendingFixModeRequest);
+        ShellUtil.logShizukuState(SettingsActivity.this, "授权回调");
         if (mPendingCrashFixRequest) {
             mPendingCrashFixRequest = false;
             if (grantResult == PackageManager.PERMISSION_GRANTED) {
-                // 通过 Shizuku 授予权限，等待命令执行完毕再启用崩溃修复
+                // 通过 Shizuku 授予 DUMP 权限，必须校验命令执行结果，
+                // 授予失败时不能启用崩溃修复（否则显示"已授权"但实际没有 DUMP 权限）
+                boolean granted = false;
+                int exitCode = -1;
+                String errText = "";
                 try {
-                    Process p = Shizuku.newProcess(
-                            new String[] { "sh" }, null, null);
-                    java.io.OutputStream out = p.getOutputStream();
-                    out.write(("pm grant " + getPackageName()
-                            + " android.permission.DUMP\nexit\n").getBytes());
-                    out.flush();
-                    out.close();
-                    p.waitFor();
-                    if (p.exitValue() == 0) {
-                        Toast.makeText(SettingsActivity.this, "成功激活", Toast.LENGTH_SHORT).show();
+                    if (!Shizuku.pingBinder()) {
+                        LogUtil.log(this, "[权限] Shizuku 授予 DUMP 失败: binder未连接");
+                    } else {
+                        Process p = Shizuku.newProcess(
+                                new String[] { "sh" }, null, null);
+                        java.io.OutputStream out = p.getOutputStream();
+                        out.write(("pm grant " + getPackageName()
+                                + " android.permission.DUMP\nexit\n").getBytes());
+                        out.flush();
+                        out.close();
+                        // pm grant 的报错在 stderr，必须记下来才能判断"激活失败"的真实原因
+                        errText = ShellUtil.readProcessError(p);
+                        p.waitFor();
+                        exitCode = p.exitValue();
+                        granted = exitCode == 0;
                     }
-                } catch (Exception e) {
-                    LogUtil.log(this, "[权限] Shizuku 授予 DUMP 失败: " + e.getMessage());
+                } catch (Throwable t) {
+                    LogUtil.log(this, "[权限] Shizuku 授予 DUMP 失败: " + t);
                 }
                 ShellUtil.reset();
-                enableCrashFix(false);
+                if (granted && ShellUtil.hasDumpPermission(this)) {
+                    LogUtil.log(this, "[权限] DUMP 授予成功, exitCode=" + exitCode);
+                    Toast.makeText(SettingsActivity.this, "成功激活", Toast.LENGTH_SHORT).show();
+                    enableCrashFix(false);
+                } else {
+                    LogUtil.log(this, "[权限] DUMP 授予失败, exitCode=" + exitCode
+                            + ", stderr=" + (errText.isEmpty() ? "无" : errText)
+                            + ", 已回滚：不启用崩溃修复");
+                    ShellUtil.logShizukuState(SettingsActivity.this, "激活结果(失败)");
+                    Toast.makeText(this, "激活失败，未能授予 DUMP 权限", Toast.LENGTH_SHORT).show();
+                }
             } else {
                 Toast.makeText(this, "获取Shizuku权限失败", Toast.LENGTH_SHORT).show();
             }
@@ -212,6 +246,11 @@ public class SettingsActivity extends AppCompatActivity {
         switchManualCloseDaemon = findViewById(R.id.manual_close_daemon);
         manualCloseDaemonLayout = findViewById(R.id.manual_close_daemon_layout);
         switchCrashFix = findViewById(R.id.crashfix);
+        switchLsposedMode = findViewById(R.id.lsposed_mode);
+        lsposedModeRow = findViewById(R.id.lsposed_mode_row);
+        lsposedModuleStatus = findViewById(R.id.lsposed_module_status);
+        debugToolsRow = findViewById(R.id.debug_tools_row);
+        debugToolsStatus = findViewById(R.id.debug_tools_status);
         switchGlobalCooldown = findViewById(R.id.global_cooldown_enable);
         globalCooldownEnableLayout = findViewById(R.id.global_cooldown_enable_layout);
         globalCooldownSubLayout = findViewById(R.id.global_cooldown_sub_layout);
@@ -247,7 +286,9 @@ public class SettingsActivity extends AppCompatActivity {
         switchHide.setChecked(sp.getBoolean("hide", false));
         switchDelayDaemon.setChecked(sp.getBoolean("delay_daemon", false));
         switchManualCloseDaemon.setChecked(sp.getBoolean("manual_close_daemon", false));
-        switchCrashFix.setChecked(sp.getBoolean("crashfix", false));
+        boolean lsposedMode = sp.getBoolean("lsposed_mode", false);
+        switchLsposedMode.setChecked(lsposedMode);
+        switchCrashFix.setChecked(!lsposedMode && sp.getBoolean("crashfix", false));
         boolean globalCooldownEnabled = sp.getBoolean("global_cooldown_enable", false);
         switchGlobalCooldown.setChecked(globalCooldownEnabled);
         globalCooldownSubLayout.setVisibility(globalCooldownEnabled ? View.VISIBLE : View.GONE);
@@ -279,6 +320,7 @@ public class SettingsActivity extends AppCompatActivity {
         }
 
         refreshCrashFixDependent();
+        refreshLsposedModeUi();
     }
 
     // ========== 事件绑定 ==========
@@ -314,17 +356,17 @@ public class SettingsActivity extends AppCompatActivity {
         }
 
         // 崩溃服务检测总开关
-        final MaterialSwitch crashFixRef = switchCrashFix;
-        final android.widget.CompoundButton.OnCheckedChangeListener[] crashFixListenerHolder = new android.widget.CompoundButton.OnCheckedChangeListener[1];
-        crashFixListenerHolder[0] = (btn, checked) -> {
-            if (checked) {
-                if (!ShellUtil.hasDumpPermission(SettingsActivity.this)) {
-                    crashFixRef.setOnCheckedChangeListener(null);
-                    crashFixRef.setChecked(false);
-                    crashFixRef.setOnCheckedChangeListener(crashFixListenerHolder[0]);
-                    showDumpPermissionDialog();
-                    return;
-                }
+        mCrashFixListener = (btn, checked) -> {
+            if (checked && sp.getBoolean("lsposed_mode", false)) {
+                setCrashFixCheckedSilently(false);
+                Toast.makeText(this, "LSPosed 模块模式下由模块接管崩溃修复",
+                        Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (checked && !ShellUtil.hasDumpPermission(SettingsActivity.this)) {
+                setCrashFixCheckedSilently(false);
+                showDumpPermissionDialog();
+                return;
             }
             sp.edit().putBoolean("crashfix", checked)
                     .putBoolean("crashfix_auto_disabled", false).apply();
@@ -335,7 +377,13 @@ public class SettingsActivity extends AppCompatActivity {
             }
             refreshCrashFixDependent();
         };
-        switchCrashFix.setOnCheckedChangeListener(crashFixListenerHolder[0]);
+        switchCrashFix.setOnCheckedChangeListener(mCrashFixListener);
+
+        // LSPosed 模块模式
+        mModuleModeListener = (btn, checked) -> handleLsposedModeChanged(checked);
+        switchLsposedMode.setOnCheckedChangeListener(mModuleModeListener);
+        lsposedModeRow.setOnClickListener(v -> switchLsposedMode.toggle());
+        debugToolsRow.setOnClickListener(v -> showDebugToolsDialog());
 
         switchGlobalCooldown.setOnCheckedChangeListener((btn, checked) -> {
             sp.edit().putBoolean("global_cooldown_enable", checked).apply();
@@ -598,6 +646,7 @@ public class SettingsActivity extends AppCompatActivity {
                 LogUtil.log(SettingsActivity.this, "[权限] 对话框中点击申请Shizuku权限");
                 mPendingCrashFixRequest = true;
                 try {
+                    ShellUtil.logShizukuState(SettingsActivity.this, "申请授权(崩溃修复)");
                     Shizuku.requestPermission(0);
                 } catch (Exception e) {
                     LogUtil.log(SettingsActivity.this,
@@ -704,6 +753,7 @@ public class SettingsActivity extends AppCompatActivity {
             permDialog.dismiss();
             mPendingCrashFixRequest = true;
             try {
+                ShellUtil.logShizukuState(SettingsActivity.this, "申请授权(DUMP激活)");
                 Shizuku.requestPermission(0);
             } catch (Exception e) {
                 mPendingCrashFixRequest = false;
@@ -773,6 +823,7 @@ public class SettingsActivity extends AppCompatActivity {
                 LogUtil.log(SettingsActivity.this, "[权限] 对话框中点击申请Shizuku权限（强杀模式）");
                 mPendingFixModeRequest = true;
                 try {
+                    ShellUtil.logShizukuState(SettingsActivity.this, "申请授权(强杀模式)");
                     Shizuku.requestPermission(0);
                 } catch (Exception e) {
                     LogUtil.log(SettingsActivity.this,
@@ -806,8 +857,10 @@ public class SettingsActivity extends AppCompatActivity {
     // ========== 刷新子项状态 ==========
 
     private void refreshCrashFixDependent() {
-        boolean crashFixEnabled = switchCrashFix.isChecked();
+        boolean lsposedMode = sp.getBoolean("lsposed_mode", false);
+        boolean crashFixEnabled = !lsposedMode && switchCrashFix.isChecked();
         boolean periodicEnabled = crashFixEnabled && switchPeriodicCheck.isChecked();
+        switchCrashFix.setEnabled(!lsposedMode);
 
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
             android.transition.TransitionManager.beginDelayedTransition((android.view.ViewGroup) rootView);
@@ -835,6 +888,287 @@ public class SettingsActivity extends AppCompatActivity {
         }
         if (fixmodeServicesBtn != null)
             fixmodeServicesBtn.setEnabled(fixModeEnabled);
+    }
+
+    // ========== LSPosed 模块模式 ==========
+
+    private void handleLsposedModeChanged(boolean checked) {
+        if (checked) {
+            boolean loaded = ModuleConfig.isModuleLoaded(this);
+            sp.edit().putBoolean("lsposed_mode", true)
+                    .putBoolean("crashfix", false)
+                    .putBoolean("crashfix_auto_disabled", false)
+                    .apply();
+            setCrashFixCheckedSilently(false);
+
+            boolean written = ModuleConfig.setEnabled(this, true);
+            ModuleConfig.setDryRun(this, false);
+            ModuleConfig.syncManagedServices(this,
+                    sp.getString("daemon", ""),
+                    sp.getString("whitelist_services", ""),
+                    sp.getBoolean("whitelist_global_enable", false));
+            ModuleConfig.triggerScan(this);
+            ModuleConfig.startLogSync(this);
+            ModuleConfig.drainLogs(this);
+            TimerReceiver.cancel(this, "LSPosed 模块模式");
+
+            LogUtil.log(this, "[模块] 开启 LSPosed 模式 loaded=" + loaded
+                    + " enableWritten=" + written
+                    + " managed=" + ModuleConfig.getManagedServices(this));
+            Toast.makeText(this, loaded
+                    ? "LSPosed 模块模式已开启，崩溃修复由模块接管"
+                    : "已开启，但模块本次开机未加载，请在 LSPosed 中启用后重启",
+                    Toast.LENGTH_LONG).show();
+        } else {
+            sp.edit().putBoolean("lsposed_mode", false).apply();
+            ModuleConfig.setEnabled(this, false);
+            ModuleConfig.drainLogs(this);
+            LogUtil.log(this, "[模块] 关闭 LSPosed 模式");
+            Toast.makeText(this, "已切回应用层崩溃检测", Toast.LENGTH_SHORT).show();
+        }
+        refreshLsposedModeUi();
+        refreshCrashFixDependent();
+    }
+
+    private void setCrashFixCheckedSilently(boolean checked) {
+        if (mCrashFixListener == null) {
+            switchCrashFix.setChecked(checked);
+            return;
+        }
+        switchCrashFix.setOnCheckedChangeListener(null);
+        switchCrashFix.setChecked(checked);
+        switchCrashFix.setOnCheckedChangeListener(mCrashFixListener);
+    }
+
+    private void refreshLsposedModeUi() {
+        if (switchLsposedMode == null || lsposedModuleStatus == null) {
+            return;
+        }
+        boolean mode = sp.getBoolean("lsposed_mode", false);
+        if (switchLsposedMode.isChecked() != mode) {
+            if (mModuleModeListener != null) {
+                switchLsposedMode.setOnCheckedChangeListener(null);
+            }
+            switchLsposedMode.setChecked(mode);
+            if (mModuleModeListener != null) {
+                switchLsposedMode.setOnCheckedChangeListener(mModuleModeListener);
+            }
+        }
+
+        boolean loaded = ModuleConfig.isModuleLoaded(this);
+        if (mode) {
+            lsposedModuleStatus.setText(loaded
+                    ? "已启用：模块已加载，崩溃检测/修复由模块接管"
+                    : "已启用：模块本次开机未加载，请在 LSPosed 中启用本应用后重启");
+        } else if (!loaded) {
+            lsposedModuleStatus.setText("本应用已集成模块，需在 LSPosed 启用并重启后生效");
+        } else {
+            lsposedModuleStatus.setText("模块已加载，开启后不再使用 Shizuku/dumpsys 检测");
+        }
+
+        if (debugToolsRow != null) {
+            debugToolsRow.setVisibility(mode ? View.VISIBLE : View.GONE);
+            if (debugToolsStatus != null) {
+                if (!loaded) {
+                    debugToolsStatus.setText("模块本次开机未加载，调试不可用");
+                } else {
+                    debugToolsStatus.setText("选择一个已启用服务，模拟一次真实崩溃");
+                }
+            }
+        }
+    }
+
+    private void showDebugToolsDialog() {
+        if (!sp.getBoolean("lsposed_mode", false)) {
+            Toast.makeText(this, "请先开启 LSPosed 模块模式", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!ModuleConfig.isModuleLoaded(this)) {
+            Toast.makeText(this, "模块本次开机未加载，请先在 LSPosed 启用并重启",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        AccessibilityManager manager =
+                (AccessibilityManager) getSystemService(Context.ACCESSIBILITY_SERVICE);
+        List<AccessibilityServiceInfo> services = manager == null ? null
+                : manager.getEnabledAccessibilityServiceList(
+                        AccessibilityServiceInfo.FEEDBACK_ALL_MASK);
+        if (services == null || services.isEmpty()) {
+            Toast.makeText(this, "当前没有已启用的无障碍服务", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        PackageManager pm = getPackageManager();
+        List<DebugServiceItem> items = new ArrayList<>();
+        for (AccessibilityServiceInfo info : services) {
+            if (info == null) {
+                continue;
+            }
+            String id = info.getId();
+            if (id == null || !id.contains("/")) {
+                continue;
+            }
+            String label = id;
+            try {
+                if (info.getResolveInfo() != null) {
+                    CharSequence text = info.getResolveInfo().loadLabel(pm);
+                    if (text != null && text.length() > 0) {
+                        label = text.toString();
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+            items.add(new DebugServiceItem(label, id,
+                    ModuleConfig.isServiceManaged(this, id), false));
+        }
+        if (items.isEmpty()) {
+            Toast.makeText(this, "没有可调试的服务", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Collections.sort(items, (a, b) -> a.label.compareToIgnoreCase(b.label));
+        items.add(0, new DebugServiceItem("全部第三方服务（逐个杀进程）",
+                "", false, true));
+
+        String[] entries = new String[items.size()];
+        for (int i = 0; i < items.size(); i++) {
+            DebugServiceItem item = items.get(i);
+            entries[i] = item.batch
+                    ? "[批量] " + item.label
+                    : (item.managed ? "[受管] " : "[未受管] ")
+                            + item.label + "\n" + item.component;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("模拟服务崩溃（[受管] 会尝试修复）")
+                .setItems(entries, (dialog, which) -> {
+                    DebugServiceItem item = items.get(which);
+                    if (item.batch) {
+                        confirmDebugKillAll(items);
+                    } else {
+                        confirmDebugKill(item);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void confirmDebugKillAll(List<DebugServiceItem> items) {
+        List<String> packages = new ArrayList<>();
+        for (DebugServiceItem item : items) {
+            if (item.batch || item.component.isEmpty()) {
+                continue;
+            }
+            ComponentName component = ComponentName.unflattenFromString(item.component);
+            if (component == null) {
+                continue;
+            }
+            String pkg = component.getPackageName();
+            if (isSystemPackage(pkg) || packages.contains(pkg)) {
+                continue;
+            }
+            packages.add(pkg);
+        }
+        if (packages.isEmpty()) {
+            Toast.makeText(this, "没有可批量模拟的第三方服务", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        StringBuilder list = new StringBuilder();
+        for (String pkg : packages) {
+            if (list.length() > 0) {
+                list.append("\n");
+            }
+            list.append(pkg);
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("批量模拟崩溃")
+                .setMessage("将依次杀掉 " + packages.size()
+                        + " 个第三方应用的进程，间隔 1.5 秒。\n\n"
+                        + list + "\n\n未受管服务需要系统自己恢复。")
+                .setPositiveButton("开始", (dialog, which) -> triggerDebugKillAll(packages))
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void triggerDebugKillAll(List<String> packages) {
+        ModuleConfig.setDebugEnabled(this, true);
+        Handler handler = new Handler(Looper.getMainLooper());
+        for (int i = 0; i < packages.size(); i++) {
+            final String pkg = packages.get(i);
+            final int index = i;
+            handler.postDelayed(() -> {
+                boolean written = ModuleConfig.triggerDebugKill(this, pkg);
+                LogUtil.log(this, "[模块] 批量模拟崩溃 " + (index + 1) + "/"
+                        + packages.size() + ": " + pkg + " written=" + written);
+            }, i * 1500L);
+        }
+        Toast.makeText(this, "已开始逐个模拟崩溃，结果写入管理器日志",
+                Toast.LENGTH_LONG).show();
+    }
+
+    /** 反复触发 kill，让目标服务在一段时间内保持崩溃，便于观察 */
+    private void triggerDebugKillHold(String component, int seconds) {
+        if (component == null || component.isEmpty()) {
+            return;
+        }
+        ModuleConfig.setDebugEnabled(this, true);
+        final int interval = 800;
+        final int count = Math.max(1, seconds * 1000 / interval);
+        Handler handler = new Handler(Looper.getMainLooper());
+        for (int i = 0; i < count; i++) {
+            final int index = i;
+            handler.postDelayed(() -> {
+                boolean written = ModuleConfig.triggerDebugKill(this, component);
+                LogUtil.log(this, "[模块] 保持模拟崩溃 " + (index + 1) + "/"
+                        + count + ": " + component + " written=" + written);
+            }, i * (long) interval);
+        }
+        Toast.makeText(this, "已开始保持 " + seconds + " 秒，期间会反复杀掉目标进程",
+                Toast.LENGTH_LONG).show();
+    }
+
+    private static boolean isSystemPackage(String pkg) {
+        return pkg.equals("android")
+                || pkg.startsWith("com.android")
+                || pkg.startsWith("com.coloros")
+                || pkg.startsWith("com.oplus");
+    }
+
+    private void confirmDebugKill(DebugServiceItem item) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("确认模拟崩溃")
+                .setMessage("将杀掉「" + item.label
+                        + "」所属应用的整个进程，可能影响该应用的所有功能。\n\n"
+                        + item.component + "\n\n当前状态："
+                        + (item.managed ? "受管，模块会尝试修复" : "未受管，模块只记录崩溃")
+                        + "\n\n选择“保持 15 秒”会反复杀进程，方便观察崩溃状态。")
+                .setPositiveButton("模拟崩溃", (dialog, which) -> {
+                    ModuleConfig.setDebugEnabled(this, true);
+                    boolean written = ModuleConfig.triggerDebugKill(this, item.component);
+                    LogUtil.log(this, "[模块] 请求模拟崩溃: " + item.component
+                            + " written=" + written);
+                    Toast.makeText(this, written
+                                    ? "已请求模块模拟崩溃，结果会写入管理器日志"
+                                    : "写入失败，需要 WRITE_SECURE_SETTINGS 权限",
+                            Toast.LENGTH_LONG).show();
+                })
+                .setNeutralButton("保持 15 秒", (dialog, which) ->
+                        triggerDebugKillHold(item.component, 15))
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private static class DebugServiceItem {
+        final String label;
+        final String component;
+        final boolean managed;
+        final boolean batch;
+
+        DebugServiceItem(String label, String component, boolean managed, boolean batch) {
+            this.label = label;
+            this.component = component;
+            this.managed = managed;
+            this.batch = batch;
+        }
     }
 
     // ========== 对话框 ==========
@@ -1403,6 +1737,11 @@ public class SettingsActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (sp.getBoolean("lsposed_mode", false)) {
+            ModuleConfig.startLogSync(this);
+            ModuleConfig.drainLogs(this);
+        }
+        refreshLsposedModeUi();
     }
 
     @Override

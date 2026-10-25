@@ -79,6 +79,9 @@ public class daemonService extends Service {
     private boolean mFirstCommandAfterCreate = true;
     // 标记本次 Settings 变化是由白名单应用切换引起的，ContentObserver 应跳过崩溃检测
     private boolean mIsWhitelistAppSwitch = false;
+
+    // LSPosed 模块模式：日志只提示一次，避免每次服务变化重复刷屏
+    private boolean mModuleModeLogged;
     private SharedPreferences.OnSharedPreferenceChangeListener mForegroundPkgListener;
 
     // ── 解锁检测重复触发追踪（仅在 crashCheckExecutor 线程读写）──
@@ -250,13 +253,25 @@ public class daemonService extends Service {
         doDaemonImpl(s);
     }
 
-    /** 调用者必须在 daemonExecutor 线程中 */
+    /** 调用者必须在 daemonExecutor 线程中执行 */
     private void doDaemonImpl(String s) {
         ProcessExitMonitor.updateHeartbeat(daemonService.this);
+        // LSPosed 模式：保活与白名单全部交给模块，管理器只同步受管列表
+        if (sp.getBoolean("lsposed_mode", false)) {
+            ModuleConfig.syncManagedServices(this,
+                    sp.getString("daemon", ""),
+                    sp.getString("whitelist_services", ""),
+                    sp.getBoolean("whitelist_global_enable", false));
+            tmpSettingValue = s == null ? "" : s;
+            mCrashedFixServiceName = null;
+            mCrashedFixLabel = null;
+            return;
+        }
         final List<String> localL = l;  // 拍快照，本次执行使用同一份完整列表
         String daemonStr = sp.getString("daemon", "");
         String whitelistStr = sp.getString("whitelist_services", "");
         boolean globalWhitelistEnable = sp.getBoolean("whitelist_global_enable", false);
+
         String currentForegroundPkg = sp.getString("current_foreground_pkg", "");
         String foregroundAppLabel = currentForegroundPkg;
         if (!currentForegroundPkg.isEmpty()) {
@@ -551,6 +566,15 @@ public class daemonService extends Service {
 
     /** 从任意线程调用，提交到 crashCheckExecutor */
     private void checkCrashedServices(String source) {
+        if (sp.getBoolean("lsposed_mode", false)) {
+            if (!mModuleModeLogged) {
+                mModuleModeLogged = true;
+                LogUtil.log(this, ModuleConfig.isModuleLoaded(this)
+                        ? "[LSPosed] 崩溃与关闭恢复交由模块处理，管理器不再主动检测/保活"
+                        : "[LSPosed] 模块未加载，当前没有服务在守护，请检查模块激活状态");
+            }
+            return;
+        }
         if (!sp.getBoolean("crashfix", false)) return;
         crashCheckExecutor.submit(() -> checkCrashedServicesInternal(source));
     }
@@ -578,6 +602,9 @@ public class daemonService extends Service {
     /** 在 crashCheckExecutor 线程中执行：运行 dumpsys，若发现崩溃则回调 daemonExecutor 修复 */
     //region debug-point crash-detection-internal
     private void checkCrashedServicesInternal(String source) {
+        if (sp.getBoolean("lsposed_mode", false)) {
+            return;
+        }
         // ── 解锁检测重复触发判断 ──
         long now = System.currentTimeMillis();
         boolean isBackground = !MainActivity.sIsForeground;
@@ -744,6 +771,11 @@ public class daemonService extends Service {
     //  崩溃修复（仅在 daemonExecutor 线程中执行）
     // ════════════════════════════════════════════════════════════════
     private void fixCrashedService(String serviceName, int retryCount) {
+        if (sp.getBoolean("lsposed_mode", false)) {
+            LogUtil.log(this, "[崩溃修复] LSPosed 模块模式，跳过应用层修复: " + serviceName);
+            mIsFixing = false;
+            return;
+        }
         mIsFixing = true;
         mLastFixStartTime = System.currentTimeMillis();
         cancelPostFixCheck();
@@ -900,6 +932,9 @@ public class daemonService extends Service {
         mHandler = new Handler();
         sp = getSharedPreferences("data", 0);
         packageManager = getPackageManager();
+        if (sp.getBoolean("lsposed_mode", false)) {
+            ModuleConfig.startLogSync(this);
+        }
         String daemonVal = sp.getString("daemon", "");
         Log.d("AM_DIAG", "[daemonService] daemon='" + daemonVal + "', 长度=" + daemonVal.length());
 
@@ -963,7 +998,9 @@ public class daemonService extends Service {
 
         // 注册前台应用变化监听器，应用切换时直接在进程内触发白名单状态同步，不启动新服务
         mForegroundPkgListener = (prefs, key) -> {
-            if ("current_foreground_pkg".equals(key) && sp.getBoolean("whitelist_global_enable", false)) {
+            if ("current_foreground_pkg".equals(key)
+                    && sp.getBoolean("whitelist_global_enable", false)
+                    && !sp.getBoolean("lsposed_mode", false)) {
                 daemonExecutor.submit(() -> {
                     String setting = Settings.Secure.getString(
                             getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);

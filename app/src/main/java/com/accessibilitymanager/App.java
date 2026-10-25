@@ -2,9 +2,11 @@ package com.accessibilitymanager;
 
 import android.app.Activity;
 import android.app.Application;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
 import com.google.android.material.color.DynamicColors;
+import rikka.shizuku.Shizuku;
 
 public class App extends Application {
     @Override
@@ -15,6 +17,19 @@ public class App extends Application {
 
         // 检查上次管理器进程被杀/退出的诊断信息
         ProcessExitMonitor.checkProcessExit(this);
+
+        // Shizuku 授权状态依赖服务端，服务断开时进程内的权限缓存不会自动失效，
+        // 必须主动作废，否则会拿着"以为还有权限"的旧状态去 newProcess
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Shizuku.addBinderDeadListener(() -> {
+                ShellUtil.logShizukuState(App.this, "binder断开");
+                ShellUtil.reset();
+            });
+            Shizuku.addBinderReceivedListenerSticky(() -> {
+                ShellUtil.logShizukuState(App.this, "binder已连接");
+                ShellUtil.reset();
+            });
+        }
 
         // 全局未捕获异常日志记录
         Thread.UncaughtExceptionHandler defaultHandler = Thread.getDefaultUncaughtExceptionHandler();

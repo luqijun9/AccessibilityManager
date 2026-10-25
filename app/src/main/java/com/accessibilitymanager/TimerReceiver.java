@@ -20,6 +20,12 @@ public class TimerReceiver extends BroadcastReceiver {
             final PendingResult pendingResult = goAsync();
             new Thread(() -> {
                 SharedPreferences sp = context.getSharedPreferences("data", Context.MODE_PRIVATE);
+                if (sp.getBoolean("lsposed_mode", false)) {
+                    LogUtil.log(context, "[定时唤醒] LSPosed 模块模式，跳过定时检测");
+                    cancel(context, "LSPosed 模块模式");
+                    pendingResult.finish();
+                    return;
+                }
                 if (!sp.getBoolean("crashfix", false)) {
                     LogUtil.log(context, "[定时唤醒] 崩溃修复已关闭，跳过本次检测");
                     cancel(context, "崩溃修复已关闭");
@@ -56,6 +62,10 @@ public class TimerReceiver extends BroadcastReceiver {
 
     public static void scheduleNext(Context context, boolean fromAlarm) {
         SharedPreferences sp = context.getSharedPreferences("data", Context.MODE_PRIVATE);
+        if (sp.getBoolean("lsposed_mode", false)) {
+            cancel(context, "LSPosed 模块模式");
+            return;
+        }
         if (!sp.getBoolean("crashfix", false)) {
             cancel(context, "崩溃修复已关闭");
             return;

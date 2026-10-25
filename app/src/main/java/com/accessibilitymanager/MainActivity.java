@@ -1058,6 +1058,7 @@ public class MainActivity extends Activity {
         }
         
         checkBatteryOptimization();
+        syncModuleLogsIfNeeded();
         checkAndShowCrashFixIntroDialog();
         if (sp.getBoolean("auto_update", true)) {
             long now = System.currentTimeMillis();
@@ -1139,15 +1140,19 @@ public class MainActivity extends Activity {
     }
 
     private final Shizuku.OnRequestPermissionResultListener RL = (requestCode, grantResult) -> {
-        LogUtil.log(MainActivity.this, "[权限] Shizuku回调, grantResult=" + grantResult + ", pendingCrashFix=" + mPendingCrashFixRequest + ", pendingFixMode=" + mPendingFixModeRequest);
+        LogUtil.log(MainActivity.this, "[权限] Shizuku回调, grantResult=" + grantResult
+                + (grantResult == PackageManager.PERMISSION_GRANTED ? "(授权成功)" : "(拒绝)")
+                + ", " + ShellUtil.shizukuDiag()
+                + ", pendingCrashFix=" + mPendingCrashFixRequest + ", pendingFixMode=" + mPendingFixModeRequest);
+        ShellUtil.logShizukuState(MainActivity.this, "授权回调");
         ShellUtil.reset();
         if (mPendingCrashFixRequest) {
             mPendingCrashFixRequest = false;
             if (grantResult == PackageManager.PERMISSION_GRANTED) {
                 LogUtil.log(MainActivity.this, "[权限] 用户已授权(grantResult=GRANTED)，通过 Shizuku 授予权限");
-                // 先通过 check() 使用 Shizuku 授予 WRITE_SECURE_SETTINGS + DUMP，再启用崩溃修复
-                check();
-                enableCrashFix(false);
+                // 先通过 check() 使用 Shizuku 授予 WRITE_SECURE_SETTINGS + DUMP，
+                // 授予成功后才启用崩溃修复（check() 内部异步执行，失败时只提示不启用）
+                check(() -> enableCrashFix(false));
             } else {
                 LogUtil.log(MainActivity.this, "[权限] 用户拒绝授权(grantResult=" + grantResult + ")");
                 runOnUiThread(() -> Toast.makeText(MainActivity.this, "获取Shizuku权限失败", Toast.LENGTH_SHORT).show());
@@ -1175,16 +1180,35 @@ public class MainActivity extends Activity {
 
     //检查Shizuku权限，申请Shizuku权限的函数
     private void check() {
+        check(null);
+    }
+
+    /**
+     * 检查 Shizuku 权限，并通过 Shizuku 授予 WRITE_SECURE_SETTINGS + DUMP。
+     *
+     * @param onReady 权限真正就绪后在主线程执行的回调（用于启用崩溃修复等），失败时不会执行
+     */
+    private void check(Runnable onReady) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
         if (checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
-                && checkSelfPermission("android.permission.DUMP") == PackageManager.PERMISSION_GRANTED)
+                && checkSelfPermission("android.permission.DUMP") == PackageManager.PERMISSION_GRANTED) {
+            if (onReady != null) runOnUiThread(onReady);
             return;
+        }
         String grantBoth = "pm grant " + getPackageName() + " android.permission.WRITE_SECURE_SETTINGS; pm grant " + getPackageName() + " android.permission.DUMP";
         boolean b = true, c = false;
         try {
-            if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED)
+            // checkSelfPermission() 命中 Shizuku 进程内缓存时不访问 binder，binder 断开后仍可能返回"已授权"，
+            // 因此先用 pingBinder() 兜底，避免后续 newProcess 被服务端拒绝
+            if (!Shizuku.pingBinder()) {
+                b = false;
+                Toast.makeText(this, "shizuku未运行", Toast.LENGTH_SHORT).show();
+            } else if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+                ShellUtil.logShizukuState(MainActivity.this, "申请授权(check自动检测)");
                 Shizuku.requestPermission(0);
-            else c = true;
+            } else {
+                c = true;
+            }
         } catch (Exception e) {
             if (checkSelfPermission("moe.shizuku.manager.permission.API_V23") == PackageManager.PERMISSION_GRANTED)
                 c = true;
@@ -1194,23 +1218,46 @@ public class MainActivity extends Activity {
             }
 
         }
-        if (b && c) {
+        if (!b || !c) return;
+
+        // 授权命令放到工作线程：服务端拒绝时 newProcess 抛 SecurityException（RuntimeException，
+        // 原先的 IOException|InterruptedException 捕获不到，会直接崩溃），且 waitFor() 不能阻塞主线程
+        new Thread(() -> {
+            boolean success = false;
+            int code = -1;
+            String error = "";
             try {
                 Process p = Shizuku.newProcess(new String[]{"sh"}, null, null);
                 OutputStream out = p.getOutputStream();
                 out.write((grantBoth + "\nexit\n").getBytes());
                 out.flush();
                 out.close();
+                // pm grant 的报错在 stderr，必须记下来才能判断"激活失败"的真实原因
+                error = ShellUtil.readProcessError(p);
                 p.waitFor();
-                if (p.exitValue() == 0) {
-                    Toast.makeText(this, "成功激活", Toast.LENGTH_SHORT).show();
-                    runOnUiThread(this::checkAndShowCrashFixIntroDialog);
-                }
-            } catch (IOException | InterruptedException ioException) {
-                Toast.makeText(this, "激活失败", Toast.LENGTH_SHORT).show();
+                code = p.exitValue();
+                success = code == 0;
+            } catch (Throwable t) {
+                LogUtil.log(MainActivity.this, "[权限] 激活异常: " + t);
             }
-        }
-
+            final boolean ok = success;
+            final int exitCode = code;
+            final String stderr = error;
+            runOnUiThread(() -> {
+                if (ok) {
+                    LogUtil.log(MainActivity.this, "[权限] Shizuku 激活成功，已授予 WRITE_SECURE_SETTINGS + DUMP");
+                    Toast.makeText(MainActivity.this, "成功激活", Toast.LENGTH_SHORT).show();
+                    if (onReady != null) onReady.run();
+                    checkAndShowCrashFixIntroDialog();
+                } else {
+                    LogUtil.log(MainActivity.this, "[权限] Shizuku 激活失败, exitCode=" + exitCode
+                            + ", stderr=" + (stderr.isEmpty() ? "无" : stderr)
+                            + ", " + ShellUtil.shizukuDiag());
+                    ShellUtil.logShizukuState(MainActivity.this, "激活结果(失败)");
+                    Toast.makeText(MainActivity.this, "激活失败", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }).start();
     }
 
     private void requestCrashFixPermission() {
@@ -1356,6 +1403,7 @@ public class MainActivity extends Activity {
             permDialog.dismiss();
             mPendingCrashFixRequest = true;
             try {
+                ShellUtil.logShizukuState(MainActivity.this, "申请授权(崩溃修复-DUMP激活)");
                 Shizuku.requestPermission(0);
             } catch (Exception e) {
                 mPendingCrashFixRequest = false;
@@ -1421,6 +1469,7 @@ public class MainActivity extends Activity {
                 LogUtil.log(MainActivity.this, "[权限] 对话框中点击申请Shizuku权限（强杀模式）");
                 mPendingFixModeRequest = true;
                 try {
+                    ShellUtil.logShizukuState(MainActivity.this, "申请授权(强杀模式)");
                     Shizuku.requestPermission(0);
                 } catch (Exception e) {
                     LogUtil.log(MainActivity.this, "[权限] 对话框申请异常: " + e.getClass().getSimpleName());
@@ -1466,6 +1515,7 @@ public class MainActivity extends Activity {
                 LogUtil.log(MainActivity.this, "[权限] 对话框中点击申请Shizuku权限");
                 mPendingCrashFixRequest = true;
                 try {
+                    ShellUtil.logShizukuState(MainActivity.this, "申请授权(崩溃修复)");
                     Shizuku.requestPermission(0);
                 } catch (Exception e) {
                     LogUtil.log(MainActivity.this, "[权限] 对话框申请异常: " + e.getClass().getSimpleName());
@@ -1797,6 +1847,7 @@ public class MainActivity extends Activity {
             }
             String resultDaemon = newDaemon.toString();
             sp.edit().putString("daemon", resultDaemon).apply();
+            syncModuleServicesIfNeeded();
 
             // 从已开启的无障碍服务列表中移除
             String sv = Settings.Secure.getString(getContentResolver(),
@@ -1964,6 +2015,7 @@ public class MainActivity extends Activity {
                     checkAndShowCrashFixIntroDialog();
                 }
                 sp.edit().putString("daemon", daemon).apply();
+                syncModuleServicesIfNeeded();
                 holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
                 StartForeGroundDaemon();
             });
@@ -1993,6 +2045,7 @@ public class MainActivity extends Activity {
                             if (containsService(daemon, serviceName)) {
                                 daemon = removeServiceFromList(daemon, serviceComponent);
                                 sp.edit().putString("daemon", daemon).apply();
+                syncModuleServicesIfNeeded();
                                 holder.ib.setImageResource(R.drawable.lock);
                                 StartForeGroundDaemon();
                             }
@@ -2417,6 +2470,31 @@ public class MainActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == 0 && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             StartForeGroundDaemon();
+        }
+    }
+
+    /** LSPosed 模块模式下把受管列表同步给模块 */
+    private void syncModuleServicesIfNeeded() {
+        if (sp == null) {
+            sp = getSharedPreferences("data", 0);
+        }
+        if (!sp.getBoolean("lsposed_mode", false)) {
+            return;
+        }
+        ModuleConfig.syncManagedServices(this,
+                sp.getString("daemon", ""),
+                sp.getString("whitelist_services", ""),
+                sp.getBoolean("whitelist_global_enable", false));
+    }
+
+    /** 打开管理器时补读模块事件，避免后台被冻结期间漏日志 */
+    private void syncModuleLogsIfNeeded() {
+        if (sp == null) {
+            sp = getSharedPreferences("data", 0);
+        }
+        if (sp.getBoolean("lsposed_mode", false)) {
+            ModuleConfig.startLogSync(this);
+            ModuleConfig.drainLogs(this);
         }
     }
 

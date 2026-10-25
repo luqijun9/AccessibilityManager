@@ -158,7 +158,8 @@ public class LogActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        // 重新加载（可能跨天）
+        // 先补读模块事件，再加载日志
+        ModuleConfig.drainLogs(this);
         loadLogs();
         startListening();
     }
@@ -744,6 +745,7 @@ public class LogActivity extends AppCompatActivity {
             if (line.contains("[系统监控]") || line.contains("[系统诊断]") || line.contains("[异常崩溃]")) return 0xFFE53935;
             if (line.contains("[崩溃检测]")) return 0xFFE06D00;
             if (line.contains("[崩溃修复]") || line.contains("[崩溃修复-重试]")) return 0xFF2288DD;
+            if (line.contains("[Shizuku诊断]")) return 0xFF8E24AA;
             if (line.contains("[保活]")) return 0xFF22AA22;
             return night ? 0xFFCCCCCC : 0xFF333333;
         }

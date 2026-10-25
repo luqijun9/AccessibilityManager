@@ -204,6 +204,7 @@ public class WhitelistActivity extends AppCompatActivity {
                 return;
             }
             sp.edit().putBoolean("whitelist_global_enable", isChecked).apply();
+            syncModuleServicesIfNeeded();
             if (mAdapter != null) mAdapter.notifyDataSetChanged();
             Intent intent = new Intent(WhitelistActivity.this, daemonService.class);
             intent.putExtra("source", "AppSwitch");
@@ -482,6 +483,20 @@ public class WhitelistActivity extends AppCompatActivity {
         return containsService(settingValue, ownServiceId);
     }
 
+    /** LSPosed 模块模式下把受管列表同步给模块 */
+    private void syncModuleServicesIfNeeded() {
+        if (sp == null) {
+            sp = getSharedPreferences("data", 0);
+        }
+        if (!sp.getBoolean("lsposed_mode", false)) {
+            return;
+        }
+        ModuleConfig.syncManagedServices(this,
+                sp.getString("daemon", ""),
+                sp.getString("whitelist_services", ""),
+                sp.getBoolean("whitelist_global_enable", false));
+    }
+
     private void showWhitelistEnableDialog(final CompoundButton switchButton, final CompoundButton.OnCheckedChangeListener listener) {
         final android.app.Dialog dialog = new android.app.Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -538,6 +553,7 @@ public class WhitelistActivity extends AppCompatActivity {
             if (!currentDaemon.contains(ownServiceId)) {
                 String newDaemon = currentDaemon.isEmpty() ? ownServiceId : ownServiceId + ":" + currentDaemon;
                 sp.edit().putString("daemon", newDaemon).apply();
+                syncModuleServicesIfNeeded();
             }
             updateStatus.run();
             Toast.makeText(WhitelistActivity.this, "已尝试开启", Toast.LENGTH_SHORT).show();
@@ -558,6 +574,7 @@ public class WhitelistActivity extends AppCompatActivity {
             switchButton.setChecked(true);
             switchButton.setOnCheckedChangeListener(listener);
             sp.edit().putBoolean("whitelist_global_enable", true).apply();
+            syncModuleServicesIfNeeded();
             if (mAdapter != null) mAdapter.notifyDataSetChanged();
             Intent intent = new Intent(WhitelistActivity.this, daemonService.class);
             intent.putExtra("source", "AppSwitch");
@@ -573,6 +590,7 @@ public class WhitelistActivity extends AppCompatActivity {
         dialog.setOnDismissListener(d -> {
             if (!confirmed[0]) {
                 sp.edit().putBoolean("whitelist_global_enable", false).apply();
+                syncModuleServicesIfNeeded();
                 switchButton.setOnCheckedChangeListener(null);
                 switchButton.setChecked(false);
                 switchButton.setOnCheckedChangeListener(listener);
@@ -952,6 +970,7 @@ public class WhitelistActivity extends AppCompatActivity {
                     newWs = sb.toString();
                 }
                 sp.edit().putString("whitelist_services", newWs).apply();
+                syncModuleServicesIfNeeded();
                 
                 if (isChecked) {
                     holder.ib.setVisibility(View.VISIBLE);
