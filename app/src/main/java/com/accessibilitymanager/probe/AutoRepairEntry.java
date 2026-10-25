@@ -370,6 +370,7 @@ public class AutoRepairEntry extends XposedModule {
                         }
                     } else if (KEY_SERVICES.equals(key)) {
                         scheduleReconcile("services", RECONCILE_CONFIG_DELAY_MS);
+                        scheduleScan(SCAN_CONFIG_DELAY_MS, "services changed");
                     }
                 }
             };
@@ -1412,6 +1413,7 @@ public class AutoRepairEntry extends XposedModule {
                 }
             }
             scheduleReconcile("services", RECONCILE_CONFIG_DELAY_MS);
+            scheduleScan(SCAN_CONFIG_DELAY_MS, "services changed");
         }
     }
 
