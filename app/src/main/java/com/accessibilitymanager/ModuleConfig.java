@@ -343,7 +343,14 @@ public final class ModuleConfig {
             // Remote Preferences 可用时以它为准，避免与 Settings.Secure 出现新旧不一致
             try {
                 SharedPreferences prefs = sXposedService.getRemotePreferences(REMOTE_GROUP);
-                return prefs.edit().putString(key, value).commit();
+                boolean ok = prefs.edit().putString(key, value).commit();
+                if (ok && context != null) {
+                    try {
+                        Settings.Secure.putString(context.getContentResolver(), key, value);
+                    } catch (Throwable ignored) {
+                    }
+                }
+                return ok;
             } catch (Throwable t) {
                 LogUtil.log(context, "[模块] RemotePreferences 写入异常: " + t);
                 return false;

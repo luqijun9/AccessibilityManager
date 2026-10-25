@@ -710,7 +710,6 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
 
-        SharedPreferences.Editor editor = prefs.edit();
         long ack = sLastAckSeq;
         for (long i = sLastAckSeq + 1; i <= seq; i++) {
             String key = KEY_CMD_PREFIX + i;
@@ -719,11 +718,9 @@ public class AutoRepairEntry extends XposedModule {
                 log("command missing: seq=" + i);
             } else {
                 applyServiceCommand(payload);
-                editor.remove(key);
             }
             ack = i;
         }
-        editor.commit();
         sLastAckSeq = ack;
         try {
             Settings.Secure.putString(sContext.getContentResolver(), KEY_CMD_ACK,
@@ -1411,6 +1408,13 @@ public class AutoRepairEntry extends XposedModule {
         } else if (KEY_SERVICES.equals(key)) {
             // 锁定列表变化后，手动关闭豁免立即失效：重新加锁必须优先补回
             sManualHiddenUntil.clear();
+            if (sContext != null && sRemotePrefs != null) {
+                try {
+                    String v = sRemotePrefs.getString(KEY_SERVICES, "");
+                    Settings.Secure.putString(sContext.getContentResolver(), KEY_SERVICES, v);
+                } catch (Throwable ignored) {
+                }
+            }
             scheduleReconcile("services", RECONCILE_CONFIG_DELAY_MS);
         }
         if (!KEY_DEBUG.equals(key)) {
