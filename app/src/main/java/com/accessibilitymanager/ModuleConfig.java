@@ -199,13 +199,13 @@ public final class ModuleConfig {
         String current = getManagedServices(context);
         String reasonSuffix = (reason != null && !reason.isEmpty()) ? " (" + reason + ")" : "";
         if (desired.equals(current)) {
-            LogUtil.log(context, "[模块] 锁定服务已同步" + reasonSuffix);
+            LogUtil.log(context, "[模块] 下发锁定同步指令" + reasonSuffix);
             // 额外通过命令队列下发一次，确保 system_server 内部内存与系统设置瞬间同步
             sendServiceCommandPayload(context, "sync_services:" + desired);
             return;
         }
         if (put(context, KEY_SERVICES, desired)) {
-            LogUtil.log(context, "[模块] 锁定服务已同步" + reasonSuffix + ": " + desired);
+            LogUtil.log(context, "[模块] 下发锁定同步指令" + reasonSuffix + ": " + desired);
             sendServiceCommandPayload(context, "sync_services:" + desired);
         } else {
             LogUtil.log(context, "[模块] 锁定服务写入失败" + reasonSuffix + "（模块未连接且未授予 WRITE_SECURE_SETTINGS）");
