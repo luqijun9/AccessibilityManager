@@ -127,6 +127,8 @@ public class AutoRepairEntry extends XposedModule {
     private static long sLastReconcileWriteAt;
     private static final Map<String, Long> sSelfRemovedUntil = new HashMap<>();
     private static final Map<String, Long> sManualHiddenUntil = new HashMap<>();
+    private static final Map<String, Long> sReconcilingTokens = new ConcurrentHashMap<>();
+    private static final long RECONCILE_TOKEN_TTL_MS = 15000L;
     private static volatile String sManagedServicesCache;
     private static volatile String sFixModeCache;
     private static volatile String sFixDisabledCache;
@@ -524,6 +526,7 @@ public class AutoRepairEntry extends XposedModule {
                 continue;
             }
             desired = addComponent(desired, component);
+            sReconcilingTokens.put(key, now + RECONCILE_TOKEN_TTL_MS);
             if (added.length() > 0) {
                 added.append(' ');
             }
@@ -614,6 +617,7 @@ public class AutoRepairEntry extends XposedModule {
                 return;
             }
             unbound++;
+            sReconcilingTokens.remove(key);
             scheduleCheck(component, key, SETTLE_MS);
         }
         if (unbound > 0) {
@@ -1027,9 +1031,13 @@ public class AutoRepairEntry extends XposedModule {
             sLastAttemptAt.remove(key);
             finishRepair(key);
             clearCrashedMarker(connection, component);
+            Long tokenExpire = sReconcilingTokens.remove(key);
+            boolean fromReconcile = tokenExpire != null && now < tokenExpire;
             if (managed) {
-                if (cancelled) {
-                    event("检测", "系统已自愈（取消待执行的修复）: " + key);
+                if (fromReconcile) {
+                    event("保活", "补回已生效，服务已重新就绪: " + key);
+                } else if (cancelled) {
+                    event("检测", "进程已自动重连，取消计划的修复: " + key);
                 } else if (wasRepairing) {
                     event("修复", "恢复成功: " + key);
                 } else {
@@ -1096,7 +1104,12 @@ public class AutoRepairEntry extends XposedModule {
             sAttempts.remove(key);
             sLastAttemptAt.remove(key);
             sSuppressUntil.remove(key);
-            event("检测", "系统已自动恢复，不修复: " + key);
+            Long tokenExpire = sReconcilingTokens.remove(key);
+            if (tokenExpire != null && now < tokenExpire) {
+                event("保活", "补回已生效，服务已恢复绑定（无需重启）: " + key);
+            } else {
+                event("检测", "进程已自动重连，无需重启: " + key);
+            }
             return;
         }
         if (!sBoundCheckAvailable) {
