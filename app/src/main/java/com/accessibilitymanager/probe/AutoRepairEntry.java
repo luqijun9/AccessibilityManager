@@ -687,6 +687,12 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static void drainCommands() {
+        if (sRemotePrefs == null && sModuleInstance != null) {
+            try {
+                sRemotePrefs = sModuleInstance.getRemotePreferences(REMOTE_GROUP);
+            } catch (Throwable ignored) {
+            }
+        }
         SharedPreferences prefs = sRemotePrefs;
         if (prefs == null || sContext == null) {
             return;
@@ -1280,7 +1286,7 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static boolean isManaged(ComponentName target) {
-        String list = sManagedServicesCache != null ? sManagedServicesCache : readConfig(KEY_SERVICES);
+        String list = readConfig(KEY_SERVICES);
         if (list == null || list.isEmpty()) {
             return false;
         }
@@ -1527,6 +1533,16 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static String readConfig(String key) {
+        drainCommands();
+        if (KEY_SERVICES.equals(key) && sManagedServicesCache != null) {
+            return sManagedServicesCache;
+        }
+        if (KEY_FIX_MODE.equals(key) && sFixModeCache != null) {
+            return sFixModeCache;
+        }
+        if (KEY_FIX_DISABLED.equals(key) && sFixDisabledCache != null) {
+            return sFixDisabledCache;
+        }
         SharedPreferences prefs = sRemotePrefs;
         if (prefs != null) {
             // Remote Preferences 可用时以它为准，避免回退到可能更旧的 Settings.Secure
