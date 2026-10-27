@@ -161,6 +161,7 @@ public class MainActivity extends Activity {
 
     /** 只刷新当前可见列表项的开关/锁图标，避免整表重建 */
     private void refreshVisibleServiceSwitches() {
+        checkAndCancelConfirmedPendingChecks(settingValue);
         if (mAdapter == null || listView == null) {
             return;
         }
@@ -199,6 +200,26 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** 检查并取消已被系统回调确认生效的待检查任务，避免假阳性超时误报 */
+    private void checkAndCancelConfirmedPendingChecks(String currentSetting) {
+        if (mPendingTargetStates.isEmpty()) {
+            return;
+        }
+        java.util.Iterator<java.util.Map.Entry<String, Boolean>> it = mPendingTargetStates.entrySet().iterator();
+        while (it.hasNext()) {
+            java.util.Map.Entry<String, Boolean> entry = it.next();
+            String service = entry.getKey();
+            boolean expected = entry.getValue();
+            if (isServiceEnabled(service, currentSetting) == expected) {
+                it.remove();
+                Runnable r = mPendingServiceTimeoutRunnables.remove(service);
+                if (r != null && listView != null) {
+                    listView.removeCallbacks(r);
+                }
+            }
+        }
+    }
+
     /** 重新读取启用列表并刷新开关，用于模块异步写入后的状态纠正 */
     private void refreshEnabledServiceStates() {
         if (isFinishing()) {
@@ -218,6 +239,9 @@ public class MainActivity extends Activity {
     private String mCurrentTheme;
     private int mColorPrimary;
     private final java.util.Set<String> mLockedDisableToastShown = new java.util.HashSet<>();
+    // LSPosed 模式下开关服务待确认的目标状态与 3 秒超时兜底任务
+    private final java.util.Map<String, Boolean> mPendingTargetStates = new java.util.HashMap<>();
+    private final java.util.Map<String, Runnable> mPendingServiceTimeoutRunnables = new java.util.HashMap<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -1590,6 +1614,13 @@ public class MainActivity extends Activity {
         if (listenerAdded) Shizuku.removeRequestPermissionResultListener(RL);
 
         getContentResolver().unregisterContentObserver(mContentOb);
+        for (Runnable r : mPendingServiceTimeoutRunnables.values()) {
+            if (listView != null) {
+                listView.removeCallbacks(r);
+            }
+        }
+        mPendingServiceTimeoutRunnables.clear();
+        mPendingTargetStates.clear();
         if (mIconCache != null) mIconCache.evictAll();
         if (mServiceCache != null) mServiceCache.clear();
         super.onDestroy();
@@ -2082,15 +2113,46 @@ public class MainActivity extends Activity {
                             MainActivity.this, enable, serviceName);
                     if (!sent) {
                         holder.sw.setChecked(!enable);
-                        Toast.makeText(MainActivity.this, ModuleConfig.isRemoteConfigAvailable()
+                        Toast.makeText(MainActivity.this, (ModuleConfig.isRemoteConfigAvailable() || ModuleConfig.isModuleLoaded(MainActivity.this))
                                         ? "命令发送失败，请重试"
                                         : "模块未连接，LSPosed 模式下无法手动开关服务",
                                 Toast.LENGTH_LONG).show();
                         return;
                     }
                     holder.ib.setVisibility(enable ? View.VISIBLE : View.INVISIBLE);
-                    // 正常由启用列表观察器 + 命令回执观察器确认；3 秒兜底只应对模块异常/重启
-                    listView.postDelayed(MainActivity.this::refreshEnabledServiceStates, 3000L);
+                    if (enable) {
+                        holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
+                    }
+                    // 正常由启用列表观察器 + 命令回执观察器在毫秒级内确认；3 秒兜底检查超时异常
+                    final boolean targetEnable = enable;
+                    final String targetService = serviceName;
+
+                    // 取消该服务此前尚未触发的旧检查，防止快速连点或反向切换导致假阳性超时误报
+                    Runnable oldCheck = mPendingServiceTimeoutRunnables.remove(targetService);
+                    if (oldCheck != null && listView != null) {
+                        listView.removeCallbacks(oldCheck);
+                    }
+                    mPendingTargetStates.put(targetService, targetEnable);
+
+                    Runnable timeoutRunnable = () -> {
+                        mPendingServiceTimeoutRunnables.remove(targetService);
+                        Boolean expected = mPendingTargetStates.remove(targetService);
+                        if (expected == null) {
+                            return; // 已被成功确认或已被后续新操作覆盖
+                        }
+                        refreshEnabledServiceStates();
+                        String current = Settings.Secure.getString(getContentResolver(),
+                                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+                        boolean isNowEnabled = isServiceEnabled(targetService, current);
+                        if (isNowEnabled != expected) {
+                            LogUtil.log(MainActivity.this, "[异常] 模块响应超时: 服务 [" + targetService
+                                    + "] " + (expected ? "开启" : "关闭")
+                                    + "未能生效，请检查 LSPosed 模块是否在系统进程中激活");
+                            Toast.makeText(MainActivity.this, "模块响应超时，请检查模块激活状态", Toast.LENGTH_SHORT).show();
+                        }
+                    };
+                    mPendingServiceTimeoutRunnables.put(targetService, timeoutRunnable);
+                    listView.postDelayed(timeoutRunnable, 3000L);
                     return;
                 }
                 if (checkPermission()) {
@@ -2337,7 +2399,7 @@ public class MainActivity extends Activity {
             sp.edit().putString("daemon", daemon).apply();
             syncModuleServicesIfNeeded();
             holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
-            if (lsposed && !ModuleConfig.isRemoteConfigAvailable()) {
+            if (lsposed && !ModuleConfig.isRemoteConfigAvailable() && !ModuleConfig.isModuleLoaded(MainActivity.this)) {
                 Toast.makeText(MainActivity.this, "模块配置通道未连接，锁定列表可能未同步",
                         Toast.LENGTH_SHORT).show();
             }
@@ -2653,8 +2715,7 @@ public class MainActivity extends Activity {
         }
         if (!sp.getBoolean("lsposed_mode", false)) {
             // 已切回普通模式：若模块侧仍处于启用状态，主动关闭，避免它继续恢复服务
-            if (ModuleConfig.isRemoteConfigAvailable()
-                    && ModuleConfig.isRemoteModuleEnabled(this)) {
+            if (ModuleConfig.isRemoteModuleEnabled(this)) {
                 ModuleConfig.setEnabled(this, false);
             }
             return;

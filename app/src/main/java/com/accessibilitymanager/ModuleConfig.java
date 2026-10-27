@@ -38,6 +38,12 @@ public final class ModuleConfig {
     public static final String KEY_CMD_PREFIX = "a11y_cmd_";
     public static final String KEY_CMD_ACK = "a11y_module_cmd_ack";
 
+    // 方案 A：系统广播通信管道（直达 system_server，零延迟、免 Root/免 Shizuku、永不断联）
+    public static final String ACTION_SERVICE_CMD = "com.accessibilitymanager.action.SERVICE_CMD";
+    public static final String PERMISSION_SEND_CMD = "com.accessibilitymanager.permission.SEND_MODULE_CMD";
+    public static final String EXTRA_PAYLOAD = "payload";
+    public static final String EXTRA_TIME = "time";
+
     private static final Object sLogLock = new Object();
     private static final Object sCmdLock = new Object();
     private static ContentObserver sLogObserver;
@@ -116,7 +122,8 @@ public final class ModuleConfig {
     }
 
     public static boolean setEnabled(Context context, boolean enabled) {
-        return put(context, KEY_ENABLE, enabled ? "1" : "0");
+        put(context, KEY_ENABLE, enabled ? "1" : "0");
+        return sendServiceCommandPayload(context, "enable_module:" + (enabled ? "1" : "0"));
     }
 
     public static boolean isRemoteModuleEnabled(Context context) {
@@ -128,14 +135,15 @@ public final class ModuleConfig {
     }
 
     public static boolean triggerScan(Context context) {
-        return put(context, KEY_SCAN, String.valueOf(System.currentTimeMillis()));
+        put(context, KEY_SCAN, String.valueOf(System.currentTimeMillis()));
+        return sendServiceCommandPayload(context, "scan");
     }
 
     public static boolean setDebugEnabled(Context context, boolean enabled) {
         return put(context, KEY_DEBUG, enabled ? "1" : "0");
     }
 
-    /** 让模块代为开启/关闭无障碍服务（LSPosed 模式无需 WRITE_SECURE_SETTINGS） */
+    /** 让模块代为开启/关闭无障碍服务（方案 A：广播直达 system_server，无需 WRITE_SECURE_SETTINGS） */
     public static boolean sendServiceCommand(Context context, boolean enable, String component) {
         if (component == null || component.isEmpty()) {
             return false;
@@ -144,28 +152,43 @@ public final class ModuleConfig {
     }
 
     public static boolean sendServiceCommandPayload(Context context, String payload) {
-        if (context == null || payload == null || payload.isEmpty()
-                || !isRemoteConfigAvailable()) {
+        if (context == null || payload == null || payload.isEmpty()) {
             return false;
         }
-        synchronized (sCmdLock) {
-            try {
-                SharedPreferences prefs = sXposedService.getRemotePreferences(REMOTE_GROUP);
-                long seq = 0;
+        boolean broadcastSent = false;
+        // 1. 发送系统广播直达 system_server 中的模块（方案 A：毫秒级响应、不依赖 Preference 监听）
+        try {
+            Intent intent = new Intent(ACTION_SERVICE_CMD);
+            intent.putExtra(EXTRA_PAYLOAD, payload);
+            intent.putExtra(EXTRA_TIME, System.currentTimeMillis());
+            context.sendBroadcast(intent);
+            broadcastSent = true;
+        } catch (Throwable t) {
+            LogUtil.log(context, "[模块] 发送广播指令失败: " + t);
+        }
+
+        // 2. 同时写入 RemotePreferences 队列双重保底（若 XposedService 可用）
+        boolean remoteOk = false;
+        if (isRemoteConfigAvailable()) {
+            synchronized (sCmdLock) {
                 try {
-                    seq = Long.parseLong(prefs.getString(KEY_CMD_SEQ, "0"));
-                } catch (Throwable ignored) {
+                    SharedPreferences prefs = sXposedService.getRemotePreferences(REMOTE_GROUP);
+                    long seq = 0;
+                    try {
+                        seq = Long.parseLong(prefs.getString(KEY_CMD_SEQ, "0"));
+                    } catch (Throwable ignored) {
+                    }
+                    seq++;
+                    remoteOk = prefs.edit()
+                            .putString(KEY_CMD_PREFIX + seq, payload)
+                            .putString(KEY_CMD_SEQ, String.valueOf(seq))
+                            .commit();
+                } catch (Throwable t) {
+                    LogUtil.log(context, "[模块] 写入远程配置命令失败: " + t);
                 }
-                seq++;
-                return prefs.edit()
-                        .putString(KEY_CMD_PREFIX + seq, payload)
-                        .putString(KEY_CMD_SEQ, String.valueOf(seq))
-                        .commit();
-            } catch (Throwable t) {
-                LogUtil.log(context, "[模块] 发送服务命令失败: " + t);
-                return false;
             }
         }
+        return broadcastSent || remoteOk;
     }
 
     /** 让模块杀掉目标组件所属应用的进程，模拟一次真实崩溃 */
@@ -173,8 +196,9 @@ public final class ModuleConfig {
         if (component == null || component.isEmpty()) {
             return false;
         }
-        return put(context, KEY_DEBUG_KILL,
+        put(context, KEY_DEBUG_KILL,
                 component + "#" + System.currentTimeMillis());
+        return sendServiceCommandPayload(context, "debug_kill:" + component);
     }
 
     public static final String KEY_FIX_MODE = "a11y_module_fix_mode";
@@ -183,9 +207,8 @@ public final class ModuleConfig {
     public static boolean setFixMode(Context context, boolean fixMode, String disabledServices) {
         put(context, KEY_FIX_MODE, fixMode ? "1" : "0");
         put(context, KEY_FIX_DISABLED, disabledServices != null ? disabledServices : "");
-        sendServiceCommandPayload(context, "sync_fixmode:" + (fixMode ? "1" : "0") + "#"
+        return sendServiceCommandPayload(context, "sync_fixmode:" + (fixMode ? "1" : "0") + "#"
                 + (disabledServices != null ? disabledServices : ""));
-        return true;
     }
 
     public static void syncManagedServices(Context context, String daemon,
@@ -196,20 +219,11 @@ public final class ModuleConfig {
     public static void syncManagedServices(Context context, String daemon,
             String whitelist, boolean globalWhitelist, String reason) {
         String desired = buildManaged(daemon, whitelist, globalWhitelist);
-        String current = getManagedServices(context);
         String reasonSuffix = (reason != null && !reason.isEmpty()) ? " (" + reason + ")" : "";
-        if (desired.equals(current)) {
-            LogUtil.log(context, "[模块] 下发锁定同步指令" + reasonSuffix);
-            // 额外通过命令队列下发一次，确保 system_server 内部内存与系统设置瞬间同步
-            sendServiceCommandPayload(context, "sync_services:" + desired);
-            return;
-        }
-        if (put(context, KEY_SERVICES, desired)) {
-            LogUtil.log(context, "[模块] 下发锁定同步指令" + reasonSuffix + ": " + desired);
-            sendServiceCommandPayload(context, "sync_services:" + desired);
-        } else {
-            LogUtil.log(context, "[模块] 锁定服务写入失败" + reasonSuffix + "（模块未连接且未授予 WRITE_SECURE_SETTINGS）");
-        }
+        LogUtil.log(context, "[模块] 下发锁定同步指令" + reasonSuffix + (desired.isEmpty() ? "" : ": " + desired));
+        // 方案 A：系统广播通道直达模块，确保无论是否拥有 WRITE_SECURE_SETTINGS 都能瞬间生效
+        sendServiceCommandPayload(context, "sync_services:" + desired);
+        put(context, KEY_SERVICES, desired);
     }
 
     public static String getManagedServices(Context context) {

@@ -1,12 +1,16 @@
 package com.accessibilitymanager.probe;
 
 import android.app.ActivityManager;
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.ContentResolver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.database.ContentObserver;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Process;
@@ -57,6 +61,13 @@ public class AutoRepairEntry extends XposedModule {
     private static final String SETTING_ENABLED =
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES;
 
+    // 方案 A：系统广播通信管道（直达 system_server，免 Root/免 Shizuku、零延迟）
+    public static final String ACTION_SERVICE_CMD =
+            "com.accessibilitymanager.action.SERVICE_CMD";
+    public static final String PERMISSION_SEND_CMD =
+            "com.accessibilitymanager.permission.SEND_MODULE_CMD";
+    public static final String EXTRA_PAYLOAD = "payload";
+
     private static final long DEDUPE_MS = 1500L;
     private static final long SETTLE_MS = 3000L;
     private static final long TOGGLE_OFF_MS = 500L;
@@ -92,6 +103,8 @@ public class AutoRepairEntry extends XposedModule {
     private static int sObserverAttempts;
     private static boolean sScanPending;
     private static boolean sHeartbeatWritten;
+    private static volatile BroadcastReceiver sCommandReceiver;
+    private static int sContextRetryCount;
 
     // 事件缓冲
     private static final Object sEventLock = new Object();
@@ -169,6 +182,7 @@ public class AutoRepairEntry extends XposedModule {
         thread.start();
         sHandler = new Handler(thread.getLooper());
         initRemoteConfig();
+        scheduleReceiverInit();
 
         try {
             Class<?> connClass = classLoader.loadClass(CONNECTION_CLASS);
@@ -288,7 +302,7 @@ public class AutoRepairEntry extends XposedModule {
             Context context = ctxObj instanceof Context ? (Context) ctxObj : null;
 
             Handler handler = sHandler;
-            if (context != null && (sContext == null || sObserver == null)) {
+            if (context != null && (sContext == null || sObserver == null || sCommandReceiver == null)) {
                 final boolean changed = sContext != context;
                 sContext = context;
                 if (handler != null) {
@@ -297,6 +311,7 @@ public class AutoRepairEntry extends XposedModule {
                             sObserverAttempts = 0;
                         }
                         ensureObserver();
+                        ensureCommandReceiver();
                     });
                 }
             }
@@ -345,6 +360,7 @@ public class AutoRepairEntry extends XposedModule {
         flushEvents();
         initCommandAck();
         scheduleCommandDrain();
+        ensureCommandReceiver();
         if (sObserver != null) {
             return;
         }
@@ -734,18 +750,175 @@ public class AutoRepairEntry extends XposedModule {
         }
     }
 
+    private static Context getSystemContext() {
+        if (sContext != null) {
+            return sContext;
+        }
+        try {
+            Class<?> atClass = Class.forName("android.app.ActivityThread");
+            Method currentActivityThreadMethod = atClass.getDeclaredMethod("currentActivityThread");
+            currentActivityThreadMethod.setAccessible(true);
+            Object activityThread = currentActivityThreadMethod.invoke(null);
+            if (activityThread != null) {
+                Method getSystemContextMethod = atClass.getDeclaredMethod("getSystemContext");
+                getSystemContextMethod.setAccessible(true);
+                Context ctx = (Context) getSystemContextMethod.invoke(activityThread);
+                if (ctx != null) {
+                    sContext = ctx;
+                    return ctx;
+                }
+            }
+        } catch (Throwable t) {
+            log("getSystemContext error: " + t);
+        }
+        return null;
+    }
+
+    private static synchronized void ensureCommandReceiver() {
+        if (sCommandReceiver != null) {
+            return;
+        }
+        Context ctx = sContext;
+        if (ctx == null) {
+            ctx = getSystemContext();
+        }
+        if (ctx == null) {
+            return;
+        }
+        try {
+            BroadcastReceiver receiver = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    if (intent == null) return;
+                    String action = intent.getAction();
+                    if (!ACTION_SERVICE_CMD.equals(action)) return;
+                    String payload = intent.getStringExtra(EXTRA_PAYLOAD);
+                    if (payload == null || payload.isEmpty()) return;
+                    log("received broadcast cmd: " + payload);
+                    Handler handler = sHandler;
+                    if (handler != null) {
+                        handler.post(() -> {
+                            try {
+                                applyServiceCommand(payload);
+                            } catch (Throwable t) {
+                                event("失败", "广播指令执行异常: " + t);
+                            }
+                        });
+                    } else {
+                        applyServiceCommand(payload);
+                    }
+                }
+            };
+            IntentFilter filter = new IntentFilter(ACTION_SERVICE_CMD);
+            boolean registered = false;
+            if (Build.VERSION.SDK_INT >= 33) {
+                try {
+                    ctx.registerReceiver(receiver, filter, PERMISSION_SEND_CMD, sHandler, Context.RECEIVER_EXPORTED);
+                    registered = true;
+                } catch (Throwable t) {
+                    log("registerReceiver with permission failed: " + t + ", retrying without permission");
+                }
+                if (!registered) {
+                    try {
+                        ctx.registerReceiver(receiver, filter, null, sHandler, Context.RECEIVER_EXPORTED);
+                        registered = true;
+                    } catch (Throwable t2) {
+                        log("registerReceiver without permission failed: " + t2);
+                    }
+                }
+            } else {
+                try {
+                    ctx.registerReceiver(receiver, filter, PERMISSION_SEND_CMD, sHandler);
+                    registered = true;
+                } catch (Throwable t) {
+                    log("registerReceiver with permission failed: " + t + ", retrying without permission");
+                }
+                if (!registered) {
+                    try {
+                        ctx.registerReceiver(receiver, filter, null, sHandler);
+                        registered = true;
+                    } catch (Throwable t2) {
+                        log("registerReceiver without permission failed: " + t2);
+                    }
+                }
+            }
+            if (registered) {
+                sCommandReceiver = receiver;
+                event("配置", "系统广播指令监听已就绪 (方案A)");
+            }
+        } catch (Throwable t) {
+            event("失败", "注册广播接收器异常: " + t);
+        }
+    }
+
+    private static void scheduleReceiverInit() {
+        if (sCommandReceiver != null) {
+            return;
+        }
+        ensureCommandReceiver();
+        if (sCommandReceiver == null && sContextRetryCount < 10) {
+            sContextRetryCount++;
+            if (sHandler != null) {
+                sHandler.postDelayed(AutoRepairEntry::scheduleReceiverInit, 1500L);
+            }
+        }
+    }
+
+    private static void notifyCommandAck() {
+        Context context = sContext;
+        if (context == null) {
+            context = getSystemContext();
+        }
+        if (context == null) {
+            return;
+        }
+        try {
+            Settings.Secure.putString(context.getContentResolver(), KEY_CMD_ACK,
+                    String.valueOf(SystemClock.elapsedRealtimeNanos()));
+        } catch (Throwable t) {
+            log("notifyCommandAck failed: " + t);
+        }
+    }
+
     private static void applyServiceCommand(String value) {
         if (value == null || value.isEmpty()) {
             return;
         }
         int hash = value.lastIndexOf('#');
         String body = hash > 0 ? value.substring(0, hash) : value;
+
+        if ("scan".equals(body)) {
+            scheduleScan(0L, "manual scan");
+            event("扫描", "收到手动扫描指令");
+            notifyCommandAck();
+            return;
+        }
+
         int colon = body.indexOf(':');
         if (colon <= 0) {
             return;
         }
         String action = body.substring(0, colon);
         String component = body.substring(colon + 1);
+
+        if ("enable_module".equals(action)) {
+            boolean enable = "1".equals(component);
+            if (sContext != null) {
+                try {
+                    Settings.Secure.putString(sContext.getContentResolver(), KEY_ENABLE, enable ? "1" : "0");
+                } catch (Throwable ignored) {
+                }
+            }
+            if (enable) {
+                scheduleReconcile("enable_module", RECONCILE_CONFIG_DELAY_MS);
+                scheduleScan(SCAN_CONFIG_DELAY_MS, "enable_module");
+                event("配置", "模块已启用 (广播指令)");
+            } else {
+                event("配置", "模块已停用 (广播指令)");
+            }
+            notifyCommandAck();
+            return;
+        }
 
         if ("sync_services".equals(action)) {
             sManagedServicesCache = component;
@@ -759,6 +932,7 @@ public class AutoRepairEntry extends XposedModule {
             scheduleReconcile("sync_services cmd", RECONCILE_CONFIG_DELAY_MS);
             scheduleScan(SCAN_CONFIG_DELAY_MS, "sync_services cmd");
             event("配置", "模块已生效最新锁定列表: " + component);
+            notifyCommandAck();
             return;
         }
 
@@ -776,6 +950,16 @@ public class AutoRepairEntry extends XposedModule {
                 }
             }
             event("配置", "模块已生效强杀配置: fixmode=" + modeStr);
+            notifyCommandAck();
+            return;
+        }
+
+        if ("debug_kill".equals(action)) {
+            int slash = component.indexOf('/');
+            String pkg = slash > 0 ? component.substring(0, slash) : component;
+            killAppProcesses(pkg);
+            event("调试", "已触发进程强杀: " + component);
+            notifyCommandAck();
             return;
         }
 
@@ -790,7 +974,7 @@ public class AutoRepairEntry extends XposedModule {
         String targetKey = target.flattenToString();
         if (!enable) {
             // 用户手动关闭：给 KEY_SERVICES 的跨进程同步留出短暂窗口
-            sManualHiddenUntil.put(targetKey, SystemClock.elapsedRealtime() + 2000L);
+            sManualHiddenUntil.put(targetKey, SystemClock.elapsedRealtime() + 5000L);
         } else {
             sManualHiddenUntil.remove(targetKey);
         }
@@ -801,6 +985,7 @@ public class AutoRepairEntry extends XposedModule {
         boolean present = containsComponent(current, target);
         if (enable == present) {
             log("manual command no-op: " + component);
+            notifyCommandAck();
             return;
         }
         String updated = enable ? addComponent(current, target) : removeComponent(current, target);
@@ -809,6 +994,7 @@ public class AutoRepairEntry extends XposedModule {
         } else {
             event("失败", "手动" + (enable ? "开启" : "关闭") + "写入失败: " + component);
         }
+        notifyCommandAck();
     }
 
     private static void scheduleDebugKill() {
@@ -1522,8 +1708,11 @@ public class AutoRepairEntry extends XposedModule {
             sManualHiddenUntil.clear();
             if (sContext != null && sRemotePrefs != null) {
                 try {
-                    String v = sRemotePrefs.getString(KEY_SERVICES, "");
-                    Settings.Secure.putString(sContext.getContentResolver(), KEY_SERVICES, v);
+                    String v = sRemotePrefs.getString(KEY_SERVICES, null);
+                    if (v != null) {
+                        sManagedServicesCache = v;
+                        Settings.Secure.putString(sContext.getContentResolver(), KEY_SERVICES, v);
+                    }
                 } catch (Throwable ignored) {
                 }
             }
@@ -1534,14 +1723,38 @@ public class AutoRepairEntry extends XposedModule {
 
     private static String readConfig(String key) {
         drainCommands();
-        if (KEY_SERVICES.equals(key) && sManagedServicesCache != null) {
-            return sManagedServicesCache;
+        if (KEY_SERVICES.equals(key)) {
+            if (sManagedServicesCache != null) {
+                return sManagedServicesCache;
+            }
+            String secureVal = readSecure(KEY_SERVICES);
+            if (secureVal != null && !secureVal.isEmpty()) {
+                sManagedServicesCache = secureVal;
+                return secureVal;
+            }
+            SharedPreferences prefs = sRemotePrefs;
+            if (prefs != null) {
+                try {
+                    String remoteVal = prefs.getString(KEY_SERVICES, null);
+                    if (remoteVal != null) {
+                        sManagedServicesCache = remoteVal;
+                        return remoteVal;
+                    }
+                } catch (Throwable t) {
+                    log("read remote config failed: " + t);
+                }
+            }
+            return "";
         }
-        if (KEY_FIX_MODE.equals(key) && sFixModeCache != null) {
-            return sFixModeCache;
+        if (KEY_FIX_MODE.equals(key)) {
+            if (sFixModeCache != null) return sFixModeCache;
+            String secureVal = readSecure(KEY_FIX_MODE);
+            if (secureVal != null) return secureVal;
         }
-        if (KEY_FIX_DISABLED.equals(key) && sFixDisabledCache != null) {
-            return sFixDisabledCache;
+        if (KEY_FIX_DISABLED.equals(key)) {
+            if (sFixDisabledCache != null) return sFixDisabledCache;
+            String secureVal = readSecure(KEY_FIX_DISABLED);
+            if (secureVal != null) return secureVal;
         }
         SharedPreferences prefs = sRemotePrefs;
         if (prefs != null) {

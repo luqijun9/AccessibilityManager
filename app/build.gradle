@@ -85,4 +85,5 @@ dependencies {
     implementation 'com.belerweb:pinyin4j:2.5.1'
     compileOnly 'io.github.libxposed:api:102.0.0'
     implementation 'io.github.libxposed:service:101.0.0'
+    testImplementation 'junit:junit:4.13.2'
 }
