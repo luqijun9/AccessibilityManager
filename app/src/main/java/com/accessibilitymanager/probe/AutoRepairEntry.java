@@ -101,11 +101,11 @@ public class AutoRepairEntry extends XposedModule {
     private static volatile ContentObserver sObserver;
     private static int sObserverAttempts;
     private static boolean sScanPending;
-    // 开机早期初始化与心跳写入重试上限保护
-    static final int MAX_INIT_RETRY = 10;
-    private static final long INIT_RETRY_DELAY_MS = 1500L;
+    // 开机早期初始化与心跳写入重试上限保护（system_server 启动 ContentService 约需 15~45s）
+    static final int MAX_INIT_RETRY = 15;
+    private static final long INIT_RETRY_DELAY_MS = 5000L;
     static final int MAX_HEARTBEAT_ATTEMPTS = 8;
-    private static final long HEARTBEAT_RETRY_DELAY_MS = 2000L;
+    private static final long HEARTBEAT_RETRY_DELAY_MS = 5000L;
     private static final HeartbeatTracker sHeartbeatTracker =
             new HeartbeatTracker(MAX_HEARTBEAT_ATTEMPTS);
     private static boolean sHeartbeatRetryPending;
@@ -191,11 +191,12 @@ public class AutoRepairEntry extends XposedModule {
         HandlerThread thread = new HandlerThread("A11yAutoRepair");
         thread.start();
         sHandler = new Handler(thread.getLooper());
-        sHandler.post(AutoRepairEntry::scheduleReceiverInit);
+        // onSystemServerStarting 时 ActivityManagerService/ContentService 尚未就绪，延迟启动轮询避免早期空指针刷屏
+        sHandler.postDelayed(AutoRepairEntry::scheduleReceiverInit, 10000L);
         // 系统 boot_count 可能在 systemReady 阶段才自增，安排有限次延迟复核确保心跳与最终 boot_count 一致
-        sHandler.postDelayed(AutoRepairEntry::writeHeartbeatOnce, 5000L);
-        sHandler.postDelayed(AutoRepairEntry::writeHeartbeatOnce, 15000L);
-        sHandler.postDelayed(AutoRepairEntry::writeHeartbeatOnce, 30000L);
+        sHandler.postDelayed(AutoRepairEntry::writeHeartbeatOnce, 20000L);
+        sHandler.postDelayed(AutoRepairEntry::writeHeartbeatOnce, 40000L);
+        sHandler.postDelayed(AutoRepairEntry::writeHeartbeatOnce, 65000L);
 
         try {
             Class<?> connClass = classLoader.loadClass(CONNECTION_CLASS);
@@ -407,9 +408,10 @@ public class AutoRepairEntry extends XposedModule {
             }
         } catch (Throwable t) {
             if (sHeartbeatTracker.onWriteFailure()) {
+                log("heartbeat write deferred (system not ready): " + t);
                 scheduleHeartbeatRetry();
             } else {
-                event("失败", "心跳写入失败（已达重试上限 " + MAX_HEARTBEAT_ATTEMPTS + "）: " + t);
+                log("heartbeat auto-retry exhausted, waiting for passive/broadcast trigger: " + t);
             }
         }
     }
@@ -497,11 +499,11 @@ public class AutoRepairEntry extends XposedModule {
         } catch (Throwable t) {
             sObserver = null;
             sObserverAttempts++;
-            event("失败", "配置监听注册失败 (" + sObserverAttempts + "): " + t);
-            if (sObserverAttempts <= 3) {
+            log("register observer deferred (" + sObserverAttempts + "): " + t);
+            if (sContextRetryCount >= MAX_INIT_RETRY && sObserverAttempts <= 3) {
                 sHandler.postDelayed(AutoRepairEntry::ensureObserver, 5000L);
-            } else {
-                event("失败", "配置监听重试失败，已停用");
+            } else if (sContextRetryCount >= MAX_INIT_RETRY) {
+                event("失败", "配置监听注册失败 (" + sObserverAttempts + "): " + t);
             }
         }
     }

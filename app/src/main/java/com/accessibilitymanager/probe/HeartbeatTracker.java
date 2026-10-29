@@ -21,6 +21,8 @@ final class HeartbeatTracker {
 
     /**
      * 判断当前是否需要针对 {@code currentBootCount} 写入心跳。
+     * 注意：此方法仅幂等去重（同一 boot_count 已成功写入则跳过），绝不因为早期自发重试达到上限
+     * 而拦截后续由无障碍服务连接或 App 广播（ping/sync）被动触发的心跳写入。
      */
     synchronized boolean shouldWrite(int currentBootCount) {
         if (written) {
@@ -32,7 +34,7 @@ final class HeartbeatTracker {
             attempts = 0;
             return true;
         }
-        return attempts < maxAttempts;
+        return true;
     }
 
     /**

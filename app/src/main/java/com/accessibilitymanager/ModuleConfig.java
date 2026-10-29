@@ -36,20 +36,24 @@ public final class ModuleConfig {
     private static final Object sLogLock = new Object();
     private static ContentObserver sLogObserver;
     private static Context sLogContext;
+    private static volatile int sPingAckBootCount = Integer.MIN_VALUE;
 
     private ModuleConfig() {
     }
 
-    /** 模块会在本次开机加载后写 bootCount|version */
+    /** 模块会在本次开机加载后写 bootCount|version；若 ping 广播收到实时回执同样认定已加载 */
     public static boolean isModuleLoaded(Context context) {
         if (context == null) {
             return false;
         }
         try {
-            String value = Settings.Secure.getString(
-                    context.getContentResolver(), KEY_LOADED);
             int currentBoot = Settings.Global.getInt(
                     context.getContentResolver(), "boot_count", -1);
+            if (sPingAckBootCount != Integer.MIN_VALUE && sPingAckBootCount == currentBoot) {
+                return true;
+            }
+            String value = Settings.Secure.getString(
+                    context.getContentResolver(), KEY_LOADED);
             return isLoadedValueValid(value, currentBoot);
         } catch (Throwable t) {
             return false;
@@ -71,12 +75,25 @@ public final class ModuleConfig {
         }
     }
 
-    /** 若当前心跳未对齐（如刚重启），向 system_server 模块发送轻量 ping 触发立即补写心跳 */
+    /** 若当前心跳未对齐（如刚重启），向 system_server 模块发送轻量 ping 触发立即补写心跳与实时回执校验 */
     public static void requestModuleHeartbeat(Context context) {
         if (context == null || isModuleLoaded(context)) {
             return;
         }
-        sendServiceCommandPayload(context, "ping");
+        final Context appCtx = context.getApplicationContext();
+        final String beforeAck = get(appCtx, KEY_CMD_ACK);
+        sendServiceCommandPayload(appCtx, "ping");
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            try {
+                String afterAck = get(appCtx, KEY_CMD_ACK);
+                if (afterAck != null && !afterAck.isEmpty() && !afterAck.equals(beforeAck)) {
+                    int currentBoot = Settings.Global.getInt(
+                            appCtx.getContentResolver(), "boot_count", -1);
+                    sPingAckBootCount = currentBoot;
+                }
+            } catch (Throwable ignored) {
+            }
+        }, 250L);
     }
 
     public static boolean setEnabled(Context context, boolean enabled) {

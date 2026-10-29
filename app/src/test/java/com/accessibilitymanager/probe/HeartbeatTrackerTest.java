@@ -49,11 +49,17 @@ public class HeartbeatTrackerTest {
             assertFalse(tracker.isExhausted());
         }
 
-        // 第 maxAttempts 次失败后达到上限，不再允许继续自动重试
+        // 第 maxAttempts 次失败后达到上限，不再允许继续自动定时重试
         assertTrue(tracker.shouldWrite(10));
-        assertFalse("reaching maxAttempts must stop retrying", tracker.onWriteFailure());
+        assertFalse("reaching maxAttempts must stop auto-retrying", tracker.onWriteFailure());
         assertEquals(maxAttempts, tracker.getAttempts());
         assertTrue(tracker.isExhausted());
+
+        // 但后续系统服务就绪后由无障碍连接或 App 广播被动触发时，仍必须允许写入并恢复正常状态
+        assertTrue("passive trigger after boot ready must still be allowed to write", tracker.shouldWrite(10));
+        tracker.onWriteSuccess(10);
+        assertTrue(tracker.isWritten());
+        assertFalse(tracker.isExhausted());
         assertFalse(tracker.shouldWrite(10));
     }
 
