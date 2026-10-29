@@ -10,6 +10,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
+import android.text.TextUtils;
 import android.text.style.ForegroundColorSpan;
 import android.view.Gravity;
 import android.view.View;
@@ -41,6 +42,8 @@ public class LogActivity extends AppCompatActivity {
     private static final int VIEW_TYPE_LOG = 0;
     private static final int VIEW_TYPE_DATE = 1;
     private static final int VIEW_TYPE_GAP = 2;
+    /** 同步列表类长日志：折叠时单行显示，右侧带展开/收起按钮 */
+    private static final int VIEW_TYPE_LONG_LINE = 3;
 
     private ListView listView;
     private TextView tvEmpty;
@@ -51,6 +54,8 @@ public class LogActivity extends AppCompatActivity {
     private List<LogItem> displayItems = new ArrayList<>();
     /** 已展开的折叠组标识（组内第一条原始日志的下标）；默认不展开即默认折叠 */
     private final Set<Integer> mExpandedGroups = new HashSet<>();
+    /** 已展开的长日志下标（同步列表类日志默认单行显示） */
+    private final Set<Integer> mExpandedLongLines = new HashSet<>();
     private boolean night;
     private androidx.appcompat.widget.Toolbar toolbar;
     private boolean mIsMultiSelectMode = false;
@@ -58,8 +63,6 @@ public class LogActivity extends AppCompatActivity {
 
     /** 可折叠日志的分组标签：只有连续且同组的日志才会合并 */
     private static final String GROUP_IGNORED_SERVICE = "非保活服务";
-    private static final String GROUP_CONFIG_SYNC = "配置下发";
-    private static final String GROUP_MODULE_SYNC = "锁定列表同步";
 
     // ── 实时监听 ──
     private LogUtil.LogListener mLogListener;
@@ -124,6 +127,11 @@ public class LogActivity extends AppCompatActivity {
                 // 点击折叠组可展开/收起明细
                 if (item.kind == LogItem.KIND_GROUP) {
                     toggleGroupExpanded(item);
+                    return;
+                }
+                // 同步列表类长日志：点击整行也可展开/收起
+                if (item.kind == LogItem.KIND_LINE && isLongListLine(item.text)) {
+                    toggleLongLineExpanded(item);
                 }
                 return;
             }
@@ -466,13 +474,22 @@ public class LogActivity extends AppCompatActivity {
         if (text.contains("非保活服务") || text.contains("非受管服务")) {
             return GROUP_IGNORED_SERVICE;
         }
-        if (text.contains("下发锁定同步指令")) {
-            return GROUP_CONFIG_SYNC;
-        }
-        if (text.contains("模块已生效最新锁定列表")) {
-            return GROUP_MODULE_SYNC;
-        }
         return null;
+    }
+
+    /** 同步列表类长日志：不展开时只占一行，右侧提供展开/收起按钮 */
+    private static boolean isLongListLine(String text) {
+        return text != null
+                && (text.contains("下发锁定同步指令") || text.contains("模块已生效最新锁定列表"));
+    }
+
+    private void toggleLongLineExpanded(LogItem item) {
+        if (!mExpandedLongLines.remove(item.rawStart)) {
+            mExpandedLongLines.add(item.rawStart);
+        }
+        if (adapter != null) {
+            adapter.notifyDataSetChanged();
+        }
     }
 
     private static String groupHeaderText(String label, int count, boolean expanded) {
@@ -485,6 +502,7 @@ public class LogActivity extends AppCompatActivity {
         List<LogUtil.LogEntry> newEntries = LogUtil.readRecentLogs(this);
         entries = newEntries;
         mExpandedGroups.clear();
+        mExpandedLongLines.clear();
         displayItems = buildDisplayItems(entries);
         if (newEntries.isEmpty()) {
             listView.setVisibility(View.GONE);
@@ -831,6 +849,17 @@ public class LogActivity extends AppCompatActivity {
         listView.setSelection(displayItems.size() - 1);
     }
 
+    /** 长日志行的子视图缓存：左侧文本 + 右侧展开/收起按钮 */
+    private static class LongLineHolder {
+        final TextView text;
+        final TextView button;
+
+        LongLineHolder(TextView text, TextView button) {
+            this.text = text;
+            this.button = button;
+        }
+    }
+
     /** 展示列表条目：普通日志行、日期/间隔分隔符，或折叠组（表头+可选展开的明细） */
     private static class LogItem {
         static final int KIND_DATE = 0;
@@ -922,12 +951,15 @@ public class LogActivity extends AppCompatActivity {
             LogItem item = displayItems.get(position);
             if (item.kind == LogItem.KIND_DATE) return VIEW_TYPE_DATE;
             if (item.kind == LogItem.KIND_GAP) return VIEW_TYPE_GAP;
+            if (item.kind == LogItem.KIND_LINE && isLongListLine(item.text)) {
+                return VIEW_TYPE_LONG_LINE;
+            }
             return VIEW_TYPE_LOG;
         }
 
         @Override
         public int getViewTypeCount() {
-            return 3;
+            return 4;
         }
 
         @Override
@@ -945,6 +977,35 @@ public class LogActivity extends AppCompatActivity {
             } else if (type == VIEW_TYPE_GAP) {
                 if (convertView == null) {
                     convertView = createGapSeparatorView();
+                }
+                return convertView;
+            } else if (type == VIEW_TYPE_LONG_LINE) {
+                if (convertView == null) {
+                    convertView = createLongLineView();
+                }
+                LongLineHolder holder = (LongLineHolder) convertView.getTag();
+                String line = entry.text;
+                boolean expanded = mExpandedLongLines.contains(entry.rawStart);
+                holder.text.setMaxLines(expanded ? Integer.MAX_VALUE : 1);
+                holder.text.setEllipsize(expanded ? null : TextUtils.TruncateAt.END);
+                SpannableStringBuilder ssb = new SpannableStringBuilder(line);
+                ssb.setSpan(new ForegroundColorSpan(getLineColor(line)), 0, line.length(),
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                holder.text.setText(ssb);
+                holder.button.setText(expanded ? "收起" : "展开");
+                holder.button.setTextColor(night ? 0xFF8AB4F8 : 0xFF1A73E8);
+                holder.button.setOnClickListener(v -> {
+                    if (!mIsMultiSelectMode) {
+                        toggleLongLineExpanded(entry);
+                    }
+                });
+                if (mSelectedPositions.contains(position)) {
+                    android.graphics.drawable.GradientDrawable selBg = new android.graphics.drawable.GradientDrawable();
+                    selBg.setColor(night ? 0x33FFFFFF : 0x22000000);
+                    selBg.setCornerRadius(10f);
+                    convertView.setBackground(selBg);
+                } else {
+                    convertView.setBackground(null);
                 }
                 return convertView;
             } else {
@@ -984,6 +1045,33 @@ public class LogActivity extends AppCompatActivity {
                 }
                 return tv;
             }
+        }
+
+        private View createLongLineView() {
+            LinearLayout row = new LinearLayout(LogActivity.this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.TOP);
+            row.setLayoutParams(new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            TextView text = new TextView(LogActivity.this);
+            text.setTextSize(12f);
+            text.setPadding(16, 6, 8, 6);
+            text.setLineSpacing(0, 1.15f);
+            text.setLayoutParams(new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            TextView button = new TextView(LogActivity.this);
+            button.setTextSize(12f);
+            button.setPadding(8, 6, 16, 6);
+            button.setTypeface(Typeface.DEFAULT_BOLD);
+            button.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            row.addView(text);
+            row.addView(button);
+            row.setTag(new LongLineHolder(text, button));
+            return row;
         }
 
         private int getLineColor(String line) {
