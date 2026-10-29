@@ -9,8 +9,8 @@ android {
         applicationId "com.accessibilitymanager.pro"
         minSdk 21
         targetSdk 35
-        versionCode 53
-        versionName "18.7.0"
+        versionCode 54
+        versionName "18.7.1"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         resConfigs "zh"
