@@ -282,11 +282,12 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (itemId == R.id.perm_status) {
-                if (sp.getBoolean("crashfix", false) && !ShellUtil.hasDumpPermission(this)) {
+                boolean lsposedMode = sp.getBoolean("lsposed_mode", false);
+                if (!lsposedMode && sp.getBoolean("crashfix", false) && !ShellUtil.hasDumpPermission(this)) {
                     showDumpPermissionDialog();
                     return true;
                 }
-                if (sp.getBoolean("fixmode", false) && !ShellUtil.hasAnyPermission()) {
+                if (!lsposedMode && sp.getBoolean("fixmode", false) && !ShellUtil.hasAnyPermission()) {
                     showFixModePermissionDialog();
                     return true;
                 }
@@ -1113,6 +1114,7 @@ public class MainActivity extends Activity {
         }
         
         checkBatteryOptimization();
+        updateToolbarMenu();
         ModuleConfig.requestModuleHeartbeat(this);
         checkLsposedInactiveAfterPing();
         syncModuleLogsIfNeeded();
@@ -1669,17 +1671,18 @@ public class MainActivity extends Activity {
         MenuItem permItem = menu.findItem(R.id.perm_status);
         if (permItem != null) {
             ShellUtil.reset();
+            boolean lsposedMode = sp.getBoolean("lsposed_mode", false);
             boolean crashFixEnabled = sp.getBoolean("crashfix", false);
             boolean fixModeEnabled = sp.getBoolean("fixmode", false);
             boolean hasDump = ShellUtil.hasDumpPermission(this);
             String text;
             int color = menuColor;
-            if (crashFixEnabled && !hasDump) {
+            if (!lsposedMode && crashFixEnabled && !hasDump) {
                 // 崩溃检测仅依赖 DUMP 权限，没有 DUMP 就显示失效
                 text = "崩溃检测失效ⓘ";
                 color = Color.rgb(0xFF, 0x00, 0x00);
-            } else if (fixModeEnabled && !ShellUtil.hasAnyPermission()) {
-                // 强杀功能需要 Root/Shizuku 权限
+            } else if (!lsposedMode && fixModeEnabled && !ShellUtil.hasAnyPermission()) {
+                // 普通模式下强杀功能需要 Root/Shizuku 权限（LSPosed 模式由 system_server 直接强杀，无需权限）
                 text = "强杀功能失效ⓘ";
                 color = Color.rgb(0xFF, 0x00, 0x00);
             } else {
