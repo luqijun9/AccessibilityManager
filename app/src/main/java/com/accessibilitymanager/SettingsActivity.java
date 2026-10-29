@@ -954,6 +954,7 @@ public class SettingsActivity extends AppCompatActivity {
         if (checked) {
             boolean loaded = ModuleConfig.isModuleLoaded(this);
             if (!loaded) {
+                ModuleConfig.requestModuleHeartbeat(this, this::refreshLsposedModeUi);
                 if (mModuleModeListener != null) {
                     switchLsposedMode.setOnCheckedChangeListener(null);
                 }
@@ -1026,6 +1027,9 @@ public class SettingsActivity extends AppCompatActivity {
         }
 
         boolean loaded = ModuleConfig.isModuleLoaded(this);
+        if (!loaded) {
+            ModuleConfig.requestModuleHeartbeat(this, this::refreshLsposedModeUi);
+        }
         if (mode) {
             lsposedModuleStatus.setText(loaded
                     ? "已启用：系统级被动实时监听与自动修复"

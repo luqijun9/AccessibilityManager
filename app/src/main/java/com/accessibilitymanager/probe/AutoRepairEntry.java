@@ -61,6 +61,7 @@ public class AutoRepairEntry extends XposedModule {
     private static final long SKIP_EVENT_WINDOW_MS = 10 * 60 * 1000L;
     private static final String SETTING_ENABLED =
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES;
+    private static final String SETTING_BOOT_COUNT = "boot_count";
 
     // 方案 A：系统广播通信管道（直达 system_server，免 Root/免 Shizuku、零延迟）
     public static final String ACTION_SERVICE_CMD =
@@ -193,10 +194,6 @@ public class AutoRepairEntry extends XposedModule {
         sHandler = new Handler(thread.getLooper());
         // onSystemServerStarting 时 ActivityManagerService/ContentService 尚未就绪，延迟启动轮询避免早期空指针刷屏
         sHandler.postDelayed(AutoRepairEntry::scheduleReceiverInit, 10000L);
-        // 系统 boot_count 可能在 systemReady 阶段才自增，安排有限次延迟复核确保心跳与最终 boot_count 一致
-        sHandler.postDelayed(AutoRepairEntry::writeHeartbeatOnce, 20000L);
-        sHandler.postDelayed(AutoRepairEntry::writeHeartbeatOnce, 40000L);
-        sHandler.postDelayed(AutoRepairEntry::writeHeartbeatOnce, 65000L);
 
         try {
             Class<?> connClass = classLoader.loadClass(CONNECTION_CLASS);
@@ -376,6 +373,10 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static void writeHeartbeatOnce() {
+        writeHeartbeatOnce("auto");
+    }
+
+    private static void writeHeartbeatOnce(String reason) {
         Context context = sContext;
         if (context == null) {
             context = getSystemContext();
@@ -384,13 +385,13 @@ public class AutoRepairEntry extends XposedModule {
             if (sHeartbeatTracker.onWriteFailure()) {
                 scheduleHeartbeatRetry();
             } else {
-                event("失败", "心跳写入放弃（Context 未就绪，已达重试上限 " + MAX_HEARTBEAT_ATTEMPTS + "）");
+                log("heartbeat write deferred (context null, retry limit reached)");
             }
             return;
         }
         try {
             int bootCount = Settings.Global.getInt(
-                    context.getContentResolver(), "boot_count", -1);
+                    context.getContentResolver(), SETTING_BOOT_COUNT, -1);
             if (!sHeartbeatTracker.shouldWrite(bootCount)) {
                 return;
             }
@@ -398,12 +399,12 @@ public class AutoRepairEntry extends XposedModule {
                     bootCount + "|1");
             if (ok) {
                 sHeartbeatTracker.onWriteSuccess(bootCount);
-                event("配置", "心跳已写入, bootCount=" + bootCount);
+                event("配置", "心跳已写入, bootCount=" + bootCount + " (" + reason + ")");
             } else {
                 if (sHeartbeatTracker.onWriteFailure()) {
                     scheduleHeartbeatRetry();
                 } else {
-                    event("失败", "心跳写入返回 false，已达重试上限(" + MAX_HEARTBEAT_ATTEMPTS + ")");
+                    log("heartbeat write returned false, retry limit reached");
                 }
             }
         } catch (Throwable t) {
@@ -423,7 +424,7 @@ public class AutoRepairEntry extends XposedModule {
         sHeartbeatRetryPending = true;
         sHandler.postDelayed(() -> {
             sHeartbeatRetryPending = false;
-            writeHeartbeatOnce();
+            writeHeartbeatOnce("retry");
         }, HEARTBEAT_RETRY_DELAY_MS);
     }
 
@@ -431,7 +432,7 @@ public class AutoRepairEntry extends XposedModule {
         if (sContext == null || sHandler == null) {
             return;
         }
-        writeHeartbeatOnce();
+        writeHeartbeatOnce("observer_check");
         flushEvents();
         ensureCommandReceiver();
         if (sObserver != null) {
@@ -443,6 +444,10 @@ public class AutoRepairEntry extends XposedModule {
                 @Override
                 public void onChange(boolean selfChange, Uri uri) {
                     String key = uri == null ? null : uri.getLastPathSegment();
+                    if (SETTING_BOOT_COUNT.equals(key)) {
+                        writeHeartbeatOnce("boot_count变更");
+                        return;
+                    }
                     if (SETTING_ENABLED.equals(key)) {
                         onEnabledListChanged();
                         return;
@@ -475,6 +480,8 @@ public class AutoRepairEntry extends XposedModule {
                     }
                 }
             };
+            resolver.registerContentObserver(Settings.Global.getUriFor(SETTING_BOOT_COUNT),
+                    false, sObserver);
             resolver.registerContentObserver(Settings.Secure.getUriFor(KEY_ENABLE),
                     false, sObserver);
             resolver.registerContentObserver(Settings.Secure.getUriFor(KEY_SERVICES),
@@ -490,7 +497,8 @@ public class AutoRepairEntry extends XposedModule {
             resolver.registerContentObserver(Settings.Secure.getUriFor(SETTING_ENABLED),
                     false, sObserver);
             sObserverAttempts = 0;
-            event("配置", "配置监听已注册");
+            event("配置", "配置监听已注册 (含 boot_count 实时同步)");
+            writeHeartbeatOnce("observer_ready");
             scheduleScan(SCAN_INIT_DELAY_MS, "init");
             long sinceBoot = SystemClock.elapsedRealtime();
             long reconcileDelay = sinceBoot < BOOT_GRACE_MS
@@ -913,9 +921,9 @@ public class AutoRepairEntry extends XposedModule {
         if (value == null || value.isEmpty()) {
             return;
         }
-        writeHeartbeatOnce();
         int hash = value.lastIndexOf('#');
         String body = hash > 0 ? value.substring(0, hash) : value;
+        writeHeartbeatOnce("ping".equals(body) ? "ping唤醒" : "cmd:" + body);
 
         if ("ping".equals(body)) {
             notifyCommandAck();

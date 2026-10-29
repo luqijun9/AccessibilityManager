@@ -77,6 +77,10 @@ public final class ModuleConfig {
 
     /** 若当前心跳未对齐（如刚重启），向 system_server 模块发送轻量 ping 触发立即补写心跳与实时回执校验 */
     public static void requestModuleHeartbeat(Context context) {
+        requestModuleHeartbeat(context, null);
+    }
+
+    public static void requestModuleHeartbeat(Context context, Runnable onVerified) {
         if (context == null || isModuleLoaded(context)) {
             return;
         }
@@ -89,7 +93,15 @@ public final class ModuleConfig {
                 if (afterAck != null && !afterAck.isEmpty() && !afterAck.equals(beforeAck)) {
                     int currentBoot = Settings.Global.getInt(
                             appCtx.getContentResolver(), "boot_count", -1);
-                    sPingAckBootCount = currentBoot;
+                    if (sPingAckBootCount != currentBoot) {
+                        sPingAckBootCount = currentBoot;
+                        LogUtil.log(appCtx, "[模块] 收到系统进程 ping 实时回执, bootCount=" + currentBoot);
+                    }
+                    if (onVerified != null) {
+                        onVerified.run();
+                    }
+                } else if (isModuleLoaded(appCtx) && onVerified != null) {
+                    onVerified.run();
                 }
             } catch (Throwable ignored) {
             }
