@@ -7,7 +7,6 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.SharedPreferences;
 import android.database.ContentObserver;
 import android.net.Uri;
 import android.os.Build;
@@ -51,12 +50,9 @@ public class AutoRepairEntry extends XposedModule {
     private static final String KEY_DEBUG_KILL = "a11y_module_debug_kill";
     private static final String KEY_FIX_MODE = "a11y_module_fix_mode";
     private static final String KEY_FIX_DISABLED = "a11y_module_fix_disabled";
-    private static final String KEY_CMD_SEQ = "a11y_cmd_seq";
-    private static final String KEY_CMD_PREFIX = "a11y_cmd_";
     private static final String KEY_CMD_ACK = "a11y_module_cmd_ack";
     private static final String KEY_LOADED = "a11y_module_loaded";
     private static final String KEY_EVENTS = "a11y_module_events";
-    private static final String REMOTE_GROUP = "a11y_config";
     // 持久事件通道容量：噪音聚合后 120 条约可覆盖数天；Settings.Secure 单值不宜过大
     private static final int EVENT_LIMIT = 120;
     // 非保活服务（便签输入法等）连接日志聚合窗口：本身不重要，1 小时一条；明细仍全部写 logcat
@@ -100,8 +96,6 @@ public class AutoRepairEntry extends XposedModule {
 
     private static volatile AutoRepairEntry sModuleInstance;
     private static volatile Context sContext;
-    private static volatile SharedPreferences sRemotePrefs;
-    private static volatile SharedPreferences.OnSharedPreferenceChangeListener sPrefChangeListener;
     private static Handler sHandler;
     private static boolean sInstalled;
     private static volatile ContentObserver sObserver;
@@ -150,15 +144,15 @@ public class AutoRepairEntry extends XposedModule {
     private static boolean sReconcilePending;
     private static boolean sReconcileRetryPending;
     private static boolean sBindVerifyPending;
-    private static boolean sCommandDrainPending;
-    private static boolean sCommandAckInitialized;
-    private static long sLastAckSeq;
     private static long sLastReconcileWriteAt;
     private static final Map<String, Long> sSelfRemovedUntil = new HashMap<>();
     private static final Map<String, Long> sManualHiddenUntil = new HashMap<>();
+    private static volatile String sModuleEnabledCache;
     private static volatile String sManagedServicesCache;
     private static volatile String sFixModeCache;
     private static volatile String sFixDisabledCache;
+    private static volatile String sDryRunCache;
+    private static volatile String sDebugCache;
 
     // 反射缓存
     private static final Map<String, Field> sFieldCache = new ConcurrentHashMap<>();
@@ -197,7 +191,6 @@ public class AutoRepairEntry extends XposedModule {
         HandlerThread thread = new HandlerThread("A11yAutoRepair");
         thread.start();
         sHandler = new Handler(thread.getLooper());
-        initRemoteConfig();
         sHandler.post(AutoRepairEntry::scheduleReceiverInit);
         // 系统 boot_count 可能在 systemReady 阶段才自增，安排有限次延迟复核确保心跳与最终 boot_count 一致
         sHandler.postDelayed(AutoRepairEntry::writeHeartbeatOnce, 5000L);
@@ -438,8 +431,6 @@ public class AutoRepairEntry extends XposedModule {
         }
         writeHeartbeatOnce();
         flushEvents();
-        initCommandAck();
-        scheduleCommandDrain();
         ensureCommandReceiver();
         if (sObserver != null) {
             return;
@@ -458,19 +449,25 @@ public class AutoRepairEntry extends XposedModule {
                         scheduleDebugKill();
                         return;
                     }
-                    if (isCommandKey(key)) {
-                        scheduleCommandDrain();
-                        return;
-                    }
                     if (KEY_SCAN.equals(key)) {
                         scheduleScan(0L, "manual scan");
                         return;
                     }
+                    if (KEY_DRY_RUN.equals(key)) {
+                        sDryRunCache = readSecure(KEY_DRY_RUN);
+                        return;
+                    }
+                    if (KEY_DEBUG.equals(key)) {
+                        sDebugCache = readSecure(KEY_DEBUG);
+                        return;
+                    }
                     if (KEY_ENABLE.equals(key)) {
+                        sModuleEnabledCache = readSecure(KEY_ENABLE);
                         if (isModuleEnabled()) {
                             scheduleReconcile("enable", RECONCILE_CONFIG_DELAY_MS);
                         }
                     } else if (KEY_SERVICES.equals(key)) {
+                        sManagedServicesCache = readSecure(KEY_SERVICES);
                         scheduleReconcile("services", RECONCILE_CONFIG_DELAY_MS);
                         scheduleScan(SCAN_CONFIG_DELAY_MS, "services changed");
                     }
@@ -777,90 +774,6 @@ public class AutoRepairEntry extends XposedModule {
         }
     }
 
-    private static boolean isCommandKey(String key) {
-        return KEY_CMD_SEQ.equals(key) || (key != null && key.startsWith(KEY_CMD_PREFIX));
-    }
-
-    /** 命令队列：App 递增 seq，模块按顺序处理所有未确认命令并写回执 */
-    private static void scheduleCommandDrain() {
-        Handler handler = sHandler;
-        if (handler == null || sCommandDrainPending) {
-            return;
-        }
-        sCommandDrainPending = true;
-        handler.post(() -> {
-            sCommandDrainPending = false;
-            try {
-                drainCommands();
-            } catch (Throwable t) {
-                event("失败", "命令队列处理异常: " + t);
-            }
-        });
-    }
-
-    private static void initCommandAck() {
-        if (sCommandAckInitialized || sContext == null) {
-            return;
-        }
-        sCommandAckInitialized = true;
-        String ack = readSecure(KEY_CMD_ACK);
-        if (ack == null || ack.isEmpty()) {
-            return;
-        }
-        try {
-            sLastAckSeq = Long.parseLong(ack);
-        } catch (Throwable ignored) {
-        }
-    }
-
-    private static void drainCommands() {
-        if (sRemotePrefs == null && sModuleInstance != null) {
-            try {
-                sRemotePrefs = sModuleInstance.getRemotePreferences(REMOTE_GROUP);
-            } catch (Throwable ignored) {
-            }
-        }
-        SharedPreferences prefs = sRemotePrefs;
-        if (prefs == null || sContext == null) {
-            return;
-        }
-        long seq;
-        try {
-            seq = Long.parseLong(prefs.getString(KEY_CMD_SEQ, "0"));
-        } catch (Throwable t) {
-            return;
-        }
-        if (seq <= 0) {
-            return;
-        }
-        if (seq < sLastAckSeq) {
-            event("配置", "命令序号回退，重置回执: " + sLastAckSeq + " -> 0");
-            sLastAckSeq = 0;
-        }
-        if (seq <= sLastAckSeq) {
-            return;
-        }
-
-        long ack = sLastAckSeq;
-        for (long i = sLastAckSeq + 1; i <= seq; i++) {
-            String key = KEY_CMD_PREFIX + i;
-            String payload = prefs.getString(key, null);
-            if (payload == null) {
-                event("失败", "命令缺失: seq=" + i);
-            } else {
-                applyServiceCommand(payload);
-            }
-            ack = i;
-        }
-        sLastAckSeq = ack;
-        try {
-            Settings.Secure.putString(sContext.getContentResolver(), KEY_CMD_ACK,
-                    String.valueOf(ack));
-        } catch (Throwable t) {
-            event("失败", "命令回执写入失败: " + t);
-        }
-    }
-
     private static Context getSystemContext() {
         if (sContext != null) {
             return sContext;
@@ -1023,9 +936,10 @@ public class AutoRepairEntry extends XposedModule {
 
         if ("enable_module".equals(action)) {
             boolean enable = "1".equals(component);
+            sModuleEnabledCache = enable ? "1" : "0";
             if (sContext != null) {
                 try {
-                    Settings.Secure.putString(sContext.getContentResolver(), KEY_ENABLE, enable ? "1" : "0");
+                    Settings.Secure.putString(sContext.getContentResolver(), KEY_ENABLE, sModuleEnabledCache);
                 } catch (Throwable ignored) {
                 }
             }
@@ -1035,6 +949,30 @@ public class AutoRepairEntry extends XposedModule {
                 event("配置", "模块已启用 (广播指令)");
             } else {
                 event("配置", "模块已停用 (广播指令)");
+            }
+            notifyCommandAck();
+            return;
+        }
+
+        if ("dry_run".equals(action)) {
+            sDryRunCache = "1".equals(component) ? "1" : "0";
+            if (sContext != null) {
+                try {
+                    Settings.Secure.putString(sContext.getContentResolver(), KEY_DRY_RUN, sDryRunCache);
+                } catch (Throwable ignored) {
+                }
+            }
+            notifyCommandAck();
+            return;
+        }
+
+        if ("debug".equals(action)) {
+            sDebugCache = "1".equals(component) ? "1" : "0";
+            if (sContext != null) {
+                try {
+                    Settings.Secure.putString(sContext.getContentResolver(), KEY_DEBUG, sDebugCache);
+                } catch (Throwable ignored) {
+                }
             }
             notifyCommandAck();
             return;
@@ -1257,7 +1195,7 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
         if (!crashed) {
-            event("监听", "受管服务正常断开(忽略非崩溃): " + key);
+            log("[监听] 受管服务正常断开(忽略非崩溃): " + key);
             return;
         }
         if (sContext == null) {
@@ -1267,14 +1205,14 @@ public class AutoRepairEntry extends XposedModule {
 
         Long suppress = sSuppressUntil.get(key);
         if (suppress != null && now < suppress) {
-            event("检测", "忽略（修复抑制窗口）: " + key);
+            eventSkip("died:suppress:" + key, "检测", "忽略（修复抑制窗口）: " + key);
             return;
         }
 
         Long blocked = sBlockedUntil.get(key);
         if (blocked != null) {
             if (now < blocked) {
-                event("检测", "忽略（熔断中）: " + key);
+                eventSkip("died:blocked:" + key, "检测", "忽略（熔断中）: " + key);
                 return;
             }
             sBlockedUntil.remove(key);
@@ -1769,122 +1707,62 @@ public class AutoRepairEntry extends XposedModule {
         }
     }
 
-    /** Remote Preferences 配置通道；不可用时回退 Settings.Secure */
-    private void initRemoteConfig() {
-        try {
-            SharedPreferences prefs = getRemotePreferences(REMOTE_GROUP);
-            if (prefs == null) {
-                event("失败", "远程配置不可用: null（已回退 Settings.Secure）");
-                return;
-            }
-            sRemotePrefs = prefs;
-            sPrefChangeListener = (p, key) -> {
-                Handler handler = sHandler;
-                if (handler == null) {
-                    return;
-                }
-                handler.post(() -> {
-                    try {
-                        onConfigChanged(key);
-                    } catch (Throwable t) {
-                        event("失败", "远程配置处理异常: " + t);
-                    }
-                });
-            };
-            prefs.registerOnSharedPreferenceChangeListener(sPrefChangeListener);
-            log("remote prefs ready: " + REMOTE_GROUP);
-            initCommandAck();
-            scheduleCommandDrain();
-        } catch (Throwable t) {
-            event("失败", "远程配置不可用: " + t + "（已回退 Settings.Secure）");
-        }
-    }
-
-    private static void onConfigChanged(String key) {
-        if (key == null) {
-            scheduleReconcile("remote config", RECONCILE_CONFIG_DELAY_MS);
-            scheduleScan(SCAN_CONFIG_DELAY_MS, "remote config");
-            return;
-        }
-        if (KEY_DEBUG_KILL.equals(key)) {
-            scheduleDebugKill();
-            return;
-        }
-        if (isCommandKey(key)) {
-            scheduleCommandDrain();
-            return;
-        }
-        if (KEY_SCAN.equals(key)) {
-            scheduleScan(0L, "manual scan");
-            return;
-        }
-        if (KEY_ENABLE.equals(key)) {
-            if (isModuleEnabled()) {
-                scheduleReconcile("enable", RECONCILE_CONFIG_DELAY_MS);
-                scheduleCommandDrain();
-            }
-        } else if (KEY_SERVICES.equals(key)) {
-            // 锁定列表变化后，手动关闭豁免立即失效：重新加锁必须优先补回
-            sManualHiddenUntil.clear();
-            if (sContext != null && sRemotePrefs != null) {
-                try {
-                    String v = sRemotePrefs.getString(KEY_SERVICES, null);
-                    if (v != null) {
-                        sManagedServicesCache = v;
-                        Settings.Secure.putString(sContext.getContentResolver(), KEY_SERVICES, v);
-                    }
-                } catch (Throwable ignored) {
-                }
-            }
-            scheduleReconcile("services", RECONCILE_CONFIG_DELAY_MS);
-            scheduleScan(SCAN_CONFIG_DELAY_MS, "services changed");
-        }
-    }
-
     private static String readConfig(String key) {
-        drainCommands();
+        if (KEY_ENABLE.equals(key)) {
+            if (sModuleEnabledCache != null) return sModuleEnabledCache;
+            String secureVal = readSecure(KEY_ENABLE);
+            if (secureVal != null) {
+                sModuleEnabledCache = secureVal;
+                return secureVal;
+            }
+            return null;
+        }
         if (KEY_SERVICES.equals(key)) {
             if (sManagedServicesCache != null) {
                 return sManagedServicesCache;
             }
             String secureVal = readSecure(KEY_SERVICES);
-            if (secureVal != null && !secureVal.isEmpty()) {
+            if (secureVal != null) {
                 sManagedServicesCache = secureVal;
                 return secureVal;
-            }
-            SharedPreferences prefs = sRemotePrefs;
-            if (prefs != null) {
-                try {
-                    String remoteVal = prefs.getString(KEY_SERVICES, null);
-                    if (remoteVal != null) {
-                        sManagedServicesCache = remoteVal;
-                        return remoteVal;
-                    }
-                } catch (Throwable t) {
-                    log("read remote config failed: " + t);
-                }
             }
             return "";
         }
         if (KEY_FIX_MODE.equals(key)) {
             if (sFixModeCache != null) return sFixModeCache;
             String secureVal = readSecure(KEY_FIX_MODE);
-            if (secureVal != null) return secureVal;
+            if (secureVal != null) {
+                sFixModeCache = secureVal;
+                return secureVal;
+            }
+            return null;
         }
         if (KEY_FIX_DISABLED.equals(key)) {
             if (sFixDisabledCache != null) return sFixDisabledCache;
             String secureVal = readSecure(KEY_FIX_DISABLED);
-            if (secureVal != null) return secureVal;
-        }
-        SharedPreferences prefs = sRemotePrefs;
-        if (prefs != null) {
-            // Remote Preferences 可用时以它为准，避免回退到可能更旧的 Settings.Secure
-            try {
-                return prefs.getString(key, null);
-            } catch (Throwable t) {
-                log("read remote config failed: " + t);
-                return null;
+            if (secureVal != null) {
+                sFixDisabledCache = secureVal;
+                return secureVal;
             }
+            return null;
+        }
+        if (KEY_DRY_RUN.equals(key)) {
+            if (sDryRunCache != null) return sDryRunCache;
+            String secureVal = readSecure(KEY_DRY_RUN);
+            if (secureVal != null) {
+                sDryRunCache = secureVal;
+                return secureVal;
+            }
+            return null;
+        }
+        if (KEY_DEBUG.equals(key)) {
+            if (sDebugCache != null) return sDebugCache;
+            String secureVal = readSecure(KEY_DEBUG);
+            if (secureVal != null) {
+                sDebugCache = secureVal;
+                return secureVal;
+            }
+            return null;
         }
         return readSecure(key);
     }

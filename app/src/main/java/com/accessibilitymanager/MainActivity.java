@@ -238,6 +238,7 @@ public class MainActivity extends Activity {
 
     private String mCurrentTheme;
     private int mColorPrimary;
+    private boolean mLsposedInactiveWarned;
     private final java.util.Set<String> mLockedDisableToastShown = new java.util.HashSet<>();
     // LSPosed 模式下开关服务待确认的目标状态与 3 秒超时兜底任务
     private final java.util.Map<String, Boolean> mPendingTargetStates = new java.util.HashMap<>();
@@ -1113,6 +1114,7 @@ public class MainActivity extends Activity {
         
         checkBatteryOptimization();
         ModuleConfig.requestModuleHeartbeat(this);
+        checkLsposedInactiveAfterPing();
         syncModuleLogsIfNeeded();
         syncModuleServicesIfNeeded();
         checkAndShowCrashFixIntroDialog();
@@ -1161,6 +1163,35 @@ public class MainActivity extends Activity {
             sp.edit().putBoolean("unlock_duplicate_detected", false).apply();
             showUnlockDuplicateDialog();
         }
+    }
+
+    /**
+     * 若当前处于 LSPosed 模式，但重启后模块未激活（先等 ping 唤醒复核 600ms），
+     * 主动弹窗提示用户切换回普通模式，避免无感知完全失去保活能力。
+     */
+    private void checkLsposedInactiveAfterPing() {
+        if (!sp.getBoolean("lsposed_mode", false)) {
+            mLsposedInactiveWarned = false;
+            return;
+        }
+        if (ModuleConfig.isModuleLoaded(this)) {
+            mLsposedInactiveWarned = false;
+            return;
+        }
+        if (mLsposedInactiveWarned || listView == null) {
+            return;
+        }
+        listView.postDelayed(() -> {
+            if (isFinishing() || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && isDestroyed())) {
+                return;
+            }
+            if (!sp.getBoolean("lsposed_mode", false) || ModuleConfig.isModuleLoaded(this) || mLsposedInactiveWarned) {
+                return;
+            }
+            mLsposedInactiveWarned = true;
+            LogUtil.log(this, "[异常] 检测到已开启 LSPosed 模式但模块未激活，提示用户切换或重新激活");
+            ModuleConfig.showLsposedInactiveFallbackDialog(this, () -> chooseNormalMode(this::StartForeGroundDaemon));
+        }, 600L);
     }
 
     private void checkBatteryOptimization() {
@@ -2092,6 +2123,12 @@ public class MainActivity extends Activity {
                 }
                 if (sp.getBoolean("lsposed_mode", false)) {
                     boolean enable = holder.sw.isChecked();
+                    if (!ModuleConfig.isModuleLoaded(MainActivity.this)) {
+                        holder.sw.setChecked(!enable);
+                        ModuleConfig.showLsposedInactiveFallbackDialog(
+                                MainActivity.this, () -> chooseNormalMode(MainActivity.this::StartForeGroundDaemon));
+                        return;
+                    }
                     if (!enable && sp.getBoolean("manual_close_daemon", false)
                             && containsService(daemon, serviceName)) {
                         daemon = removeServiceFromList(daemon, serviceComponent);
@@ -2114,9 +2151,9 @@ public class MainActivity extends Activity {
                             MainActivity.this, enable, serviceName);
                     if (!sent) {
                         holder.sw.setChecked(!enable);
-                        Toast.makeText(MainActivity.this, (ModuleConfig.isRemoteConfigAvailable() || ModuleConfig.isModuleLoaded(MainActivity.this))
+                        Toast.makeText(MainActivity.this, ModuleConfig.isModuleLoaded(MainActivity.this)
                                         ? "命令发送失败，请重试"
-                                        : "模块未连接，LSPosed 模式下无法手动开关服务",
+                                        : "模块未激活，LSPosed 模式下无法手动开关服务",
                                 Toast.LENGTH_LONG).show();
                         return;
                     }
@@ -2400,8 +2437,8 @@ public class MainActivity extends Activity {
             sp.edit().putString("daemon", daemon).apply();
             syncModuleServicesIfNeeded();
             holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
-            if (lsposed && !ModuleConfig.isRemoteConfigAvailable() && !ModuleConfig.isModuleLoaded(MainActivity.this)) {
-                Toast.makeText(MainActivity.this, "模块配置通道未连接，锁定列表可能未同步",
+            if (lsposed && !ModuleConfig.isModuleLoaded(MainActivity.this)) {
+                Toast.makeText(MainActivity.this, "模块未激活，锁定列表将在模块激活后同步生效",
                         Toast.LENGTH_SHORT).show();
             }
             if (!lsposed) StartForeGroundDaemon();

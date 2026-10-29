@@ -4,26 +4,18 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
 import android.database.ContentObserver;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
-import android.widget.Toast;
 
-import androidx.appcompat.app.AlertDialog;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-import io.github.libxposed.service.XposedService;
-
-/** LSPosed 自动恢复模块的配置通道（优先 Remote Preferences，回退 Settings.Secure） */
+/** LSPosed 自动恢复模块的配置通道（基于系统广播直达 system_server + Settings.Secure 单一真实数据源） */
 public final class ModuleConfig {
-
-    private static final String REMOTE_GROUP = "a11y_config";
-    private static volatile XposedService sXposedService;
 
     public static final String KEY_ENABLE = "a11y_module_enable";
     public static final String KEY_SERVICES = "a11y_module_services";
@@ -33,71 +25,19 @@ public final class ModuleConfig {
     public static final String KEY_EVENTS = "a11y_module_events";
     public static final String KEY_DEBUG = "a11y_module_debug";
     public static final String KEY_DEBUG_KILL = "a11y_module_debug_kill";
-    // 服务开关命令队列：App 递增序号写 payload，模块按序处理并写回执
-    public static final String KEY_CMD_SEQ = "a11y_cmd_seq";
-    public static final String KEY_CMD_PREFIX = "a11y_cmd_";
     public static final String KEY_CMD_ACK = "a11y_module_cmd_ack";
 
-    // 方案 A：系统广播通信管道（直达 system_server，零延迟、免 Root/免 Shizuku、永不断联）
+    // 系统广播通信管道（直达 system_server，零延迟、免 Root/免 Shizuku、永不断联）
     public static final String ACTION_SERVICE_CMD = "com.accessibilitymanager.action.SERVICE_CMD";
     public static final String PERMISSION_SEND_CMD = "com.accessibilitymanager.permission.SEND_MODULE_CMD";
     public static final String EXTRA_PAYLOAD = "payload";
     public static final String EXTRA_TIME = "time";
 
     private static final Object sLogLock = new Object();
-    private static final Object sCmdLock = new Object();
     private static ContentObserver sLogObserver;
     private static Context sLogContext;
 
     private ModuleConfig() {
-    }
-
-    public static void onXposedServiceBind(Context context, XposedService service) {
-        sXposedService = service;
-        boolean remote = isRemoteConfigAvailable();
-        LogUtil.log(context, "[模块] XposedService 已连接: "
-                + (service == null ? "null" : service.getFrameworkName()
-                        + " " + service.getFrameworkVersion())
-                + ", RemotePreferences=" + remote);
-        if (remote && context != null) {
-            try {
-                SharedPreferences sp = context.getSharedPreferences("data", 0);
-                if (sp.getBoolean("lsposed_mode", false)) {
-                    setEnabled(context, true);
-                    setDryRun(context, false);
-                    setFixMode(context, sp.getBoolean("fixmode", false),
-                            sp.getString("fixmode_disabled_services", ""));
-                    syncManagedServices(context,
-                            sp.getString("daemon", ""),
-                            sp.getString("whitelist_services", ""),
-                            sp.getBoolean("whitelist_global_enable", false),
-                            "模块服务连接");
-                } else if (isRemoteModuleEnabled(context)) {
-                    // 已切回普通模式：确保模块侧停止动作
-                    setEnabled(context, false);
-                }
-            } catch (Throwable t) {
-                LogUtil.log(context, "[模块] 绑定后自动同步失败: " + t);
-            }
-        }
-    }
-
-    public static void onXposedServiceDied(XposedService service) {
-        if (sXposedService == service) {
-            sXposedService = null;
-        }
-    }
-
-    public static boolean isRemoteConfigAvailable() {
-        XposedService service = sXposedService;
-        if (service == null) {
-            return false;
-        }
-        try {
-            return (service.getFrameworkProperties() & XposedService.PROP_CAP_REMOTE) != 0;
-        } catch (Throwable t) {
-            return false;
-        }
     }
 
     /** 模块会在本次开机加载后写 bootCount|version */
@@ -149,7 +89,8 @@ public final class ModuleConfig {
     }
 
     public static boolean setDryRun(Context context, boolean dryRun) {
-        return put(context, KEY_DRY_RUN, dryRun ? "1" : "0");
+        put(context, KEY_DRY_RUN, dryRun ? "1" : "0");
+        return sendServiceCommandPayload(context, "dry_run:" + (dryRun ? "1" : "0"));
     }
 
     public static boolean triggerScan(Context context) {
@@ -158,7 +99,8 @@ public final class ModuleConfig {
     }
 
     public static boolean setDebugEnabled(Context context, boolean enabled) {
-        return put(context, KEY_DEBUG, enabled ? "1" : "0");
+        put(context, KEY_DEBUG, enabled ? "1" : "0");
+        return sendServiceCommandPayload(context, "debug:" + (enabled ? "1" : "0"));
     }
 
     /** 让模块代为开启/关闭无障碍服务（方案 A：广播直达 system_server，无需 WRITE_SECURE_SETTINGS） */
@@ -173,40 +115,16 @@ public final class ModuleConfig {
         if (context == null || payload == null || payload.isEmpty()) {
             return false;
         }
-        boolean broadcastSent = false;
-        // 1. 发送系统广播直达 system_server 中的模块（方案 A：毫秒级响应、不依赖 Preference 监听）
         try {
             Intent intent = new Intent(ACTION_SERVICE_CMD);
             intent.putExtra(EXTRA_PAYLOAD, payload);
             intent.putExtra(EXTRA_TIME, System.currentTimeMillis());
             context.sendBroadcast(intent);
-            broadcastSent = true;
+            return true;
         } catch (Throwable t) {
             LogUtil.log(context, "[模块] 发送广播指令失败: " + t);
+            return false;
         }
-
-        // 2. 同时写入 RemotePreferences 队列双重保底（若 XposedService 可用）
-        boolean remoteOk = false;
-        if (isRemoteConfigAvailable()) {
-            synchronized (sCmdLock) {
-                try {
-                    SharedPreferences prefs = sXposedService.getRemotePreferences(REMOTE_GROUP);
-                    long seq = 0;
-                    try {
-                        seq = Long.parseLong(prefs.getString(KEY_CMD_SEQ, "0"));
-                    } catch (Throwable ignored) {
-                    }
-                    seq++;
-                    remoteOk = prefs.edit()
-                            .putString(KEY_CMD_PREFIX + seq, payload)
-                            .putString(KEY_CMD_SEQ, String.valueOf(seq))
-                            .commit();
-                } catch (Throwable t) {
-                    LogUtil.log(context, "[模块] 写入远程配置命令失败: " + t);
-                }
-            }
-        }
-        return broadcastSent || remoteOk;
     }
 
     /** 让模块杀掉目标组件所属应用的进程，模拟一次真实崩溃 */
@@ -388,14 +306,8 @@ public final class ModuleConfig {
     }
 
     private static String get(Context context, String key) {
-        if (isRemoteConfigAvailable()) {
-            try {
-                SharedPreferences prefs = sXposedService.getRemotePreferences(REMOTE_GROUP);
-                return prefs.getString(key, null);
-            } catch (Throwable t) {
-                LogUtil.log(context, "[模块] 读 RemotePreferences 失败: " + t);
-                return null;
-            }
+        if (context == null) {
+            return null;
         }
         try {
             return Settings.Secure.getString(context.getContentResolver(), key);
@@ -405,60 +317,15 @@ public final class ModuleConfig {
     }
 
     private static boolean put(Context context, String key, String value) {
-        if (isRemoteConfigAvailable()) {
-            // Remote Preferences 可用时以它为准，避免与 Settings.Secure 出现新旧不一致
-            try {
-                SharedPreferences prefs = sXposedService.getRemotePreferences(REMOTE_GROUP);
-                boolean ok = prefs.edit().putString(key, value).commit();
-                if (ok && context != null) {
-                    try {
-                        Settings.Secure.putString(context.getContentResolver(), key, value);
-                    } catch (Throwable ignored) {
-                    }
-                }
-                return ok;
-            } catch (Throwable t) {
-                LogUtil.log(context, "[模块] RemotePreferences 写入异常: " + t);
-                return false;
-            }
+        if (context == null) {
+            return false;
         }
         try {
             return Settings.Secure.putString(context.getContentResolver(), key, value);
-        } catch (Throwable t) {
-            LogUtil.log(context, "[模块] 写入 " + key + " 失败: " + t);
+        } catch (Throwable ignored) {
+            // 未授予 WRITE_SECURE_SETTINGS 时由广播通道通知 system_server 模块代写，无需报错刷屏
             return false;
         }
-    }
-
-    /** 尝试打开已安装的 LSPosed 管理器应用 */
-    public static boolean openLsposedManager(Context context) {
-        if (context == null) return false;
-        String[] packages = new String[] {
-                "org.lsposed.manager",
-                "org.lsposed.manager.core",
-                "io.github.vvb2060.magisk",
-                "com.topjohnwu.magisk"
-        };
-        PackageManager pm = context.getPackageManager();
-        for (String pkg : packages) {
-            try {
-                Intent intent = pm.getLaunchIntentForPackage(pkg);
-                if (intent != null) {
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    context.startActivity(intent);
-                    return true;
-                }
-            } catch (Throwable ignored) {
-            }
-        }
-        try {
-            Intent intent = new Intent("org.lsposed.manager.ACTION_LAUNCH");
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            context.startActivity(intent);
-            return true;
-        } catch (Throwable ignored) {
-        }
-        return false;
     }
 
     /** 弹出 LSPosed 模块未激活提示与引导对话框 */
@@ -477,6 +344,20 @@ public final class ModuleConfig {
 
         if (onFallbackToNormal != null) {
             builder.setNeutralButton("改用普通模式", (dialog, which) -> onFallbackToNormal.run());
+        }
+        builder.show();
+    }
+
+    /** 已开启 LSPosed 模式但重启后检测到模块未生效时的回退提示弹窗 */
+    public static void showLsposedInactiveFallbackDialog(Context context, Runnable onSwitchToNormal) {
+        if (context == null) return;
+        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(context)
+                .setTitle("LSPosed 模块未生效")
+                .setMessage("检测到当前已开启「LSPosed 模块模式」，但模块在本次开机中未加载生效（可能已在 LSPosed 中取消勾选或尚未重启生效）。\n\n"
+                        + "当前所有加锁服务处于暂停守护状态，建议立即切回普通模式，或在 LSPosed 中重新勾选本模块并重启手机。")
+                .setNegativeButton("暂不切换", null);
+        if (onSwitchToNormal != null) {
+            builder.setPositiveButton("切回普通模式", (dialog, which) -> onSwitchToNormal.run());
         }
         builder.show();
     }

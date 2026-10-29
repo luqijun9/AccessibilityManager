@@ -6,8 +6,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
 import com.google.android.material.color.DynamicColors;
-import io.github.libxposed.service.XposedService;
-import io.github.libxposed.service.XposedServiceHelper;
 import rikka.shizuku.Shizuku;
 
 public class App extends Application {
@@ -19,26 +17,6 @@ public class App extends Application {
 
         // 检查上次管理器进程被杀/退出的诊断信息
         ProcessExitMonitor.checkProcessExit(this);
-
-        // LSPosed 服务：用于 Remote Preferences 配置通道（无需 WRITE_SECURE_SETTINGS）
-        // 库要求 Android 8.0+，低版本系统不加载该通道，继续走 Settings.Secure
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            try {
-                XposedServiceHelper.registerListener(new XposedServiceHelper.OnServiceListener() {
-                    @Override
-                    public void onServiceBind(XposedService service) {
-                        ModuleConfig.onXposedServiceBind(App.this, service);
-                    }
-
-                    @Override
-                    public void onServiceDied(XposedService service) {
-                        ModuleConfig.onXposedServiceDied(service);
-                    }
-                });
-            } catch (Throwable t) {
-                LogUtil.log(this, "[模块] XposedService 监听注册失败: " + t);
-            }
-        }
 
         // Shizuku 授权状态依赖服务端，服务断开时进程内的权限缓存不会自动失效，
         // 必须主动作废，否则会拿着"以为还有权限"的旧状态去 newProcess
