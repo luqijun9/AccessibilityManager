@@ -102,23 +102,41 @@ public final class ModuleConfig {
 
     /** 模块会在本次开机加载后写 bootCount|version */
     public static boolean isModuleLoaded(Context context) {
-
+        if (context == null) {
+            return false;
+        }
         try {
             String value = Settings.Secure.getString(
                     context.getContentResolver(), KEY_LOADED);
-            if (value == null || value.isEmpty()) {
-                return false;
-            }
+            int currentBoot = Settings.Global.getInt(
+                    context.getContentResolver(), "boot_count", -1);
+            return isLoadedValueValid(value, currentBoot);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    static boolean isLoadedValueValid(String value, int currentBoot) {
+        if (value == null || value.isEmpty()) {
+            return false;
+        }
+        try {
             int separator = value.indexOf('|');
             String bootValue = separator > 0 ? value.substring(0, separator) : value;
             int moduleBoot = Integer.parseInt(bootValue);
-            int currentBoot = Settings.Global.getInt(
-                    context.getContentResolver(), "boot_count", -1);
             // 部分 ROM 没有 boot_count，退化为“有心跳即加载”
             return currentBoot < 0 || moduleBoot == currentBoot;
         } catch (Throwable t) {
             return false;
         }
+    }
+
+    /** 若当前心跳未对齐（如刚重启），向 system_server 模块发送轻量 ping 触发立即补写心跳 */
+    public static void requestModuleHeartbeat(Context context) {
+        if (context == null || isModuleLoaded(context)) {
+            return;
+        }
+        sendServiceCommandPayload(context, "ping");
     }
 
     public static boolean setEnabled(Context context, boolean enabled) {
@@ -450,17 +468,12 @@ public final class ModuleConfig {
                 .setTitle("LSPosed 模块未激活")
                 .setMessage("当前尚未检测到本模块在 LSPosed 中激活或生效。\n\n"
                         + "激活步骤：\n"
-                        + "1. 打开【LSPosed 管理器】\n"
+                        + "1. 打开【LSPosed 管理器】（如从系统通知栏或拨号盘暗码进入）\n"
                         + "2. 在模块列表中找到并勾选【无障碍管理器】\n"
-                        + "3. 推荐勾选作用域：系统框架 (Android 系统)\n"
+                        + "3. 勾选作用域：系统框架 (Android 系统)\n"
                         + "4. 重启手机（或执行软重启）使模块生效\n\n"
                         + "激活生效后即可享受系统底层被动实时监听与 0 轮询保活。")
-                .setPositiveButton("打开 LSPosed", (dialog, which) -> {
-                    if (!openLsposedManager(context)) {
-                        Toast.makeText(context, "未找到 LSPosed 管理器，请手动前往打开", Toast.LENGTH_SHORT).show();
-                    }
-                })
-                .setNegativeButton("知道了", null);
+                .setPositiveButton("知道了", null);
 
         if (onFallbackToNormal != null) {
             builder.setNeutralButton("改用普通模式", (dialog, which) -> onFallbackToNormal.run());

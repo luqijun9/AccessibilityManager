@@ -102,7 +102,14 @@ public class AutoRepairEntry extends XposedModule {
     private static volatile ContentObserver sObserver;
     private static int sObserverAttempts;
     private static boolean sScanPending;
-    private static boolean sHeartbeatWritten;
+    // 开机早期初始化与心跳写入重试上限保护
+    static final int MAX_INIT_RETRY = 10;
+    private static final long INIT_RETRY_DELAY_MS = 1500L;
+    static final int MAX_HEARTBEAT_ATTEMPTS = 8;
+    private static final long HEARTBEAT_RETRY_DELAY_MS = 2000L;
+    private static final HeartbeatTracker sHeartbeatTracker =
+            new HeartbeatTracker(MAX_HEARTBEAT_ATTEMPTS);
+    private static boolean sHeartbeatRetryPending;
     private static volatile BroadcastReceiver sCommandReceiver;
     private static int sContextRetryCount;
 
@@ -182,7 +189,11 @@ public class AutoRepairEntry extends XposedModule {
         thread.start();
         sHandler = new Handler(thread.getLooper());
         initRemoteConfig();
-        scheduleReceiverInit();
+        sHandler.post(AutoRepairEntry::scheduleReceiverInit);
+        // 系统 boot_count 可能在 systemReady 阶段才自增，安排有限次延迟复核确保心跳与最终 boot_count 一致
+        sHandler.postDelayed(AutoRepairEntry::writeHeartbeatOnce, 5000L);
+        sHandler.postDelayed(AutoRepairEntry::writeHeartbeatOnce, 15000L);
+        sHandler.postDelayed(AutoRepairEntry::writeHeartbeatOnce, 30000L);
 
         try {
             Class<?> connClass = classLoader.loadClass(CONNECTION_CLASS);
@@ -337,19 +348,54 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static void writeHeartbeatOnce() {
-        if (sHeartbeatWritten || sContext == null) {
+        Context context = sContext;
+        if (context == null) {
+            context = getSystemContext();
+        }
+        if (context == null) {
+            if (sHeartbeatTracker.onWriteFailure()) {
+                scheduleHeartbeatRetry();
+            } else {
+                event("失败", "心跳写入放弃（Context 未就绪，已达重试上限 " + MAX_HEARTBEAT_ATTEMPTS + "）");
+            }
             return;
         }
         try {
             int bootCount = Settings.Global.getInt(
-                    sContext.getContentResolver(), "boot_count", -1);
-            Settings.Secure.putString(sContext.getContentResolver(), KEY_LOADED,
+                    context.getContentResolver(), "boot_count", -1);
+            if (!sHeartbeatTracker.shouldWrite(bootCount)) {
+                return;
+            }
+            boolean ok = Settings.Secure.putString(context.getContentResolver(), KEY_LOADED,
                     bootCount + "|1");
-            sHeartbeatWritten = true;
-            event("配置", "心跳已写入, bootCount=" + bootCount);
+            if (ok) {
+                sHeartbeatTracker.onWriteSuccess(bootCount);
+                event("配置", "心跳已写入, bootCount=" + bootCount);
+            } else {
+                if (sHeartbeatTracker.onWriteFailure()) {
+                    scheduleHeartbeatRetry();
+                } else {
+                    event("失败", "心跳写入返回 false，已达重试上限(" + MAX_HEARTBEAT_ATTEMPTS + ")");
+                }
+            }
         } catch (Throwable t) {
-            event("失败", "心跳写入失败: " + t);
+            if (sHeartbeatTracker.onWriteFailure()) {
+                scheduleHeartbeatRetry();
+            } else {
+                event("失败", "心跳写入失败（已达重试上限 " + MAX_HEARTBEAT_ATTEMPTS + "）: " + t);
+            }
         }
+    }
+
+    private static void scheduleHeartbeatRetry() {
+        if (sHeartbeatRetryPending || sHandler == null) {
+            return;
+        }
+        sHeartbeatRetryPending = true;
+        sHandler.postDelayed(() -> {
+            sHeartbeatRetryPending = false;
+            writeHeartbeatOnce();
+        }, HEARTBEAT_RETRY_DELAY_MS);
     }
 
     private static void ensureObserver() {
@@ -852,14 +898,17 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static void scheduleReceiverInit() {
-        if (sCommandReceiver != null) {
-            return;
+        if (sContext == null) {
+            sContext = getSystemContext();
         }
-        ensureCommandReceiver();
-        if (sCommandReceiver == null && sContextRetryCount < 10) {
+        if (sContext != null) {
+            ensureCommandReceiver();
+            ensureObserver();
+        }
+        if ((sCommandReceiver == null || sObserver == null) && sContextRetryCount < MAX_INIT_RETRY) {
             sContextRetryCount++;
             if (sHandler != null) {
-                sHandler.postDelayed(AutoRepairEntry::scheduleReceiverInit, 1500L);
+                sHandler.postDelayed(AutoRepairEntry::scheduleReceiverInit, INIT_RETRY_DELAY_MS);
             }
         }
     }
@@ -884,8 +933,14 @@ public class AutoRepairEntry extends XposedModule {
         if (value == null || value.isEmpty()) {
             return;
         }
+        writeHeartbeatOnce();
         int hash = value.lastIndexOf('#');
         String body = hash > 0 ? value.substring(0, hash) : value;
+
+        if ("ping".equals(body)) {
+            notifyCommandAck();
+            return;
+        }
 
         if ("scan".equals(body)) {
             scheduleScan(0L, "manual scan");

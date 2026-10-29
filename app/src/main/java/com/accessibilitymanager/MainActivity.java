@@ -1112,6 +1112,7 @@ public class MainActivity extends Activity {
         }
         
         checkBatteryOptimization();
+        ModuleConfig.requestModuleHeartbeat(this);
         syncModuleLogsIfNeeded();
         syncModuleServicesIfNeeded();
         checkAndShowCrashFixIntroDialog();

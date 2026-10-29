@@ -75,6 +75,13 @@ public class SettingsActivity extends AppCompatActivity {
     private boolean mPendingCrashFixRequest = false;
     private boolean mPendingFixModeRequest = false;
     private boolean night;
+    private final android.database.ContentObserver mModuleLoadedObserver =
+            new android.database.ContentObserver(new Handler(Looper.getMainLooper())) {
+                @Override
+                public void onChange(boolean selfChange) {
+                    refreshLsposedModeUi();
+                }
+            };
 
     private final Shizuku.OnRequestPermissionResultListener mShizukuListener = (requestCode, grantResult) -> {
         LogUtil.log(this, "[权限] SettingsActivity Shizuku回调, grantResult=" + grantResult
@@ -185,6 +192,15 @@ public class SettingsActivity extends AppCompatActivity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             Shizuku.addRequestPermissionResultListener(mShizukuListener);
         }
+        try {
+            getContentResolver().registerContentObserver(
+                    Settings.Secure.getUriFor(ModuleConfig.KEY_LOADED), false, mModuleLoadedObserver);
+            getContentResolver().registerContentObserver(
+                    Settings.Secure.getUriFor(ModuleConfig.KEY_CMD_ACK), false, mModuleLoadedObserver);
+        } catch (Throwable ignored) {
+        }
+        ModuleConfig.requestModuleHeartbeat(this);
+        refreshLsposedModeUi();
     }
 
     @Override
@@ -192,6 +208,10 @@ public class SettingsActivity extends AppCompatActivity {
         super.onStop();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             Shizuku.removeRequestPermissionResultListener(mShizukuListener);
+        }
+        try {
+            getContentResolver().unregisterContentObserver(mModuleLoadedObserver);
+        } catch (Throwable ignored) {
         }
     }
 
