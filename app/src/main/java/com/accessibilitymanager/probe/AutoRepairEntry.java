@@ -57,7 +57,12 @@ public class AutoRepairEntry extends XposedModule {
     private static final String KEY_LOADED = "a11y_module_loaded";
     private static final String KEY_EVENTS = "a11y_module_events";
     private static final String REMOTE_GROUP = "a11y_config";
-    private static final int EVENT_LIMIT = 40;
+    // 持久事件通道容量：噪音聚合后 120 条约可覆盖数天；Settings.Secure 单值不宜过大
+    private static final int EVENT_LIMIT = 120;
+    // 非保活服务（便签输入法等）连接日志聚合窗口：本身不重要，1 小时一条；明细仍全部写 logcat
+    private static final long NON_MANAGED_EVENT_WINDOW_MS = 60 * 60 * 1000L;
+    // 跳过路径聚合窗口：原因有诊断价值，保留 10 分钟粒度
+    private static final long SKIP_EVENT_WINDOW_MS = 10 * 60 * 1000L;
     private static final String SETTING_ENABLED =
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES;
 
@@ -119,6 +124,10 @@ public class AutoRepairEntry extends XposedModule {
     private static final String sEventSession =
             Long.toHexString(System.currentTimeMillis());
     private static long sEventSeq;
+    private static final EventThrottle sNonManagedThrottle =
+            new EventThrottle(NON_MANAGED_EVENT_WINDOW_MS);
+    private static final EventThrottle sSkipThrottle =
+            new EventThrottle(SKIP_EVENT_WINDOW_MS);
 
     // 状态缓存（仅在 sHandler 线程读写）
     private static boolean sRepairInProgress;
@@ -232,6 +241,31 @@ public class AutoRepairEntry extends XposedModule {
         String line = "[" + category + "] " + message;
         log(line);
         appendEvent(line);
+    }
+
+    /** 非保活服务的连接/断开：logcat 保留全部明细，持久事件按组件 1 小时聚合，避免刷掉关键事件 */
+    private static void eventNonManaged(String key, String summary) {
+        EventThrottle.Decision decision =
+                sNonManagedThrottle.onEvent(key, SystemClock.elapsedRealtime());
+        if (!decision.emit) {
+            log("[监听] " + summary + ": " + key);
+            return;
+        }
+        String suffix = decision.suppressed > 0
+                ? "（窗口内已省略 " + decision.suppressed + " 条）" : "";
+        event("监听", "非保活服务(聚合): " + key + " — " + summary + suffix);
+    }
+
+    /** 高频跳过路径降噪：同一原因 10 分钟内只写一条持久事件，明细仍写 logcat */
+    private static void eventSkip(String key, String category, String message) {
+        EventThrottle.Decision decision = sSkipThrottle.onEvent(key, SystemClock.elapsedRealtime());
+        if (!decision.emit) {
+            log("[" + category + "] " + message);
+            return;
+        }
+        String suffix = decision.suppressed > 0
+                ? "（窗口内已省略 " + decision.suppressed + " 条）" : "";
+        event(category, message + suffix);
     }
 
     private static void appendEvent(String message) {
@@ -492,15 +526,25 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static void runScan(String reason) {
-        if (sContext == null || !isModuleEnabled()) {
+        if (sContext == null) {
+            return;
+        }
+        if (!isModuleEnabled()) {
+            eventSkip("scan:disabled", "扫描", "跳过 (" + reason + ")：模块已停用");
             return;
         }
         String managed = readConfig(KEY_SERVICES);
         if (managed == null || managed.isEmpty()) {
+            eventSkip("scan:managed-empty", "扫描", "跳过 (" + reason + ")：锁定列表为空");
             return;
         }
         String enabled = readEnabled();
-        if (enabled == null || enabled.isEmpty() || !hasConnectionState()) {
+        if (enabled == null || enabled.isEmpty()) {
+            eventSkip("scan:no-enabled", "失败", "扫描跳过 (" + reason + ")：启用列表读取失败");
+            return;
+        }
+        if (!hasConnectionState()) {
+            eventSkip("scan:no-conn", "失败", "扫描跳过 (" + reason + ")：没有可用的连接状态");
             return;
         }
 
@@ -521,6 +565,8 @@ public class AutoRepairEntry extends XposedModule {
                 continue;
             }
             if (!sBoundCheckAvailable) {
+                eventSkip("scan:no-bound-check", "失败",
+                        "扫描中止 (" + reason + ")：无法读取绑定状态: " + key);
                 return;
             }
             candidates++;
@@ -541,17 +587,22 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
         if (!isModuleEnabled()) {
-            log("reconcile skipped (module disabled): " + reason);
+            eventSkip("reconcile:disabled", "保活", "跳过补回 (" + reason + ")：模块已停用");
             return;
         }
         long now = SystemClock.elapsedRealtime();
         if (now < BOOT_GRACE_MS) {
-            log("reconcile skipped (boot grace): " + reason);
+            eventSkip("reconcile:boot-grace", "保活", "跳过补回 (" + reason + ")：开机保护期内");
             return;
         }
         String managed = readConfig(KEY_SERVICES);
         String enabled = readEnabled();
-        if (managed == null || managed.isEmpty() || enabled == null) {
+        if (enabled == null) {
+            eventSkip("reconcile:no-enabled", "失败", "补回跳过 (" + reason + ")：启用列表读取失败");
+            return;
+        }
+        if (managed == null || managed.isEmpty()) {
+            log("reconcile skipped (managed empty): " + reason);
             return;
         }
 
@@ -582,7 +633,7 @@ public class AutoRepairEntry extends XposedModule {
                 sManualHiddenUntil.remove(key);
             }
             if (!isPackageInstalled(component.getPackageName())) {
-                log("skip uninstalled: " + key);
+                event("保活", "跳过补回 (" + reason + ")：应用已卸载: " + key);
                 continue;
             }
             desired = addComponent(desired, component);
@@ -642,12 +693,24 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static void verifyBindings(String reason) {
-        if (sContext == null || !isModuleEnabled() || !hasConnectionState()) {
+        if (sContext == null) {
+            return;
+        }
+        if (!isModuleEnabled()) {
+            eventSkip("verify:disabled", "保活", "跳过补回后校验 (" + reason + ")：模块已停用");
+            return;
+        }
+        if (!hasConnectionState()) {
+            eventSkip("verify:no-conn", "失败", "补回后校验跳过 (" + reason + ")：没有可用的连接状态");
             return;
         }
         String managed = readConfig(KEY_SERVICES);
         String enabled = readEnabled();
-        if (managed == null || managed.isEmpty() || enabled == null) {
+        if (enabled == null) {
+            eventSkip("verify:no-enabled", "失败", "补回后校验跳过 (" + reason + ")：启用列表读取失败");
+            return;
+        }
+        if (managed == null || managed.isEmpty()) {
             return;
         }
         long now = SystemClock.elapsedRealtime();
@@ -673,6 +736,8 @@ public class AutoRepairEntry extends XposedModule {
                 continue;
             }
             if (!sBoundCheckAvailable) {
+                eventSkip("verify:no-bound-check", "失败",
+                        "补回后校验中止 (" + reason + ")：无法读取绑定状态: " + key);
                 return;
             }
             unbound++;
@@ -781,7 +846,7 @@ public class AutoRepairEntry extends XposedModule {
             String key = KEY_CMD_PREFIX + i;
             String payload = prefs.getString(key, null);
             if (payload == null) {
-                log("command missing: seq=" + i);
+                event("失败", "命令缺失: seq=" + i);
             } else {
                 applyServiceCommand(payload);
             }
@@ -1188,7 +1253,7 @@ public class AutoRepairEntry extends XposedModule {
         sLastDied.put(key, now);
 
         if (!isManaged(component)) {
-            event("监听", "非受管服务挂掉(忽略): " + key + " (crashed=" + crashed + ")");
+            eventNonManaged(key, "非保活服务挂掉(忽略) crashed=" + crashed);
             return;
         }
         if (!crashed) {
@@ -1277,14 +1342,14 @@ public class AutoRepairEntry extends XposedModule {
                     event("服务", "服务已就绪: " + key);
                 }
             } else {
-                event("监听", "非受管服务连接(忽略): " + key);
+                eventNonManaged(key, "非保活服务连接(忽略)");
             }
             return;
         }
 
         if (!managed) {
-            event("监听", "非受管服务重绑失败(忽略): " + key + " (crashed=" + crashed
-                    + ", iface=" + hasInterface + ")");
+            eventNonManaged(key, "非保活服务重绑失败(忽略) crashed=" + crashed
+                    + ", iface=" + hasInterface);
             return;
         }
         event("检测", "重绑失败 (crashed=" + crashed + ", iface=" + hasInterface
@@ -1316,7 +1381,7 @@ public class AutoRepairEntry extends XposedModule {
 
         Long suppress = sSuppressUntil.get(key);
         if (suppress != null && now < suppress) {
-            log("check skipped (self-repair window): " + key);
+            eventSkip("check:suppress:" + key, "检测", "跳过检查：修复抑制窗口内: " + key);
             return;
         }
         if (!isManaged(component)) {
@@ -1709,7 +1774,7 @@ public class AutoRepairEntry extends XposedModule {
         try {
             SharedPreferences prefs = getRemotePreferences(REMOTE_GROUP);
             if (prefs == null) {
-                log("remote prefs unavailable: null");
+                event("失败", "远程配置不可用: null（已回退 Settings.Secure）");
                 return;
             }
             sRemotePrefs = prefs;
@@ -1731,7 +1796,7 @@ public class AutoRepairEntry extends XposedModule {
             initCommandAck();
             scheduleCommandDrain();
         } catch (Throwable t) {
-            log("remote prefs unavailable: " + t);
+            event("失败", "远程配置不可用: " + t + "（已回退 Settings.Secure）");
         }
     }
 

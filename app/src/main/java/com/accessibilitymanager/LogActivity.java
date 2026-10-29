@@ -29,9 +29,12 @@ import java.io.DataOutputStream;
 import java.io.File;
 import java.io.InputStreamReader;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 public class LogActivity extends AppCompatActivity {
 
@@ -42,11 +45,21 @@ public class LogActivity extends AppCompatActivity {
     private ListView listView;
     private TextView tvEmpty;
     private LogAdapter adapter;
+    /** 原始日志条目（保持完整，不因折叠丢失） */
     private List<LogUtil.LogEntry> entries;
+    /** 界面展示列表：在原始日志基础上把连续重复日志折叠成组 */
+    private List<LogItem> displayItems = new ArrayList<>();
+    /** 已展开的折叠组标识（组内第一条原始日志的下标）；默认不展开即默认折叠 */
+    private final Set<Integer> mExpandedGroups = new HashSet<>();
     private boolean night;
     private androidx.appcompat.widget.Toolbar toolbar;
     private boolean mIsMultiSelectMode = false;
     private final java.util.Set<Integer> mSelectedPositions = new java.util.TreeSet<>();
+
+    /** 可折叠日志的分组标签：只有连续且同组的日志才会合并 */
+    private static final String GROUP_IGNORED_SERVICE = "非保活服务";
+    private static final String GROUP_CONFIG_SYNC = "配置下发";
+    private static final String GROUP_MODULE_SYNC = "锁定列表同步";
 
     // ── 实时监听 ──
     private LogUtil.LogListener mLogListener;
@@ -92,9 +105,9 @@ public class LogActivity extends AppCompatActivity {
         toolbar.setNavigationOnClickListener(v -> finish());
 
         listView.setOnItemLongClickListener((parent, view, position, id) -> {
-            if (entries == null || position < 0 || position >= entries.size()) return false;
-            LogUtil.LogEntry item = entries.get(position);
-            if (item.type != LogUtil.LogEntry.TYPE_LOG_LINE) return false;
+            if (displayItems == null || position < 0 || position >= displayItems.size()) return false;
+            LogItem item = displayItems.get(position);
+            if (item.kind != LogItem.KIND_LINE && item.kind != LogItem.KIND_GROUP) return false;
             
             if (!mIsMultiSelectMode) {
                 enterMultiSelectMode(position);
@@ -105,10 +118,16 @@ public class LogActivity extends AppCompatActivity {
         });
 
         listView.setOnItemClickListener((parent, view, position, id) -> {
-            if (!mIsMultiSelectMode) return;
-            if (entries == null || position < 0 || position >= entries.size()) return;
-            LogUtil.LogEntry item = entries.get(position);
-            if (item.type != LogUtil.LogEntry.TYPE_LOG_LINE) return;
+            if (displayItems == null || position < 0 || position >= displayItems.size()) return;
+            LogItem item = displayItems.get(position);
+            if (!mIsMultiSelectMode) {
+                // 点击折叠组可展开/收起明细
+                if (item.kind == LogItem.KIND_GROUP) {
+                    toggleGroupExpanded(item);
+                }
+                return;
+            }
+            if (item.kind != LogItem.KIND_LINE && item.kind != LogItem.KIND_GROUP) return;
             toggleItemSelection(position);
         });
 
@@ -233,18 +252,18 @@ public class LogActivity extends AppCompatActivity {
     }
 
     private void toggleSelectAll() {
-        if (entries == null) return;
+        if (displayItems == null) return;
         int totalLogCount = 0;
-        for (int i = 0; i < entries.size(); i++) {
-            if (entries.get(i).type == LogUtil.LogEntry.TYPE_LOG_LINE) totalLogCount++;
+        for (int i = 0; i < displayItems.size(); i++) {
+            if (isSelectable(displayItems.get(i))) totalLogCount++;
         }
         if (mSelectedPositions.size() >= totalLogCount) {
             mSelectedPositions.clear();
             exitMultiSelectMode();
         } else {
             mSelectedPositions.clear();
-            for (int i = 0; i < entries.size(); i++) {
-                if (entries.get(i).type == LogUtil.LogEntry.TYPE_LOG_LINE) {
+            for (int i = 0; i < displayItems.size(); i++) {
+                if (isSelectable(displayItems.get(i))) {
                     mSelectedPositions.add(i);
                 }
             }
@@ -253,22 +272,37 @@ public class LogActivity extends AppCompatActivity {
         }
     }
 
+    private static boolean isSelectable(LogItem item) {
+        return item.kind == LogItem.KIND_LINE || item.kind == LogItem.KIND_GROUP;
+    }
+
     private void copySelectedLogs() {
-        if (mSelectedPositions.isEmpty() || entries == null) {
+        if (mSelectedPositions.isEmpty() || displayItems == null) {
             exitMultiSelectMode();
             return;
         }
         StringBuilder sb = new StringBuilder();
+        int copiedLines = 0;
         for (int pos : mSelectedPositions) {
-            if (pos >= 0 && pos < entries.size()) {
+            if (pos < 0 || pos >= displayItems.size()) continue;
+            LogItem item = displayItems.get(pos);
+            if (item.kind == LogItem.KIND_GROUP && entries != null) {
+                // 折叠组一次性复制组内全部原始日志
+                for (int i = item.rawStart; i < item.rawEnd && i < entries.size(); i++) {
+                    if (sb.length() > 0) sb.append("\n");
+                    sb.append(entries.get(i).text);
+                    copiedLines++;
+                }
+            } else if (item.text != null) {
                 if (sb.length() > 0) sb.append("\n");
-                sb.append(entries.get(pos).text);
+                sb.append(item.text);
+                copiedLines++;
             }
         }
         android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(android.content.Context.CLIPBOARD_SERVICE);
         if (cm != null) {
             cm.setPrimaryClip(android.content.ClipData.newPlainText("log", sb.toString()));
-            Toast.makeText(this, "已复制 " + mSelectedPositions.size() + " 条日志", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "已复制 " + copiedLines + " 条日志", Toast.LENGTH_SHORT).show();
         }
         exitMultiSelectMode();
     }
@@ -298,36 +332,172 @@ public class LogActivity extends AppCompatActivity {
 
         LogUtil.LogEntry entry = new LogUtil.LogEntry(type, text);
         entries.add(entry);
+        int rawIndex = entries.size() - 1;
+
+        // 增量维护展示列表，避免日志刷屏时反复全量重建
+        if (type == LogUtil.LogEntry.TYPE_DATE_SEPARATOR) {
+            displayItems.add(LogItem.date(text));
+        } else if (type == LogUtil.LogEntry.TYPE_GAP_SEPARATOR) {
+            displayItems.add(LogItem.gap());
+        } else {
+            String groupLabel = collapseGroupLabel(text);
+            if (groupLabel != null) {
+                appendCollapsibleLine(rawIndex, text, groupLabel);
+            } else {
+                displayItems.add(LogItem.line(rawIndex, text));
+            }
+        }
 
         if (adapter == null) {
             listView.setVisibility(View.VISIBLE);
             tvEmpty.setVisibility(View.GONE);
-            adapter = new LogAdapter(entries, night);
+            adapter = new LogAdapter(night);
             listView.setAdapter(adapter);
         } else {
             adapter.notifyDataSetChanged();
         }
         // 自动滚动到底部
-        listView.setSelection(entries.size() - 1);
+        listView.setSelection(displayItems.size() - 1);
+    }
+
+    /** 追加一条可折叠日志：与上一条同组日志合并成折叠组 */
+    private void appendCollapsibleLine(int rawIndex, String text, String groupLabel) {
+        LogItem last = displayItems.isEmpty() ? null : displayItems.get(displayItems.size() - 1);
+        if (last == null) {
+            displayItems.add(LogItem.line(rawIndex, text));
+            return;
+        }
+        // 1) 上一条是折叠组（未展开）：直接累计
+        if (last.kind == LogItem.KIND_GROUP && last.rawEnd == rawIndex && !last.expanded) {
+            last.rawEnd = rawIndex + 1;
+            last.count++;
+            last.text = groupHeaderText(last.groupLabel, last.count, false);
+            return;
+        }
+        // 2) 上一条属于已展开的折叠组：扩充该组并继续显示明细
+        if (last.kind == LogItem.KIND_LINE && last.ownerGroup != null
+                && last.ownerGroup.expanded && last.ownerGroup.rawEnd == rawIndex) {
+            LogItem group = last.ownerGroup;
+            group.rawEnd = rawIndex + 1;
+            group.count++;
+            group.text = groupHeaderText(group.groupLabel, group.count, true);
+            displayItems.add(LogItem.line(rawIndex, text, group));
+            return;
+        }
+        // 3) 上一条是可折叠的普通行：把这两条合并成新的折叠组
+        if (last.kind == LogItem.KIND_LINE && last.ownerGroup == null
+                && last.rawStart == rawIndex - 1
+                && groupLabel.equals(collapseGroupLabel(entries.get(last.rawStart).text))) {
+            displayItems.remove(displayItems.size() - 1);
+            displayItems.add(LogItem.group(last.rawStart, rawIndex + 1, 2, false,
+                    groupHeaderText(groupLabel, 2, false), groupLabel));
+            return;
+        }
+        displayItems.add(LogItem.line(rawIndex, text));
+    }
+
+    /** 点击折叠组：切换展开/收起状态并重建展示列表 */
+    private void toggleGroupExpanded(LogItem item) {
+        if (!mExpandedGroups.remove(item.rawStart)) {
+            mExpandedGroups.add(item.rawStart);
+        }
+        displayItems = buildDisplayItems(entries);
+        if (adapter != null) {
+            adapter.notifyDataSetChanged();
+        }
+        // 保持折叠组表头可见
+        for (int i = 0; i < displayItems.size(); i++) {
+            LogItem it = displayItems.get(i);
+            if (it.kind == LogItem.KIND_GROUP && it.rawStart == item.rawStart) {
+                listView.setSelection(i);
+                break;
+            }
+        }
+    }
+
+    /** 把原始日志转换为展示列表：连续的同类日志合并为可折叠组 */
+    private List<LogItem> buildDisplayItems(List<LogUtil.LogEntry> raw) {
+        List<LogItem> items = new ArrayList<>();
+        if (raw == null) return items;
+        int i = 0;
+        while (i < raw.size()) {
+            LogUtil.LogEntry e = raw.get(i);
+            String groupLabel = e.type == LogUtil.LogEntry.TYPE_LOG_LINE
+                    ? collapseGroupLabel(e.text) : null;
+            if (groupLabel != null) {
+                int j = i + 1;
+                while (j < raw.size()
+                        && raw.get(j).type == LogUtil.LogEntry.TYPE_LOG_LINE
+                        && groupLabel.equals(collapseGroupLabel(raw.get(j).text))) {
+                    j++;
+                }
+                int count = j - i;
+                if (count >= 2) {
+                    boolean expanded = mExpandedGroups.contains(i);
+                    LogItem group = LogItem.group(i, j, count, expanded,
+                            groupHeaderText(groupLabel, count, expanded), groupLabel);
+                    items.add(group);
+                    if (expanded) {
+                        for (int k = i; k < j; k++) {
+                            items.add(LogItem.line(k, raw.get(k).text, group));
+                        }
+                    }
+                } else {
+                    items.add(LogItem.line(i, e.text));
+                }
+                i = j;
+            } else if (e.type == LogUtil.LogEntry.TYPE_DATE_SEPARATOR) {
+                items.add(LogItem.date(e.text));
+                i++;
+            } else if (e.type == LogUtil.LogEntry.TYPE_GAP_SEPARATOR) {
+                items.add(LogItem.gap());
+                i++;
+            } else {
+                items.add(LogItem.line(i, e.text));
+                i++;
+            }
+        }
+        return items;
+    }
+
+    /** 返回可折叠日志的分组标签，null 表示不折叠；兼容旧版本的“非受管”写法 */
+    private static String collapseGroupLabel(String text) {
+        if (text == null) return null;
+        if (text.contains("非保活服务") || text.contains("非受管服务")) {
+            return GROUP_IGNORED_SERVICE;
+        }
+        if (text.contains("下发锁定同步指令")) {
+            return GROUP_CONFIG_SYNC;
+        }
+        if (text.contains("模块已生效最新锁定列表")) {
+            return GROUP_MODULE_SYNC;
+        }
+        return null;
+    }
+
+    private static String groupHeaderText(String label, int count, boolean expanded) {
+        return (expanded ? "▾ " : "▸ ") + label + "：共 " + count + " 条，点击"
+                + (expanded ? "收起" : "展开");
     }
 
     /** 从文件加载所有已有日志 */
     private void loadLogs() {
         List<LogUtil.LogEntry> newEntries = LogUtil.readRecentLogs(this);
+        entries = newEntries;
+        mExpandedGroups.clear();
+        displayItems = buildDisplayItems(entries);
         if (newEntries.isEmpty()) {
             listView.setVisibility(View.GONE);
             tvEmpty.setVisibility(View.VISIBLE);
             adapter = null;
-            entries = newEntries;
             return;
         }
 
-        entries = newEntries;
         listView.setVisibility(View.VISIBLE);
         tvEmpty.setVisibility(View.GONE);
-        adapter = new LogAdapter(entries, night);
+        adapter = new LogAdapter(night);
         listView.setAdapter(adapter);
-        listView.setSelection(entries.size() - 1);
+        listView.setSelection(displayItems.size() - 1);
     }
 
     private String getSharedPreferencesDump() {
@@ -600,6 +770,9 @@ public class LogActivity extends AppCompatActivity {
 
     /** 直接使用 DUMP 权限执行 dumpsys accessibility（不依赖 Root/Shizuku） */
     private void executeDumpDirect() {
+        if (entries == null) {
+            entries = new ArrayList<>();
+        }
         // 添加分隔标题
         entries.add(new LogUtil.LogEntry(
                 LogUtil.LogEntry.TYPE_DATE_SEPARATOR,
@@ -644,35 +817,99 @@ public class LogActivity extends AppCompatActivity {
                 "────────  执行完毕  ────────"
         ));
 
+        // 批量追加后重建展示列表（折叠组按原始下标保持展开状态）
+        displayItems = buildDisplayItems(entries);
+
         if (adapter == null) {
             listView.setVisibility(View.VISIBLE);
             tvEmpty.setVisibility(View.GONE);
-            adapter = new LogAdapter(entries, night);
+            adapter = new LogAdapter(night);
             listView.setAdapter(adapter);
         } else {
             adapter.notifyDataSetChanged();
         }
-        listView.setSelection(entries.size() - 1);
+        listView.setSelection(displayItems.size() - 1);
+    }
+
+    /** 展示列表条目：普通日志行、日期/间隔分隔符，或折叠组（表头+可选展开的明细） */
+    private static class LogItem {
+        static final int KIND_DATE = 0;
+        static final int KIND_GAP = 1;
+        static final int KIND_LINE = 2;
+        static final int KIND_GROUP = 3;
+
+        int kind;
+        String text;
+        /** 普通行：原始日志下标；折叠组：组内第一条原始日志下标 */
+        int rawStart;
+        /** 折叠组专用：组内最后一条原始日志下标 + 1 */
+        int rawEnd;
+        /** 折叠组专用：组内日志条数 */
+        int count;
+        /** 折叠组专用：是否展开 */
+        boolean expanded;
+        /** 折叠组专用：分组标签（同类日志才合并） */
+        String groupLabel;
+        /** 展开状态下，该明细行所属的折叠组表头 */
+        LogItem ownerGroup;
+
+        static LogItem date(String text) {
+            LogItem item = new LogItem();
+            item.kind = KIND_DATE;
+            item.text = text;
+            return item;
+        }
+
+        static LogItem gap() {
+            LogItem item = new LogItem();
+            item.kind = KIND_GAP;
+            return item;
+        }
+
+        static LogItem line(int rawIndex, String text) {
+            return line(rawIndex, text, null);
+        }
+
+        static LogItem line(int rawIndex, String text, LogItem ownerGroup) {
+            LogItem item = new LogItem();
+            item.kind = KIND_LINE;
+            item.rawStart = rawIndex;
+            item.rawEnd = rawIndex + 1;
+            item.text = text;
+            item.ownerGroup = ownerGroup;
+            return item;
+        }
+
+        static LogItem group(int start, int end, int count, boolean expanded, String text,
+                String groupLabel) {
+            LogItem item = new LogItem();
+            item.kind = KIND_GROUP;
+            item.rawStart = start;
+            item.rawEnd = end;
+            item.count = count;
+            item.expanded = expanded;
+            item.text = text;
+            item.groupLabel = groupLabel;
+            return item;
+        }
     }
 
     private class LogAdapter extends BaseAdapter {
 
-        private final List<LogUtil.LogEntry> entries;
         private boolean night;
 
-        LogAdapter(List<LogUtil.LogEntry> entries, boolean night) {
-            this.entries = entries;
+        LogAdapter(boolean night) {
             this.night = night;
         }
 
         @Override
         public int getCount() {
-            return entries.size();
+            return displayItems.size();
         }
 
         @Override
         public Object getItem(int position) {
-            return entries.get(position);
+            return displayItems.get(position);
         }
 
         @Override
@@ -682,9 +919,9 @@ public class LogActivity extends AppCompatActivity {
 
         @Override
         public int getItemViewType(int position) {
-            LogUtil.LogEntry entry = entries.get(position);
-            if (entry.type == LogUtil.LogEntry.TYPE_DATE_SEPARATOR) return VIEW_TYPE_DATE;
-            if (entry.type == LogUtil.LogEntry.TYPE_GAP_SEPARATOR) return VIEW_TYPE_GAP;
+            LogItem item = displayItems.get(position);
+            if (item.kind == LogItem.KIND_DATE) return VIEW_TYPE_DATE;
+            if (item.kind == LogItem.KIND_GAP) return VIEW_TYPE_GAP;
             return VIEW_TYPE_LOG;
         }
 
@@ -695,7 +932,7 @@ public class LogActivity extends AppCompatActivity {
 
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
-            LogUtil.LogEntry entry = entries.get(position);
+            LogItem entry = displayItems.get(position);
             int type = getItemViewType(position);
 
             if (type == VIEW_TYPE_DATE) {
@@ -724,7 +961,15 @@ public class LogActivity extends AppCompatActivity {
                 }
                 String line = entry.text;
                 SpannableStringBuilder ssb = new SpannableStringBuilder(line);
-                int color = getLineColor(line);
+                int color;
+                if (entry.kind == LogItem.KIND_GROUP) {
+                    // 折叠组表头使用弱化颜色，方便和真实日志区分
+                    color = night ? 0xFF9E9E9E : 0xFF757575;
+                    tv.setTypeface(Typeface.DEFAULT_BOLD);
+                } else {
+                    color = getLineColor(line);
+                    tv.setTypeface(Typeface.DEFAULT);
+                }
                 ssb.setSpan(new ForegroundColorSpan(color), 0, line.length(),
                         Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 tv.setText(ssb);
