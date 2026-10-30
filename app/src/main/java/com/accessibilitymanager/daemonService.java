@@ -67,6 +67,54 @@ public class daemonService extends Service {
         }
     }
 
+    public static void notifyNotificationRemoved(Context context, String pkgName) {
+        if (pkgName == null || pkgName.isEmpty()) {
+            return;
+        }
+        String appLabel = pkgName;
+        if (context != null) {
+            try {
+                PackageManager pm = context.getPackageManager();
+                ApplicationInfo info = pm.getApplicationInfo(pkgName, PackageManager.GET_META_DATA);
+                CharSequence label = info.loadLabel(pm);
+                if (label != null && label.length() > 0) {
+                    appLabel = label.toString();
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        final String resolvedLabel = appLabel;
+        final daemonService instance = sInstance;
+        if (instance != null) {
+            instance.daemonExecutor.submit(() -> {
+                if (instance.mIsFixing && System.currentTimeMillis() - instance.mLastFixStartTime <= 5000) {
+                    LogUtil.log(instance, "[通知监听] 修复操作进行中(5秒内)，忽略 " + resolvedLabel + " 的通知清除事件");
+                    return;
+                }
+                LogUtil.log(instance, "[通知监听] 监听到 " + resolvedLabel + " 通知被清除，触发崩溃检测");
+                instance.checkCrashedServices("通知消失(" + resolvedLabel + ")");
+            });
+        } else if (context != null) {
+            SharedPreferences prefs = context.getSharedPreferences("data", 0);
+            if (!prefs.getString("daemon", "").isEmpty()
+                    && !prefs.getBoolean("lsposed_mode", false)
+                    && prefs.getBoolean("crashfix", false)) {
+                LogUtil.log(context, "[通知监听] 监听到 " + resolvedLabel + " 通知被清除，拉起守护服务进行崩溃检测");
+                Intent serviceIntent = new Intent(context, daemonService.class);
+                serviceIntent.putExtra("source", "NotificationRemoved");
+                serviceIntent.putExtra("source_label", resolvedLabel);
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(serviceIntent);
+                    } else {
+                        context.startService(serviceIntent);
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+    }
+
     // ── 共享状态：仅在 daemonExecutor 线程中读写 ──
     private String tmpSettingValue;
     private List<String> l = new ArrayList<>();
@@ -1069,6 +1117,9 @@ public class daemonService extends Service {
             checkCrashedServices("Alarm");
         } else if ("AccessibilityService".equals(alarmSource)) {
             checkCrashedServices("解锁(无障碍检测)");
+        } else if ("NotificationRemoved".equals(alarmSource)) {
+            String sourceLabel = intent.getStringExtra("source_label");
+            checkCrashedServices("通知消失(" + (sourceLabel != null ? sourceLabel : "未知") + ")");
         } else if (!mFirstCommandAfterCreate) {
             checkCrashedServices("服务刷新");
         }

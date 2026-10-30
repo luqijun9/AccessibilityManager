@@ -50,7 +50,7 @@ public class SettingsActivity extends AppCompatActivity {
     // 子项视图引用
     private MaterialSwitch switchBoot, switchToast, switchUserOnly, switchHide, switchDelayDaemon, switchManualCloseDaemon;
     private View manualCloseDaemonLayout;
-    private MaterialSwitch switchCrashFix, switchUnlockCrashCheck, switchFixMode, switchGlobalCooldown;
+    private MaterialSwitch switchCrashFix, switchUnlockCrashCheck, switchNotifyCrashCheck, switchFixMode, switchGlobalCooldown;
     private MaterialSwitch switchPeriodicCheck, switchWakeIdle, switchIgnoreSystemCrash;
     private MaterialSwitch switchAutoUpdate;
     private MaterialSwitch switchLsposedMode;
@@ -62,18 +62,20 @@ public class SettingsActivity extends AppCompatActivity {
     private TextView debugToolsStatus;
     private android.widget.CompoundButton.OnCheckedChangeListener mCrashFixListener;
     private android.widget.CompoundButton.OnCheckedChangeListener mModuleModeListener;
+    private android.widget.CompoundButton.OnCheckedChangeListener mNotifyCrashCheckListener;
     private LinearLayout crashDependentLayout, fixmodeServicesLayout, periodicSubLayout, globalCooldownTimeLayout,
-            globalCooldownEnableLayout, globalCooldownSubLayout;
-    private View fixmodeServicesBtn;
-    private View fixmodeWrapper, globalCooldownWrapper, periodicWrapper;
+            globalCooldownEnableLayout, globalCooldownSubLayout, notifyCrashEnableLayout, notifyCrashAppsLayout;
+    private View fixmodeServicesBtn, notifyCrashAppsBtn;
+    private View fixmodeWrapper, globalCooldownWrapper, periodicWrapper, notifyCrashWrapper;
     private TextView intervalLabel, notifyCustomBtn, crashTutorialBtn, aboutBtn, checkUpdateBtn,
-            globalCooldownTimeLabel;
+            globalCooldownTimeLabel, notifyCrashAppsDesc;
     private View btnThemeColor;
     private TextView tvThemeDesc;
 
-    // Shizuku 权限状态
+    // Shizuku / 通知使用权权限状态
     private boolean mPendingCrashFixRequest = false;
     private boolean mPendingFixModeRequest = false;
+    private boolean mPendingNotifyListenerRequest = false;
     private boolean night;
     private final android.database.ContentObserver mModuleLoadedObserver =
             new android.database.ContentObserver(new Handler(Looper.getMainLooper())) {
@@ -279,6 +281,12 @@ public class SettingsActivity extends AppCompatActivity {
         globalCooldownTimeLayout = findViewById(R.id.global_cooldown_time_layout);
         globalCooldownTimeLabel = findViewById(R.id.global_cooldown_time);
         switchUnlockCrashCheck = findViewById(R.id.unlock_crash_check);
+        switchNotifyCrashCheck = findViewById(R.id.notify_crash_check);
+        notifyCrashWrapper = findViewById(R.id.notify_crash_wrapper);
+        notifyCrashEnableLayout = findViewById(R.id.notify_crash_enable_layout);
+        notifyCrashAppsLayout = findViewById(R.id.notify_crash_apps_layout);
+        notifyCrashAppsBtn = findViewById(R.id.notify_crash_apps_btn);
+        notifyCrashAppsDesc = findViewById(R.id.notify_crash_apps_desc);
         switchFixMode = findViewById(R.id.fixmode);
         switchPeriodicCheck = findViewById(R.id.periodic_check);
         switchWakeIdle = findViewById(R.id.periodic_check_wake_idle);
@@ -321,6 +329,14 @@ public class SettingsActivity extends AppCompatActivity {
         globalCooldownWrapper.setBackgroundResource(globalCooldownEnabled ? R.drawable.bg_nested_setting : 0);
         globalCooldownTimeLabel.setText(sp.getInt("global_cooldown_time_minutes", 15) + "分钟");
         switchUnlockCrashCheck.setChecked(sp.getBoolean("unlock_crash_check", false));
+        boolean notifyCrashPref = sp.getBoolean(NotificationMonitorService.KEY_NOTIFY_CRASH_CHECK, false);
+        boolean hasNotifyListenerPerm = NotificationMonitorService.isNotificationListenerEnabled(this);
+        if (notifyCrashPref && !hasNotifyListenerPerm) {
+            sp.edit().putBoolean(NotificationMonitorService.KEY_NOTIFY_CRASH_CHECK, false).apply();
+            notifyCrashPref = false;
+        }
+        switchNotifyCrashCheck.setChecked(notifyCrashPref);
+        updateNotifyCrashAppsDesc();
         boolean fixMode = sp.getBoolean("fixmode", false);
         switchFixMode.setChecked(fixMode);
         if (switchLsposedFixMode != null) {
@@ -531,6 +547,33 @@ public class SettingsActivity extends AppCompatActivity {
             sp.edit().putBoolean("unlock_crash_check", checked).apply();
         };
         switchUnlockCrashCheck.setOnCheckedChangeListener(unlockListenerHolder[0]);
+
+        // 监听通知检测
+        mNotifyCrashCheckListener = (btn, checked) -> {
+            if (checked) {
+                if (!NotificationMonitorService.isNotificationListenerEnabled(SettingsActivity.this)) {
+                    setNotifyCrashCheckSilently(false);
+                    showNotificationListenerPermissionDialog();
+                    return;
+                }
+            }
+            sp.edit().putBoolean(NotificationMonitorService.KEY_NOTIFY_CRASH_CHECK, checked).apply();
+            refreshCrashFixDependent();
+            if (checked && NotificationMonitorService.countWatchedPackages(
+                    sp.getString(NotificationMonitorService.KEY_NOTIFY_WATCH_PACKAGES, "")) == 0) {
+                showNotifyWatchAppsDialog();
+            }
+        };
+        switchNotifyCrashCheck.setOnCheckedChangeListener(mNotifyCrashCheckListener);
+        if (notifyCrashEnableLayout != null) {
+            notifyCrashEnableLayout.setOnClickListener(v -> switchNotifyCrashCheck.toggle());
+        }
+        if (notifyCrashAppsLayout != null) {
+            notifyCrashAppsLayout.setOnClickListener(v -> showNotifyWatchAppsDialog());
+        }
+        if (notifyCrashAppsBtn != null) {
+            notifyCrashAppsBtn.setOnClickListener(v -> showNotifyWatchAppsDialog());
+        }
 
         // 重启时强杀对应APP（需要 Root/Shizuku 权限）
         final MaterialSwitch fixModeRef = switchFixMode;
@@ -934,11 +977,27 @@ public class SettingsActivity extends AppCompatActivity {
         }
 
         switchUnlockCrashCheck.setEnabled(crashFixEnabled);
+        if (switchNotifyCrashCheck != null) {
+            switchNotifyCrashCheck.setEnabled(crashFixEnabled);
+        }
         switchFixMode.setEnabled(crashFixEnabled);
         switchPeriodicCheck.setEnabled(crashFixEnabled);
         switchWakeIdle.setEnabled(periodicEnabled);
         switchIgnoreSystemCrash.setEnabled(crashFixEnabled);
         intervalLabel.setEnabled(periodicEnabled);
+
+        boolean notifyCrashEnabled = crashFixEnabled && switchNotifyCrashCheck != null && switchNotifyCrashCheck.isChecked();
+        if (notifyCrashAppsLayout != null) {
+            notifyCrashAppsLayout.setEnabled(notifyCrashEnabled);
+            notifyCrashAppsLayout.setVisibility(notifyCrashEnabled ? View.VISIBLE : View.GONE);
+            if (notifyCrashWrapper != null) {
+                notifyCrashWrapper.setBackgroundResource(notifyCrashEnabled ? R.drawable.bg_nested_setting : 0);
+            }
+        }
+        if (notifyCrashAppsBtn != null) {
+            notifyCrashAppsBtn.setEnabled(notifyCrashEnabled);
+        }
+        updateNotifyCrashAppsDesc();
 
         boolean fixModeEnabled = crashFixEnabled && switchFixMode.isChecked();
         if (fixmodeServicesLayout != null) {
@@ -1469,13 +1528,289 @@ public class SettingsActivity extends AppCompatActivity {
         });
     }
 
+    private void setNotifyCrashCheckSilently(boolean checked) {
+        if (switchNotifyCrashCheck == null) {
+            return;
+        }
+        if (mNotifyCrashCheckListener == null) {
+            switchNotifyCrashCheck.setChecked(checked);
+            return;
+        }
+        switchNotifyCrashCheck.setOnCheckedChangeListener(null);
+        switchNotifyCrashCheck.setChecked(checked);
+        switchNotifyCrashCheck.setOnCheckedChangeListener(mNotifyCrashCheckListener);
+    }
+
+    private void updateNotifyCrashAppsDesc() {
+        if (notifyCrashAppsDesc == null) {
+            return;
+        }
+        String watchedStr = sp.getString(NotificationMonitorService.KEY_NOTIFY_WATCH_PACKAGES, "");
+        int count = NotificationMonitorService.countWatchedPackages(watchedStr);
+        if (count > 0) {
+            notifyCrashAppsDesc.setText("已选择 " + count + " 个应用，通知清除时触发崩溃检测");
+        } else {
+            notifyCrashAppsDesc.setText("未选择应用，点击选择需监听通知的应用");
+        }
+    }
+
+    private void showNotificationListenerPermissionDialog() {
+        final android.app.Dialog permDialog = new android.app.Dialog(this);
+        permDialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        View dv = getLayoutInflater().inflate(R.layout.dialog_permission, null);
+        permDialog.setContentView(dv);
+        android.view.Window w = permDialog.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(
+                    android.graphics.Color.TRANSPARENT));
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            int marginPx = (int) (16 * dm.density + 0.5f);
+            android.view.WindowManager.LayoutParams lp = w.getAttributes();
+            lp.width = dm.widthPixels - marginPx * 2;
+            lp.height = android.view.WindowManager.LayoutParams.WRAP_CONTENT;
+            w.setAttributes(lp);
+        }
+
+        ((TextView) dv.findViewById(R.id.perm_title)).setText("需要授予通知使用权");
+        ((TextView) dv.findViewById(R.id.perm_msg)).setText(
+                "监听应用通知被清除需要授予无障碍管理器「通知使用权」权限。\n\n"
+                        + "点击「去开启」后，请在系统设置中找到「无障碍管理器」并打开开关。");
+
+        dv.findViewById(R.id.perm_btn_neutral).setVisibility(View.GONE);
+        dv.findViewById(R.id.perm_btn_shizuku).setVisibility(View.GONE);
+
+        dv.findViewById(R.id.perm_btn_root).setVisibility(View.VISIBLE);
+        ((TextView) dv.findViewById(R.id.perm_btn_root)).setText("取消");
+        dv.findViewById(R.id.perm_btn_root).setOnClickListener(v -> permDialog.dismiss());
+
+        ((TextView) dv.findViewById(R.id.perm_btn_positive)).setText("去开启");
+        dv.findViewById(R.id.perm_btn_positive).setOnClickListener(v -> {
+            permDialog.dismiss();
+            mPendingNotifyListenerRequest = true;
+            openNotificationListenerSettings();
+        });
+
+        permDialog.show();
+    }
+
+    private void openNotificationListenerSettings() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                Intent detailIntent = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS);
+                detailIntent.putExtra(
+                        Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+                        new ComponentName(this, NotificationMonitorService.class).flattenToString());
+                startActivity(detailIntent);
+                return;
+            } catch (Throwable ignored) {
+            }
+        }
+        try {
+            startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
+        } catch (Throwable e) {
+            Toast.makeText(this, "无法打开通知使用权设置页面", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void showNotifyWatchAppsDialog() {
+        List<AccessibilityServiceInfo> list = new ArrayList<>(
+                ((AccessibilityManager) getApplicationContext()
+                        .getSystemService(Context.ACCESSIBILITY_SERVICE)).getInstalledAccessibilityServiceList());
+
+        final PackageManager pm = getPackageManager();
+        String watchedStr = sp.getString(NotificationMonitorService.KEY_NOTIFY_WATCH_PACKAGES, "");
+
+        List<ServiceItem> allItems = new ArrayList<>();
+        java.util.Set<String> seenPackages = new java.util.HashSet<>();
+
+        for (AccessibilityServiceInfo info : list) {
+            String id = info.getId();
+            if (id == null || !id.contains("/")) {
+                continue;
+            }
+            String pkgName = id.split("/")[0];
+            // 排除无障碍管理器自身及已处理过的同包名服务
+            if (pkgName.equals(getPackageName()) || seenPackages.contains(pkgName)) {
+                continue;
+            }
+
+            // 只展示用户应用（排除系统应用）
+            if (info.getResolveInfo() != null && info.getResolveInfo().serviceInfo != null) {
+                if ((info.getResolveInfo().serviceInfo.applicationInfo.flags
+                        & android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0) {
+                    continue;
+                }
+            }
+
+            seenPackages.add(pkgName);
+            String appLabel = pkgName;
+            try {
+                CharSequence pkgLabel = pm.getApplicationLabel(
+                        pm.getApplicationInfo(pkgName, PackageManager.GET_META_DATA));
+                if (pkgLabel != null && pkgLabel.length() > 0) {
+                    appLabel = pkgLabel.toString();
+                }
+            } catch (Exception ignored) {
+            }
+
+            boolean isChecked = NotificationMonitorService.isPackageWatched(watchedStr, pkgName);
+            String pkgPinyin = PinyinUtils.getPinyin(appLabel);
+            allItems.add(new ServiceItem(pkgName, appLabel, isChecked, pkgPinyin, ""));
+        }
+
+        if (allItems.isEmpty()) {
+            Toast.makeText(this, "未找到其他含无障碍服务的应用", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        Collections.sort(allItems, (o1, o2) -> {
+            String p1 = o1.packageLabelPinyin != null ? o1.packageLabelPinyin : "";
+            String p2 = o2.packageLabelPinyin != null ? o2.packageLabelPinyin : "";
+            return p1.compareToIgnoreCase(p2);
+        });
+
+        View dialogView = getLayoutInflater().inflate(R.layout.dialog_add_favorites, null);
+        EditText editSearch = dialogView.findViewById(R.id.edit_search);
+        ListView listFavorites = dialogView.findViewById(R.id.list_favorites);
+
+        class AppWatchAdapter extends BaseAdapter {
+            List<ServiceItem> displayedItems = new ArrayList<>(allItems);
+
+            @Override
+            public int getCount() {
+                return displayedItems.size();
+            }
+
+            @Override
+            public ServiceItem getItem(int position) {
+                return displayedItems.get(position);
+            }
+
+            @Override
+            public long getItemId(int position) {
+                return position;
+            }
+
+            @Override
+            public View getView(int position, View convertView, ViewGroup parent) {
+                if (convertView == null) {
+                    convertView = getLayoutInflater().inflate(
+                            android.R.layout.simple_list_item_multiple_choice, parent, false);
+                }
+                android.widget.CheckedTextView ctv = (android.widget.CheckedTextView) convertView;
+                ServiceItem item = getItem(position);
+                ctv.setText(item.label);
+                ctv.setChecked(item.isChecked);
+
+                android.graphics.drawable.Drawable icon = null;
+                try {
+                    String packageName = item.serviceId;
+                    icon = mIconCache.get(packageName);
+                    if (icon == null) {
+                        icon = pm.getApplicationIcon(packageName);
+                        mIconCache.put(packageName, icon);
+                    }
+                } catch (Exception ignored) {
+                }
+
+                if (icon != null && icon.getConstantState() != null) {
+                    icon = icon.getConstantState().newDrawable().mutate();
+                    int size = (int) (32 * getResources().getDisplayMetrics().density + 0.5f);
+                    icon.setBounds(0, 0, size, size);
+                    ctv.setCompoundDrawables(icon, null, null, null);
+                    ctv.setCompoundDrawablePadding((int) (12 * getResources().getDisplayMetrics().density + 0.5f));
+                } else {
+                    ctv.setCompoundDrawables(null, null, null, null);
+                }
+
+                ctv.setOnClickListener(v -> {
+                    item.isChecked = !item.isChecked;
+                    ctv.setChecked(item.isChecked);
+                });
+                return convertView;
+            }
+
+            public void filter(String text) {
+                String filterString = text.toLowerCase();
+                List<ServiceItem> filtered = new ArrayList<>();
+                for (ServiceItem item : allItems) {
+                    if (item.label.toLowerCase().contains(filterString)
+                            || item.serviceId.toLowerCase().contains(filterString)) {
+                        filtered.add(item);
+                    }
+                }
+                displayedItems = filtered;
+                notifyDataSetChanged();
+            }
+        }
+
+        AppWatchAdapter adapter = new AppWatchAdapter();
+        listFavorites.setAdapter(adapter);
+
+        editSearch.addTextChangedListener(new android.text.TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+            }
+
+            @Override
+            public void afterTextChanged(android.text.Editable s) {
+                adapter.filter(s.toString());
+            }
+        });
+
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+                .setTitle("选择监听通知的应用")
+                .setView(dialogView)
+                .setPositiveButton("确定", (d, which) -> {
+                    StringBuilder sb = new StringBuilder();
+                    for (ServiceItem item : allItems) {
+                        if (item.isChecked) {
+                            if (sb.length() > 0) {
+                                sb.append(":");
+                            }
+                            sb.append(item.serviceId);
+                        }
+                    }
+                    sp.edit().putString(NotificationMonitorService.KEY_NOTIFY_WATCH_PACKAGES, sb.toString()).apply();
+                    updateNotifyCrashAppsDesc();
+                })
+                .setNegativeButton("取消", null)
+                .setNeutralButton("全选/全不选", null)
+                .create();
+
+        dialog.show();
+
+        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+            if (adapter.displayedItems.isEmpty()) {
+                return;
+            }
+            boolean allChecked = true;
+            for (ServiceItem item : adapter.displayedItems) {
+                if (!item.isChecked) {
+                    allChecked = false;
+                    break;
+                }
+            }
+            boolean targetState = !allChecked;
+            for (ServiceItem item : adapter.displayedItems) {
+                item.isChecked = targetState;
+            }
+            adapter.notifyDataSetChanged();
+        });
+    }
+
     private void showCrashTutorialDialog() {
         View dv = getLayoutInflater().inflate(R.layout.dialog_crash_tutorial, null);
         ((TextView) dv.findViewById(R.id.tutorial_msg)).setText(
                 "1. 崩溃检测：检测无障碍服务是否假死（已开启但显示\"无法运行\"），检测到后关闭服务再打开\n\n"
                         + "2. 解锁检测：设备解锁时进行检测。如果解锁检测无效，即日志中看不到[解锁广播]相关的日志，请开启管理器的无障碍服务或自启动权限\n\n"
-                        + "3. 强杀应用重启：检测到崩溃的无障碍服务后，将会使服务重启，默认重启方式为直接重启服务。若普通重启仍失效，可尝试开启此功能强杀 App 进程后再恢复服务（需 Shizuku/Root 权限）\n\n"
-                        + "4. 定时检测：定时检测服务状态，建议间隔≥10分钟\n");
+                        + "3. 监听通知检测：部分无障碍软件会挂常驻通知，若被系统杀后台通知会消失。勾选对应应用后，一旦其通知被清除即立刻触发一次崩溃检测（需授予通知使用权）\n\n"
+                        + "4. 强杀应用重启：检测到崩溃的无障碍服务后，将会使服务重启，默认重启方式为直接重启服务。若普通重启仍失效，可尝试开启此功能强杀 App 进程后再恢复服务（需 Shizuku/Root 权限）\n\n"
+                        + "5. 定时检测：定时检测服务状态，建议间隔≥10分钟\n");
 
         final android.app.Dialog dialog = new android.app.Dialog(this);
         dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
@@ -1853,6 +2188,26 @@ public class SettingsActivity extends AppCompatActivity {
         if (sp.getBoolean("lsposed_mode", false)) {
             ModuleConfig.startLogSync(this);
             ModuleConfig.drainLogs(this);
+        }
+        if (mPendingNotifyListenerRequest) {
+            mPendingNotifyListenerRequest = false;
+            if (NotificationMonitorService.isNotificationListenerEnabled(this)) {
+                sp.edit().putBoolean(NotificationMonitorService.KEY_NOTIFY_CRASH_CHECK, true).apply();
+                setNotifyCrashCheckSilently(true);
+                refreshCrashFixDependent();
+                Toast.makeText(this, "已授予通知使用权，监听通知检测已开启", Toast.LENGTH_SHORT).show();
+                if (NotificationMonitorService.countWatchedPackages(
+                        sp.getString(NotificationMonitorService.KEY_NOTIFY_WATCH_PACKAGES, "")) == 0) {
+                    showNotifyWatchAppsDialog();
+                }
+            } else {
+                Toast.makeText(this, "未授予通知使用权，功能未开启", Toast.LENGTH_SHORT).show();
+            }
+        } else if (sp.getBoolean(NotificationMonitorService.KEY_NOTIFY_CRASH_CHECK, false)
+                && !NotificationMonitorService.isNotificationListenerEnabled(this)) {
+            sp.edit().putBoolean(NotificationMonitorService.KEY_NOTIFY_CRASH_CHECK, false).apply();
+            setNotifyCrashCheckSilently(false);
+            refreshCrashFixDependent();
         }
         refreshLsposedModeUi();
     }
