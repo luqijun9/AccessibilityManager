@@ -967,7 +967,6 @@ public class SettingsActivity extends AppCompatActivity {
         }
         if (periodicSubLayout != null) {
             periodicSubLayout.setVisibility(periodicEnabled ? View.VISIBLE : View.GONE);
-            periodicWrapper.setBackgroundResource(periodicEnabled ? R.drawable.bg_nested_setting : 0);
         }
 
         switchUnlockCrashCheck.setEnabled(crashFixEnabled);
@@ -984,9 +983,6 @@ public class SettingsActivity extends AppCompatActivity {
         if (notifyCrashAppsLayout != null) {
             notifyCrashAppsLayout.setEnabled(notifyCrashEnabled);
             notifyCrashAppsLayout.setVisibility(notifyCrashEnabled ? View.VISIBLE : View.GONE);
-            if (notifyCrashWrapper != null) {
-                notifyCrashWrapper.setBackgroundResource(notifyCrashEnabled ? R.drawable.bg_nested_setting : 0);
-            }
         }
         if (notifyCrashAppsBtn != null) {
             notifyCrashAppsBtn.setEnabled(notifyCrashEnabled);
@@ -997,9 +993,6 @@ public class SettingsActivity extends AppCompatActivity {
         if (fixmodeServicesLayout != null) {
             fixmodeServicesLayout.setEnabled(fixModeEnabled);
             fixmodeServicesLayout.setVisibility(fixModeEnabled ? View.VISIBLE : View.GONE);
-            if (fixmodeWrapper != null) {
-                fixmodeWrapper.setBackgroundResource(fixModeEnabled ? R.drawable.bg_nested_setting : 0);
-            }
         }
         if (fixmodeServicesBtn != null)
             fixmodeServicesBtn.setEnabled(fixModeEnabled);
