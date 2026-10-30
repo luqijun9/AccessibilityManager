@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingLeft="24dp"
+    android:paddingRight="24dp"
+    android:paddingTop="12dp"
+    android:paddingBottom="4dp">
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+        android:hint="2分钟内连续崩溃触发熔断"
+        app:helperText="范围 1-20，默认 3 次"
+        app:suffixText="次">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/input_threshold"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="number"
+            android:selectAllOnFocus="true" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+        android:hint="熔断冷却时长"
+        app:helperText="范围 0-1440，填 0 关闭熔断，默认 10 分钟"
+        app:suffixText="分钟">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/input_cooldown"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="number"
+            android:selectAllOnFocus="true" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+        android:hint="单次崩溃最大重试次数"
+        app:helperText="范围 1-10，默认 2 次"
+        app:suffixText="次">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/input_max_attempts"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="number"
+            android:selectAllOnFocus="true" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_reset_circuit_state"
+        style="@style/Widget.Material3.Button.TonalButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:text="立即解除当前所有熔断状态" />
+
+</LinearLayout>
+

@@ -168,12 +168,85 @@ public final class ModuleConfig {
 
     public static final String KEY_FIX_MODE = "a11y_module_fix_mode";
     public static final String KEY_FIX_DISABLED = "a11y_module_fix_disabled";
+    public static final String KEY_CIRCUIT_CONFIG = "a11y_module_circuit_config";
+
+    public static final String SP_UNSTABLE_THRESHOLD = "lsposed_unstable_threshold";
+    public static final String SP_UNSTABLE_COOLDOWN = "lsposed_unstable_cooldown";
+    public static final String SP_MAX_ATTEMPTS = "lsposed_max_attempts";
+    public static final int DEFAULT_UNSTABLE_THRESHOLD = 3;
+    public static final int DEFAULT_UNSTABLE_COOLDOWN = 10;
+    public static final int DEFAULT_MAX_ATTEMPTS = 2;
+
+    private static volatile String sLastSyncedServices = null;
 
     public static boolean setFixMode(Context context, boolean fixMode, String disabledServices) {
         put(context, KEY_FIX_MODE, fixMode ? "1" : "0");
         put(context, KEY_FIX_DISABLED, disabledServices != null ? disabledServices : "");
         return sendServiceCommandPayload(context, "sync_fixmode:" + (fixMode ? "1" : "0") + "#"
                 + (disabledServices != null ? disabledServices : ""));
+    }
+
+    public static boolean syncCircuitConfig(Context context) {
+        if (context == null) {
+            return false;
+        }
+        SharedPreferences prefs = context.getSharedPreferences("data", 0);
+        int threshold = prefs.getInt(SP_UNSTABLE_THRESHOLD, DEFAULT_UNSTABLE_THRESHOLD);
+        int cooldownMin = prefs.getInt(SP_UNSTABLE_COOLDOWN, DEFAULT_UNSTABLE_COOLDOWN);
+        int maxAttempts = prefs.getInt(SP_MAX_ATTEMPTS, DEFAULT_MAX_ATTEMPTS);
+        return syncCircuitConfig(context, threshold, cooldownMin, maxAttempts);
+    }
+
+    public static boolean syncCircuitConfig(Context context, int threshold, int cooldownMin, int maxAttempts) {
+        if (context == null) {
+            return false;
+        }
+        SharedPreferences prefs = context.getSharedPreferences("data", 0);
+        prefs.edit()
+                .putInt(SP_UNSTABLE_THRESHOLD, threshold)
+                .putInt(SP_UNSTABLE_COOLDOWN, cooldownMin)
+                .putInt(SP_MAX_ATTEMPTS, maxAttempts)
+                .apply();
+        String value = threshold + "|" + cooldownMin + "|" + maxAttempts;
+        put(context, KEY_CIRCUIT_CONFIG, value);
+        return sendServiceCommandPayload(context, "sync_circuit:" + value);
+    }
+
+    public static boolean resetCircuitBreaker(Context context) {
+        if (context == null) {
+            return false;
+        }
+        LogUtil.log(context, "[模块] 下发解除熔断指令");
+        return sendServiceCommandPayload(context, "reset_circuit");
+    }
+
+    /** 解析熔断与重试配置字符串 "threshold|cooldownMin|maxAttempts" */
+    public static int[] parseCircuitConfig(String raw) {
+        int threshold = DEFAULT_UNSTABLE_THRESHOLD;
+        int cooldownMin = DEFAULT_UNSTABLE_COOLDOWN;
+        int maxAttempts = DEFAULT_MAX_ATTEMPTS;
+        if (raw != null && !raw.isEmpty()) {
+            String[] parts = raw.split("\\|");
+            if (parts.length >= 1) {
+                try {
+                    threshold = Math.max(1, Math.min(20, Integer.parseInt(parts[0].trim())));
+                } catch (NumberFormatException ignored) {
+                }
+            }
+            if (parts.length >= 2) {
+                try {
+                    cooldownMin = Math.max(0, Math.min(1440, Integer.parseInt(parts[1].trim())));
+                } catch (NumberFormatException ignored) {
+                }
+            }
+            if (parts.length >= 3) {
+                try {
+                    maxAttempts = Math.max(1, Math.min(10, Integer.parseInt(parts[2].trim())));
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+        return new int[] { threshold, cooldownMin, maxAttempts };
     }
 
     public static void syncManagedServices(Context context, String daemon,
@@ -184,8 +257,13 @@ public final class ModuleConfig {
     public static void syncManagedServices(Context context, String daemon,
             String whitelist, boolean globalWhitelist, String reason) {
         String desired = buildManaged(daemon, whitelist, globalWhitelist);
-        String reasonSuffix = (reason != null && !reason.isEmpty()) ? " (" + reason + ")" : "";
-        LogUtil.log(context, "[模块] 下发锁定同步指令" + reasonSuffix + (desired.isEmpty() ? "" : ": " + desired));
+        String existing = getManagedServices(context);
+        boolean changed = !desired.equals(sLastSyncedServices) && !desired.equals(existing);
+        sLastSyncedServices = desired;
+        if (changed) {
+            String reasonSuffix = (reason != null && !reason.isEmpty()) ? " (" + reason + ")" : "";
+            LogUtil.log(context, "[模块] 下发锁定同步指令" + reasonSuffix + (desired.isEmpty() ? "" : ": " + desired));
+        }
         // 方案 A：系统广播通道直达模块，确保无论是否拥有 WRITE_SECURE_SETTINGS 都能瞬间生效
         sendServiceCommandPayload(context, "sync_services:" + desired);
         put(context, KEY_SERVICES, desired);

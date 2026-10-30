@@ -2864,6 +2864,7 @@ public class MainActivity extends Activity {
             ModuleConfig.setEnabled(this, true);
         }
         ModuleConfig.setDryRun(this, false);
+        ModuleConfig.syncCircuitConfig(this);
         ModuleConfig.syncManagedServices(this,
                 sp.getString("daemon", ""),
                 sp.getString("whitelist_services", ""),
