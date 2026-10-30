@@ -1090,12 +1090,12 @@ public class SettingsActivity extends AppCompatActivity {
         }
         if (mode) {
             lsposedModuleStatus.setText(loaded
-                    ? "已启用：系统级被动实时监听与自动修复"
+                    ? "已启用：由模块服务接管崩溃检测和服务开关，崩溃检测无需主动检测，定时检测等设置项将自动关闭"
                     : "未生效：模块未加载，请在 LSPosed 启用后重启");
         } else if (!loaded) {
-            lsposedModuleStatus.setText("未激活：需在 LSPosed 勾选并重启手机生效");
+            lsposedModuleStatus.setText("未激活：需在 LSPosed 勾选并重启手机生效（开启后由模块服务接管崩溃检测和服务开关，崩溃检测无需主动检测，定时检测等设置项将自动关闭）");
         } else {
-            lsposedModuleStatus.setText("已激活：开启后由底层被动实时监听，0 轮询开销");
+            lsposedModuleStatus.setText("已激活：开启后由模块服务接管崩溃检测和服务开关，崩溃检测无需主动检测，定时检测等设置项将自动关闭");
         }
 
         if (debugToolsRow != null) {
