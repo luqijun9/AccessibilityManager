@@ -108,6 +108,22 @@
                             android:focusable="false" />
                     </LinearLayout>
 
+                    <!-- LSPosed 模式下：强杀应用后重启挂载槽 -->
+                    <LinearLayout
+                        android:id="@+id/work_mode_fixmode_slot"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:layout_marginLeft="20dp"
+                            android:layout_marginRight="16dp"
+                            android:background="@color/divider" />
+                    </LinearLayout>
+
                     <!-- 调试工具：模拟服务崩溃（仅 LSPosed 模块模式 Debug 包） -->
                     <LinearLayout
                         android:id="@+id/debug_tools_row"
@@ -617,119 +633,63 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- ════════════ 崩溃服务检测 ════════════ -->
+            <!-- ════════════ 崩溃服务检测（仅普通模式显示；LSPosed 模式下整块隐藏，强杀项挂载到工作模式下方） ════════════ -->
             <LinearLayout
-                android:id="@+id/section_crash_fix"
+                android:id="@+id/crash_fix_section_container"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingLeft="4dp"
-                android:paddingTop="16dp"
-                android:paddingBottom="8dp">
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="崩溃服务检测"
-                    android:textColor="@color/text_hint"
-                    android:textSize="13sp" />
-                <TextView
-                    android:id="@+id/crash_tutorial_btn"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:background="?android:attr/selectableItemBackground"
-                    android:clickable="true"
-                    android:focusable="true"
-                    android:paddingLeft="8dp"
-                    android:paddingRight="8dp"
-                    android:text="说明"
-                    android:textColor="?attr/colorPrimary"
-                    android:textSize="13sp" />
-            </LinearLayout>
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                app:cardCornerRadius="16dp"
-                app:cardElevation="0dp"
-                app:strokeWidth="0dp"
-                app:cardBackgroundColor="?attr/colorSurfaceContainer">
+                android:orientation="vertical">
+
                 <LinearLayout
+                    android:id="@+id/section_crash_fix"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical">
-
-                    <!-- 崩溃服务检测总开关（仅普通模式显示；LSPosed 模式下自动隐藏） -->
-                    <LinearLayout
-                        android:id="@+id/crashfix_row"
-                        android:layout_width="match_parent"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingLeft="4dp"
+                    android:paddingTop="16dp"
+                    android:paddingBottom="8dp">
+                    <TextView
+                        android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:minHeight="72dp"
-                        android:paddingLeft="20dp"
-                        android:paddingRight="16dp"
-                        android:paddingTop="12dp"
-                        android:paddingBottom="12dp"
+                        android:layout_weight="1"
+                        android:text="崩溃服务检测"
+                        android:textColor="@color/text_hint"
+                        android:textSize="13sp" />
+                    <TextView
+                        android:id="@+id/crash_tutorial_btn"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
                         android:background="?android:attr/selectableItemBackground"
                         android:clickable="true"
-                        android:focusable="true">
-
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:orientation="vertical"
-                            android:paddingRight="16dp">
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="崩溃服务检测总开关"
-                                android:textColor="@color/text_primary"
-                                android:textSize="16sp" />
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="检测崩溃的服务，检测到的崩溃服务将会被重启"
-                                android:textColor="@color/text_secondary"
-                                android:textSize="13sp"
-                                android:layout_marginTop="2dp" />
-                        </LinearLayout>
-
-                        <com.google.android.material.materialswitch.MaterialSwitch
-                            android:id="@+id/crashfix"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:clickable="true"
-                            android:focusable="false" />
-                    </LinearLayout>
-
-                    <View
-                        android:id="@+id/crashfix_fixmode_divider"
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:layout_marginLeft="20dp"
-                        android:layout_marginRight="16dp"
-                        android:background="@color/divider" />
-
-                    <!-- 强杀应用后重启（LSPosed 模式与普通模式共用一套控件） -->
+                        android:focusable="true"
+                        android:paddingLeft="8dp"
+                        android:paddingRight="8dp"
+                        android:text="说明"
+                        android:textColor="?attr/colorPrimary"
+                        android:textSize="13sp" />
+                </LinearLayout>
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:cardCornerRadius="16dp"
+                    app:cardElevation="0dp"
+                    app:strokeWidth="0dp"
+                    app:cardBackgroundColor="?attr/colorSurfaceContainer">
                     <LinearLayout
-                        android:id="@+id/fixmode_wrapper"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:layout_marginHorizontal="8dp"
-                        android:layout_marginVertical="4dp">
+                        android:orientation="vertical">
 
+                        <!-- 崩溃服务检测总开关 -->
                         <LinearLayout
-                            android:id="@+id/fixmode_row"
+                            android:id="@+id/crashfix_row"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:gravity="center_vertical"
                             android:minHeight="72dp"
-                            android:paddingLeft="12dp"
-                            android:paddingRight="8dp"
+                            android:paddingLeft="20dp"
+                            android:paddingRight="16dp"
                             android:paddingTop="12dp"
                             android:paddingBottom="12dp"
                             android:background="?android:attr/selectableItemBackground"
@@ -746,79 +706,150 @@
                                 <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="强杀应用后重启"
+                                    android:text="崩溃服务检测总开关"
                                     android:textColor="@color/text_primary"
                                     android:textSize="16sp" />
 
                                 <TextView
-                                    android:id="@+id/fixmode_desc"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="需shizuku/root权限。若普通重启后仍失效，可尝试强杀App进程后再恢复服务"
+                                    android:text="检测崩溃的服务，检测到的崩溃服务将会被重启"
                                     android:textColor="@color/text_secondary"
                                     android:textSize="13sp"
                                     android:layout_marginTop="2dp" />
                             </LinearLayout>
 
                             <com.google.android.material.materialswitch.MaterialSwitch
-                                android:id="@+id/fixmode"
+                                android:id="@+id/crashfix"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:clickable="true"
                                 android:focusable="false" />
                         </LinearLayout>
 
-                        <!-- 强杀重启服务选择 (子设置) -->
+                        <View
+                            android:id="@+id/crashfix_fixmode_divider"
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:layout_marginLeft="20dp"
+                            android:layout_marginRight="16dp"
+                            android:background="@color/divider" />
+
+                        <!-- 普通模式下：强杀应用后重启挂载槽 -->
                         <LinearLayout
-                            android:id="@+id/fixmode_services_layout"
+                            android:id="@+id/normal_mode_fixmode_slot"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:gravity="center_vertical"
-                            android:visibility="gone"
-                            android:minHeight="64dp"
-                            android:paddingLeft="12dp"
-                            android:paddingRight="8dp"
-                            android:paddingTop="8dp"
-                            android:paddingBottom="8dp"
-                            android:background="?android:attr/selectableItemBackground"
-                            android:clickable="true"
-                            android:focusable="true">
+                            android:orientation="vertical">
 
+                            <!-- 强杀应用后重启（LSPosed 模式与普通模式共用一套控件） -->
                             <LinearLayout
-                                android:layout_width="0dp"
+                                android:id="@+id/fixmode_wrapper"
+                                android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:layout_weight="1"
                                 android:orientation="vertical"
-                                android:paddingRight="16dp">
+                                android:layout_marginHorizontal="8dp"
+                                android:layout_marginVertical="4dp">
 
-                                <TextView
-                                    android:layout_width="wrap_content"
+                                <LinearLayout
+                                    android:id="@+id/fixmode_row"
+                                    android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
-                                    android:text="选择强杀重启的服务"
-                                    android:textColor="@color/text_primary"
-                                    android:textSize="15sp" />
-                                <TextView
-                                    android:layout_width="wrap_content"
+                                    android:gravity="center_vertical"
+                                    android:minHeight="72dp"
+                                    android:paddingLeft="12dp"
+                                    android:paddingRight="8dp"
+                                    android:paddingTop="12dp"
+                                    android:paddingBottom="12dp"
+                                    android:background="?android:attr/selectableItemBackground"
+                                    android:clickable="true"
+                                    android:focusable="true">
+
+                                    <LinearLayout
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_weight="1"
+                                        android:orientation="vertical"
+                                        android:paddingRight="16dp">
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="强杀应用后重启"
+                                            android:textColor="@color/text_primary"
+                                            android:textSize="16sp" />
+
+                                        <TextView
+                                            android:id="@+id/fixmode_desc"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="需shizuku/root权限。若普通重启后仍失效，可尝试强杀App进程后再恢复服务"
+                                            android:textColor="@color/text_secondary"
+                                            android:textSize="13sp"
+                                            android:layout_marginTop="2dp" />
+                                    </LinearLayout>
+
+                                    <com.google.android.material.materialswitch.MaterialSwitch
+                                        android:id="@+id/fixmode"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:clickable="true"
+                                        android:focusable="false" />
+                                </LinearLayout>
+
+                                <!-- 强杀重启服务选择 (子设置) -->
+                                <LinearLayout
+                                    android:id="@+id/fixmode_services_layout"
+                                    android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
-                                    android:text="控制哪些服务允许被强杀"
-                                    android:textColor="@color/text_secondary"
-                                    android:textSize="13sp"
-                                    android:layout_marginTop="2dp" />
+                                    android:gravity="center_vertical"
+                                    android:visibility="gone"
+                                    android:minHeight="64dp"
+                                    android:paddingLeft="12dp"
+                                    android:paddingRight="8dp"
+                                    android:paddingTop="8dp"
+                                    android:paddingBottom="8dp"
+                                    android:background="?android:attr/selectableItemBackground"
+                                    android:clickable="true"
+                                    android:focusable="true">
+
+                                    <LinearLayout
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_weight="1"
+                                        android:orientation="vertical"
+                                        android:paddingRight="16dp">
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="选择强杀重启的服务"
+                                            android:textColor="@color/text_primary"
+                                            android:textSize="15sp" />
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="控制哪些服务允许被强杀"
+                                            android:textColor="@color/text_secondary"
+                                            android:textSize="13sp"
+                                            android:layout_marginTop="2dp" />
+                                    </LinearLayout>
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/fixmode_services_btn"
+                                        style="@style/Widget.Material3.Button"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:minWidth="0dp"
+                                        android:paddingLeft="16dp"
+                                        android:paddingRight="16dp"
+                                        android:text="设置"
+                                        android:textSize="14sp" />
+                                </LinearLayout>
                             </LinearLayout>
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/fixmode_services_btn"
-                                style="@style/Widget.Material3.Button"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:minWidth="0dp"
-                                android:paddingLeft="16dp"
-                                android:paddingRight="16dp"
-                                android:text="设置"
-                                android:textSize="14sp" />
                         </LinearLayout>
                     </LinearLayout>
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
 
             <!-- ════════════ 崩溃检测时机（仅非 LSPosed 模式且开启崩溃检测总开关时显示） ════════════ -->
             <LinearLayout

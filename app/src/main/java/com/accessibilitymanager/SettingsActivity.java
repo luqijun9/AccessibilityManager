@@ -54,7 +54,8 @@ public class SettingsActivity extends AppCompatActivity {
     private MaterialSwitch switchPeriodicCheck, switchWakeIdle, switchIgnoreSystemCrash;
     private MaterialSwitch switchAutoUpdate;
     private MaterialSwitch switchLsposedMode;
-    private View lsposedModeRow, crashFixRow, crashFixFixmodeDivider, fixmodeRow;
+    private View lsposedModeRow, crashFixRow, crashFixFixmodeDivider, fixmodeRow, crashFixSectionContainer;
+    private LinearLayout workModeFixmodeSlot, normalModeFixmodeSlot;
     private TextView lsposedModuleStatus, fixmodeDesc;
     private View debugToolsRow;
     private TextView debugToolsStatus;
@@ -268,8 +269,11 @@ public class SettingsActivity extends AppCompatActivity {
         switchManualCloseDaemon = findViewById(R.id.manual_close_daemon);
         manualCloseDaemonLayout = findViewById(R.id.manual_close_daemon_layout);
         switchCrashFix = findViewById(R.id.crashfix);
+        crashFixSectionContainer = findViewById(R.id.crash_fix_section_container);
         crashFixRow = findViewById(R.id.crashfix_row);
         crashFixFixmodeDivider = findViewById(R.id.crashfix_fixmode_divider);
+        workModeFixmodeSlot = findViewById(R.id.work_mode_fixmode_slot);
+        normalModeFixmodeSlot = findViewById(R.id.normal_mode_fixmode_slot);
         switchLsposedMode = findViewById(R.id.lsposed_mode);
         lsposedModeRow = findViewById(R.id.lsposed_mode_row);
         lsposedModuleStatus = findViewById(R.id.lsposed_module_status);
@@ -928,14 +932,30 @@ public class SettingsActivity extends AppCompatActivity {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
             android.transition.TransitionManager.beginDelayedTransition((android.view.ViewGroup) rootView);
         }
+        if (fixmodeWrapper != null) {
+            LinearLayout targetSlot = lsposedMode ? workModeFixmodeSlot : normalModeFixmodeSlot;
+            if (targetSlot != null && fixmodeWrapper.getParent() != targetSlot) {
+                if (fixmodeWrapper.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) fixmodeWrapper.getParent()).removeView(fixmodeWrapper);
+                }
+                targetSlot.addView(fixmodeWrapper);
+            }
+            fixmodeWrapper.setVisibility(showFixModeSection ? View.VISIBLE : View.GONE);
+        }
+        if (workModeFixmodeSlot != null) {
+            workModeFixmodeSlot.setVisibility(lsposedMode ? View.VISIBLE : View.GONE);
+        }
+        if (crashFixSectionContainer != null) {
+            crashFixSectionContainer.setVisibility(lsposedMode ? View.GONE : View.VISIBLE);
+        }
         if (crashFixRow != null) {
             crashFixRow.setVisibility(lsposedMode ? View.GONE : View.VISIBLE);
         }
         if (crashFixFixmodeDivider != null) {
             crashFixFixmodeDivider.setVisibility(crashFixEnabled ? View.VISIBLE : View.GONE);
         }
-        if (fixmodeWrapper != null) {
-            fixmodeWrapper.setVisibility(showFixModeSection ? View.VISIBLE : View.GONE);
+        if (normalModeFixmodeSlot != null) {
+            normalModeFixmodeSlot.setVisibility(crashFixEnabled ? View.VISIBLE : View.GONE);
         }
         if (fixmodeDesc != null) {
             fixmodeDesc.setText(lsposedMode
