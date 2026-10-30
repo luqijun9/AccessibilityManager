@@ -1146,9 +1146,9 @@ public class SettingsActivity extends AppCompatActivity {
         int cooldown = sp.getInt(ModuleConfig.SP_UNSTABLE_COOLDOWN, ModuleConfig.DEFAULT_UNSTABLE_COOLDOWN);
         int maxAttempts = sp.getInt(ModuleConfig.SP_MAX_ATTEMPTS, ModuleConfig.DEFAULT_MAX_ATTEMPTS);
         if (cooldown <= 0) {
-            lsposedCircuitDesc.setText("已关闭连续崩溃熔断 · 单次最多重试 " + maxAttempts + " 次");
+            lsposedCircuitDesc.setText("不限制连续崩溃 · 单次最多重试 " + maxAttempts + " 次");
         } else {
-            lsposedCircuitDesc.setText("2分钟内连续崩溃 " + threshold + " 次熔断 " + cooldown
+            lsposedCircuitDesc.setText("2分钟内连续崩溃 " + threshold + " 次则暂停修复 " + cooldown
                     + " 分钟 · 单次最多重试 " + maxAttempts + " 次");
         }
     }
@@ -1172,7 +1172,7 @@ public class SettingsActivity extends AppCompatActivity {
         inputMaxAttempts.setText(String.valueOf(currentMaxAttempts));
 
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
-                .setTitle("熔断与重试设置")
+                .setTitle("崩溃重试与保护设置")
                 .setView(layout)
                 .setPositiveButton("确定", null)
                 .setNegativeButton("取消", null)
@@ -1183,7 +1183,7 @@ public class SettingsActivity extends AppCompatActivity {
         if (btnResetCircuit != null) {
             btnResetCircuit.setOnClickListener(v -> {
                 ModuleConfig.resetCircuitBreaker(SettingsActivity.this);
-                Toast.makeText(SettingsActivity.this, "已向模块下发解除熔断指令", Toast.LENGTH_SHORT).show();
+                Toast.makeText(SettingsActivity.this, "已通知模块立即恢复所有暂停修复的服务", Toast.LENGTH_SHORT).show();
             });
         }
 
@@ -1210,7 +1210,7 @@ public class SettingsActivity extends AppCompatActivity {
                 return;
             }
             if (cooldown < 0 || cooldown > 1440) {
-                Toast.makeText(SettingsActivity.this, "熔断冷却时长请输入 0-1440 之间的数字", Toast.LENGTH_SHORT).show();
+                Toast.makeText(SettingsActivity.this, "暂停自动修复时长请输入 0-1440 之间的数字", Toast.LENGTH_SHORT).show();
                 return;
             }
             if (maxAttempts < 1 || maxAttempts > 10) {
@@ -1219,7 +1219,7 @@ public class SettingsActivity extends AppCompatActivity {
             }
             ModuleConfig.syncCircuitConfig(SettingsActivity.this, threshold, cooldown, maxAttempts);
             updateLsposedCircuitDesc();
-            Toast.makeText(SettingsActivity.this, "熔断与重试设置已保存并同步", Toast.LENGTH_SHORT).show();
+            Toast.makeText(SettingsActivity.this, "设置已保存并实时生效", Toast.LENGTH_SHORT).show();
             dialog.dismiss();
         });
     }

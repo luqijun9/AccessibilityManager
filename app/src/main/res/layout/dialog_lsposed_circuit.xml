@@ -13,8 +13,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-        android:hint="2分钟内连续崩溃触发熔断"
-        app:helperText="范围 1-20，默认 3 次"
+        android:hint="触发暂停的连续崩溃次数"
+        app:helperText="2分钟内连续崩溃几次后暂停修复（1-20，默认 3 次）"
         app:suffixText="次">
 
         <com.google.android.material.textfield.TextInputEditText
@@ -30,8 +30,8 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
         style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-        android:hint="熔断冷却时长"
-        app:helperText="范围 0-1440，填 0 关闭熔断，默认 10 分钟"
+        android:hint="暂停自动修复时长"
+        app:helperText="触发后暂停修复多久（0-1440，填 0 永不暂停，默认 10 分钟）"
         app:suffixText="分钟">
 
         <com.google.android.material.textfield.TextInputEditText
@@ -48,7 +48,7 @@
         android:layout_marginTop="12dp"
         style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
         android:hint="单次崩溃最大重试次数"
-        app:helperText="范围 1-10，默认 2 次"
+        app:helperText="单次恢复失败时的最大重试次数（1-10，默认 2 次）"
         app:suffixText="次">
 
         <com.google.android.material.textfield.TextInputEditText
@@ -65,7 +65,6 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="14dp"
-        android:text="立即解除当前所有熔断状态" />
+        android:text="立即恢复所有暂停修复的服务" />
 
 </LinearLayout>
-

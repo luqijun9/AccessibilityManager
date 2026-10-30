@@ -216,7 +216,7 @@ public final class ModuleConfig {
         if (context == null) {
             return false;
         }
-        LogUtil.log(context, "[模块] 下发解除熔断指令");
+        LogUtil.log(context, "[模块] 下发恢复暂停修复服务指令");
         return sendServiceCommandPayload(context, "reset_circuit");
     }
 

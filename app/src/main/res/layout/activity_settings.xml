@@ -124,7 +124,7 @@
                             android:background="@color/divider" />
                     </LinearLayout>
 
-                    <!-- LSPosed 模式下：熔断与重试设置 -->
+                    <!-- LSPosed 模式下：崩溃重试与保护设置 -->
                     <LinearLayout
                         android:id="@+id/lsposed_circuit_row"
                         android:layout_width="match_parent"
@@ -160,7 +160,7 @@
                                 <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="熔断与重试设置"
+                                    android:text="崩溃重试与保护设置"
                                     android:textColor="@color/text_primary"
                                     android:textSize="16sp" />
 
@@ -168,7 +168,7 @@
                                     android:id="@+id/lsposed_circuit_desc"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="连续崩溃 3 次熔断 10 分钟 · 单次最多重试 2 次"
+                                    android:text="2分钟内连续崩溃 3 次则暂停修复 10 分钟 · 单次最多重试 2 次"
                                     android:textColor="@color/text_secondary"
                                     android:textSize="13sp"
                                     android:layout_marginTop="2dp" />

@@ -948,7 +948,7 @@ public class AutoRepairEntry extends XposedModule {
             sAttempts.clear();
             sLastAttemptAt.clear();
             sCrashHistory.clear();
-            event("配置", "已手动解除熔断状态 (清除 " + count + " 个熔断服务)");
+            event("配置", "已手动恢复暂停修复的服务 (清除 " + count + " 个暂停记录)");
             scheduleScan(0L, "reset_circuit");
             notifyCommandAck();
             return;
@@ -1039,7 +1039,7 @@ public class AutoRepairEntry extends XposedModule {
             }
             if (changed) {
                 int[] parsed = parseCircuitConfig(component);
-                event("配置", "模块已生效熔断配置: 连续崩溃阈值=" + parsed[0] + "次, 冷却="
+                event("配置", "模块已生效崩溃保护配置: 连续崩溃阈值=" + parsed[0] + "次, 暂停修复="
                         + (parsed[1] == 0 ? "关闭" : (parsed[1] + "分钟")) + ", 最大重试=" + parsed[2] + "次");
             }
             notifyCommandAck();
@@ -1264,7 +1264,7 @@ public class AutoRepairEntry extends XposedModule {
         Long blocked = sBlockedUntil.get(key);
         if (blocked != null) {
             if (now < blocked) {
-                eventSkip("died:blocked:" + key, "检测", "忽略（熔断中）: " + key);
+                eventSkip("died:blocked:" + key, "检测", "忽略（暂停修复中）: " + key);
                 return;
             }
             sBlockedUntil.remove(key);
@@ -1289,7 +1289,7 @@ public class AutoRepairEntry extends XposedModule {
         recordCrash(key, now);
         Long afterRecord = sBlockedUntil.get(key);
         if (afterRecord != null && now < afterRecord) {
-            event("失败", "连续崩溃，熔断跳过: " + key);
+            event("失败", "连续崩溃，暂停修复跳过: " + key);
             return;
         }
         if (sAttempts.getOrDefault(key, 0) >= getMaxAttempts()) {
@@ -1402,7 +1402,7 @@ public class AutoRepairEntry extends XposedModule {
 
         Long blocked = sBlockedUntil.get(key);
         if (blocked != null && now < blocked) {
-            event("失败", "跳过（熔断中）: " + key);
+            event("失败", "跳过（暂停修复中）: " + key);
             return;
         }
         int attempts = sAttempts.getOrDefault(key, 0);
@@ -1552,7 +1552,7 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
         sBlockedUntil.put(key, SystemClock.elapsedRealtime() + cooldownMs);
-        event("失败", "熔断 " + (cooldownMs / 60000L) + " 分钟 ("
+        event("失败", "暂停修复 " + (cooldownMs / 60000L) + " 分钟 ("
                 + reason + "): " + key);
     }
 
@@ -1570,7 +1570,7 @@ public class AutoRepairEntry extends XposedModule {
         if (cooldownMs > 0L && history.size() >= getUnstableThreshold()) {
             sBlockedUntil.put(key, now + cooldownMs);
             event("失败", "连续 " + history.size() + " 次崩溃（"
-                    + (UNSTABLE_WINDOW_MS / 1000) + " 秒内），熔断 "
+                    + (UNSTABLE_WINDOW_MS / 1000) + " 秒内），暂停自动修复 "
                     + (cooldownMs / 60000L) + " 分钟: " + key);
         }
     }
