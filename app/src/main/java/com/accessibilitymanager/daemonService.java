@@ -666,17 +666,11 @@ public class daemonService extends Service {
             }
         }
 
-        // ── 全局冷却时间拦截 ──
+        // ── 解锁检测短时间防抖（15秒内重复解锁不重复触发 dumpsys） ──
         if ("解锁".equals(source) || "解锁(无障碍检测)".equals(source)) {
-            boolean cooldownEnabled = sp.getBoolean("global_cooldown_enable", false);
-            if (cooldownEnabled) {
-                long cooldownMinutes = sp.getInt("global_cooldown_time_minutes", 15);
-                long cooldownMs = cooldownMinutes * 60 * 1000;
-                if (now - mLastDumpsysTime < cooldownMs) {
-                    LogUtil.log(daemonService.this, "[崩溃检测] 距离上次检测不到 " + cooldownMinutes + " 分钟，受全局冷却限制已拦截");
-                    Log.d("AccMgrDebug", "[TASK-" + Integer.toHexString(System.identityHashCode(this)) + "] global cooldown intercepted");
-                    return;
-                }
+            if (now - mLastDumpsysTime < 15_000L) {
+                Log.d("AccMgrDebug", "[TASK-" + Integer.toHexString(System.identityHashCode(this)) + "] unlock 15s debounce intercepted");
+                return;
             }
         }
 

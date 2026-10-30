@@ -50,25 +50,23 @@ public class SettingsActivity extends AppCompatActivity {
     // 子项视图引用
     private MaterialSwitch switchBoot, switchToast, switchUserOnly, switchHide, switchDelayDaemon, switchManualCloseDaemon;
     private View manualCloseDaemonLayout;
-    private MaterialSwitch switchCrashFix, switchUnlockCrashCheck, switchNotifyCrashCheck, switchFixMode, switchGlobalCooldown;
+    private MaterialSwitch switchCrashFix, switchUnlockCrashCheck, switchNotifyCrashCheck, switchFixMode;
     private MaterialSwitch switchPeriodicCheck, switchWakeIdle, switchIgnoreSystemCrash;
     private MaterialSwitch switchAutoUpdate;
     private MaterialSwitch switchLsposedMode;
-    private View lsposedModeRow;
-    private TextView lsposedModuleStatus;
-    private View lsposedFixmodeLayout, lsposedFixmodeRow, lsposedFixmodeServicesLayout;
-    private MaterialSwitch switchLsposedFixMode;
+    private View lsposedModeRow, crashFixRow, crashFixFixmodeDivider, fixmodeRow;
+    private TextView lsposedModuleStatus, fixmodeDesc;
     private View debugToolsRow;
     private TextView debugToolsStatus;
     private android.widget.CompoundButton.OnCheckedChangeListener mCrashFixListener;
     private android.widget.CompoundButton.OnCheckedChangeListener mModuleModeListener;
     private android.widget.CompoundButton.OnCheckedChangeListener mNotifyCrashCheckListener;
-    private LinearLayout crashDependentLayout, fixmodeServicesLayout, periodicSubLayout, globalCooldownTimeLayout,
-            globalCooldownEnableLayout, globalCooldownSubLayout, notifyCrashEnableLayout, notifyCrashAppsLayout;
+    private LinearLayout crashDependentLayout, fixmodeServicesLayout, periodicSubLayout,
+            notifyCrashEnableLayout, notifyCrashAppsLayout;
     private View fixmodeServicesBtn, notifyCrashAppsBtn;
-    private View fixmodeWrapper, globalCooldownWrapper, periodicWrapper, notifyCrashWrapper;
+    private View fixmodeWrapper, periodicWrapper, notifyCrashWrapper;
     private TextView intervalLabel, notifyCustomBtn, crashTutorialBtn, aboutBtn, checkUpdateBtn,
-            globalCooldownTimeLabel, notifyCrashAppsDesc;
+            notifyCrashAppsDesc;
     private View btnThemeColor;
     private TextView tvThemeDesc;
 
@@ -270,16 +268,13 @@ public class SettingsActivity extends AppCompatActivity {
         switchManualCloseDaemon = findViewById(R.id.manual_close_daemon);
         manualCloseDaemonLayout = findViewById(R.id.manual_close_daemon_layout);
         switchCrashFix = findViewById(R.id.crashfix);
+        crashFixRow = findViewById(R.id.crashfix_row);
+        crashFixFixmodeDivider = findViewById(R.id.crashfix_fixmode_divider);
         switchLsposedMode = findViewById(R.id.lsposed_mode);
         lsposedModeRow = findViewById(R.id.lsposed_mode_row);
         lsposedModuleStatus = findViewById(R.id.lsposed_module_status);
         debugToolsRow = findViewById(R.id.debug_tools_row);
         debugToolsStatus = findViewById(R.id.debug_tools_status);
-        switchGlobalCooldown = findViewById(R.id.global_cooldown_enable);
-        globalCooldownEnableLayout = findViewById(R.id.global_cooldown_enable_layout);
-        globalCooldownSubLayout = findViewById(R.id.global_cooldown_sub_layout);
-        globalCooldownTimeLayout = findViewById(R.id.global_cooldown_time_layout);
-        globalCooldownTimeLabel = findViewById(R.id.global_cooldown_time);
         switchUnlockCrashCheck = findViewById(R.id.unlock_crash_check);
         switchNotifyCrashCheck = findViewById(R.id.notify_crash_check);
         notifyCrashWrapper = findViewById(R.id.notify_crash_wrapper);
@@ -288,6 +283,8 @@ public class SettingsActivity extends AppCompatActivity {
         notifyCrashAppsBtn = findViewById(R.id.notify_crash_apps_btn);
         notifyCrashAppsDesc = findViewById(R.id.notify_crash_apps_desc);
         switchFixMode = findViewById(R.id.fixmode);
+        fixmodeRow = findViewById(R.id.fixmode_row);
+        fixmodeDesc = findViewById(R.id.fixmode_desc);
         switchPeriodicCheck = findViewById(R.id.periodic_check);
         switchWakeIdle = findViewById(R.id.periodic_check_wake_idle);
         switchIgnoreSystemCrash = findViewById(R.id.ignore_system_crash);
@@ -304,12 +301,7 @@ public class SettingsActivity extends AppCompatActivity {
         btnThemeColor = findViewById(R.id.btn_theme_color);
         tvThemeDesc = findViewById(R.id.tv_theme_desc);
         fixmodeWrapper = findViewById(R.id.fixmode_wrapper);
-        globalCooldownWrapper = findViewById(R.id.global_cooldown_wrapper);
         periodicWrapper = findViewById(R.id.periodic_wrapper);
-        lsposedFixmodeLayout = findViewById(R.id.lsposed_fixmode_layout);
-        lsposedFixmodeRow = findViewById(R.id.lsposed_fixmode_row);
-        switchLsposedFixMode = findViewById(R.id.lsposed_switch_fixmode);
-        lsposedFixmodeServicesLayout = findViewById(R.id.lsposed_fixmode_services_layout);
     }
 
     private void loadValues() {
@@ -323,19 +315,11 @@ public class SettingsActivity extends AppCompatActivity {
         boolean lsposedMode = sp.getBoolean("lsposed_mode", false);
         switchLsposedMode.setChecked(lsposedMode);
         switchCrashFix.setChecked(!lsposedMode && sp.getBoolean("crashfix", false));
-        boolean globalCooldownEnabled = sp.getBoolean("global_cooldown_enable", false);
-        switchGlobalCooldown.setChecked(globalCooldownEnabled);
-        globalCooldownSubLayout.setVisibility(globalCooldownEnabled ? View.VISIBLE : View.GONE);
-        globalCooldownWrapper.setBackgroundResource(globalCooldownEnabled ? R.drawable.bg_nested_setting : 0);
-        globalCooldownTimeLabel.setText(sp.getInt("global_cooldown_time_minutes", 15) + "分钟");
         switchUnlockCrashCheck.setChecked(sp.getBoolean("unlock_crash_check", false));
         switchNotifyCrashCheck.setChecked(sp.getBoolean(NotificationMonitorService.KEY_NOTIFY_CRASH_CHECK, false));
         updateNotifyCrashAppsDesc();
         boolean fixMode = sp.getBoolean("fixmode", false);
         switchFixMode.setChecked(fixMode);
-        if (switchLsposedFixMode != null) {
-            switchLsposedFixMode.setChecked(fixMode);
-        }
         switchPeriodicCheck.setChecked(sp.getBoolean("periodic_check", false));
         switchWakeIdle.setChecked(sp.getBoolean("periodic_check_wake_idle", true));
         switchIgnoreSystemCrash.setChecked(sp.getBoolean("ignore_system_crash_trigger", true));
@@ -418,24 +402,15 @@ public class SettingsActivity extends AppCompatActivity {
             refreshCrashFixDependent();
         };
         switchCrashFix.setOnCheckedChangeListener(mCrashFixListener);
+        if (crashFixRow != null) {
+            crashFixRow.setOnClickListener(v -> switchCrashFix.toggle());
+        }
 
         // LSPosed 模块模式
         mModuleModeListener = (btn, checked) -> handleLsposedModeChanged(checked);
         switchLsposedMode.setOnCheckedChangeListener(mModuleModeListener);
         lsposedModeRow.setOnClickListener(v -> switchLsposedMode.toggle());
         debugToolsRow.setOnClickListener(v -> showDebugToolsDialog());
-
-        switchGlobalCooldown.setOnCheckedChangeListener((btn, checked) -> {
-            sp.edit().putBoolean("global_cooldown_enable", checked).apply();
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
-                android.transition.TransitionManager.beginDelayedTransition((android.view.ViewGroup) rootView);
-            }
-            globalCooldownSubLayout.setVisibility(checked ? View.VISIBLE : View.GONE);
-            globalCooldownWrapper.setBackgroundResource(checked ? R.drawable.bg_nested_setting : 0);
-        });
-
-        globalCooldownEnableLayout.setOnClickListener(v -> switchGlobalCooldown.toggle());
-        globalCooldownTimeLabel.setOnClickListener(v -> showCooldownTimeDialog());
 
         // 解锁检测
         final MaterialSwitch unlockCrashCheckRef = switchUnlockCrashCheck;
@@ -541,6 +516,9 @@ public class SettingsActivity extends AppCompatActivity {
             sp.edit().putBoolean("unlock_crash_check", checked).apply();
         };
         switchUnlockCrashCheck.setOnCheckedChangeListener(unlockListenerHolder[0]);
+        if (switchUnlockCrashCheck.getParent() instanceof View) {
+            ((View) switchUnlockCrashCheck.getParent()).setOnClickListener(v -> switchUnlockCrashCheck.toggle());
+        }
 
         // 监听通知检测
         mNotifyCrashCheckListener = (btn, checked) -> {
@@ -569,11 +547,11 @@ public class SettingsActivity extends AppCompatActivity {
             notifyCrashAppsBtn.setOnClickListener(v -> showNotifyWatchAppsDialog());
         }
 
-        // 重启时强杀对应APP（需要 Root/Shizuku 权限）
+        // 重启时强杀对应APP（普通模式下需要 Root/Shizuku 权限，LSPosed 模式下无需权限）
         final MaterialSwitch fixModeRef = switchFixMode;
         final android.widget.CompoundButton.OnCheckedChangeListener[] fixModeListenerHolder = new android.widget.CompoundButton.OnCheckedChangeListener[1];
         fixModeListenerHolder[0] = (btn, checked) -> {
-            if (checked) {
+            if (checked && !sp.getBoolean("lsposed_mode", false)) {
                 ShellUtil.reset();
                 ShellUtil.getPermissionState();
                 if (!ShellUtil.hasAnyPermission()) {
@@ -585,38 +563,12 @@ public class SettingsActivity extends AppCompatActivity {
                 }
             }
             sp.edit().putBoolean("fixmode", checked).apply();
-            if (switchLsposedFixMode != null && switchLsposedFixMode.isChecked() != checked) {
-                switchLsposedFixMode.setChecked(checked);
-            }
             ModuleConfig.setFixMode(SettingsActivity.this, checked, sp.getString("fixmode_disabled_services", ""));
             refreshCrashFixDependent();
         };
         switchFixMode.setOnCheckedChangeListener(fixModeListenerHolder[0]);
-
-        if (switchLsposedFixMode != null) {
-            switchLsposedFixMode.setOnCheckedChangeListener((btn, checked) -> {
-                sp.edit().putBoolean("fixmode", checked).apply();
-                if (switchFixMode != null && switchFixMode.isChecked() != checked) {
-                    switchFixMode.setOnCheckedChangeListener(null);
-                    switchFixMode.setChecked(checked);
-                    switchFixMode.setOnCheckedChangeListener(fixModeListenerHolder[0]);
-                }
-                if (lsposedFixmodeServicesLayout != null) {
-                    lsposedFixmodeServicesLayout.setVisibility(checked ? View.VISIBLE : View.GONE);
-                }
-                ModuleConfig.setFixMode(SettingsActivity.this, checked, sp.getString("fixmode_disabled_services", ""));
-                refreshCrashFixDependent();
-            });
-        }
-        if (lsposedFixmodeRow != null) {
-            lsposedFixmodeRow.setOnClickListener(v -> {
-                if (switchLsposedFixMode != null) {
-                    switchLsposedFixMode.toggle();
-                }
-            });
-        }
-        if (lsposedFixmodeServicesLayout != null) {
-            lsposedFixmodeServicesLayout.setOnClickListener(v -> showFixmodeServicesDialog());
+        if (fixmodeRow != null) {
+            fixmodeRow.setOnClickListener(v -> switchFixMode.toggle());
         }
 
         fixmodeServicesLayout.setOnClickListener(v -> showFixmodeServicesDialog());
@@ -632,6 +584,9 @@ public class SettingsActivity extends AppCompatActivity {
             refreshCrashFixDependent();
             intervalLabel.setEnabled(checked);
         });
+        if (switchPeriodicCheck.getParent() instanceof View) {
+            ((View) switchPeriodicCheck.getParent()).setOnClickListener(v -> switchPeriodicCheck.toggle());
+        }
 
         switchWakeIdle.setOnCheckedChangeListener((btn, checked) -> {
             sp.edit().putBoolean("periodic_check_wake_idle", checked).apply();
@@ -639,15 +594,25 @@ public class SettingsActivity extends AppCompatActivity {
                 TimerReceiver.scheduleNext(SettingsActivity.this);
             }
         });
+        if (switchWakeIdle.getParent() instanceof View) {
+            ((View) switchWakeIdle.getParent()).setOnClickListener(v -> switchWakeIdle.toggle());
+        }
 
         switchIgnoreSystemCrash.setOnCheckedChangeListener(
                 (btn, checked) -> sp.edit().putBoolean("ignore_system_crash_trigger", checked).apply());
+        if (switchIgnoreSystemCrash.getParent() instanceof View) {
+            ((View) switchIgnoreSystemCrash.getParent()).setOnClickListener(v -> switchIgnoreSystemCrash.toggle());
+        }
 
-        intervalLabel.setOnClickListener(v -> {
+        View.OnClickListener intervalClickListener = v -> {
             if (!switchPeriodicCheck.isChecked())
                 return;
             showIntervalDialog(() -> intervalLabel.setText(sp.getInt("periodic_check_interval", 10) + "分钟"));
-        });
+        };
+        intervalLabel.setOnClickListener(intervalClickListener);
+        if (intervalLabel.getParent() instanceof View) {
+            ((View) intervalLabel.getParent()).setOnClickListener(intervalClickListener);
+        }
 
         // 自定义通知栏文字 - 整行触发
         ((View) notifyCustomBtn.getParent()).setOnClickListener(v -> showNotifyCustomDialog());
@@ -957,10 +922,25 @@ public class SettingsActivity extends AppCompatActivity {
         boolean lsposedMode = sp.getBoolean("lsposed_mode", false);
         boolean crashFixEnabled = !lsposedMode && switchCrashFix.isChecked();
         boolean periodicEnabled = crashFixEnabled && switchPeriodicCheck.isChecked();
+        boolean showFixModeSection = lsposedMode || crashFixEnabled;
         switchCrashFix.setEnabled(!lsposedMode);
 
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
             android.transition.TransitionManager.beginDelayedTransition((android.view.ViewGroup) rootView);
+        }
+        if (crashFixRow != null) {
+            crashFixRow.setVisibility(lsposedMode ? View.GONE : View.VISIBLE);
+        }
+        if (crashFixFixmodeDivider != null) {
+            crashFixFixmodeDivider.setVisibility(crashFixEnabled ? View.VISIBLE : View.GONE);
+        }
+        if (fixmodeWrapper != null) {
+            fixmodeWrapper.setVisibility(showFixModeSection ? View.VISIBLE : View.GONE);
+        }
+        if (fixmodeDesc != null) {
+            fixmodeDesc.setText(lsposedMode
+                    ? "由系统底层直接杀掉卡死应用进程后恢复，无需 Shizuku/Root"
+                    : "需shizuku/root权限。若普通重启后仍失效，可尝试强杀App进程后再恢复服务");
         }
         if (crashDependentLayout != null) {
             crashDependentLayout.setVisibility(crashFixEnabled ? View.VISIBLE : View.GONE);
@@ -974,7 +954,7 @@ public class SettingsActivity extends AppCompatActivity {
         if (switchNotifyCrashCheck != null) {
             switchNotifyCrashCheck.setEnabled(crashFixEnabled);
         }
-        switchFixMode.setEnabled(crashFixEnabled);
+        switchFixMode.setEnabled(showFixModeSection);
         switchPeriodicCheck.setEnabled(crashFixEnabled);
         switchWakeIdle.setEnabled(periodicEnabled);
         switchIgnoreSystemCrash.setEnabled(crashFixEnabled);
@@ -993,11 +973,13 @@ public class SettingsActivity extends AppCompatActivity {
         }
         updateNotifyCrashAppsDesc();
 
-        boolean fixModeEnabled = crashFixEnabled && switchFixMode.isChecked();
+        boolean fixModeEnabled = showFixModeSection && switchFixMode.isChecked();
         if (fixmodeServicesLayout != null) {
             fixmodeServicesLayout.setEnabled(fixModeEnabled);
             fixmodeServicesLayout.setVisibility(fixModeEnabled ? View.VISIBLE : View.GONE);
-            fixmodeWrapper.setBackgroundResource(fixModeEnabled ? R.drawable.bg_nested_setting : 0);
+            if (fixmodeWrapper != null) {
+                fixmodeWrapper.setBackgroundResource(fixModeEnabled ? R.drawable.bg_nested_setting : 0);
+            }
         }
         if (fixmodeServicesBtn != null)
             fixmodeServicesBtn.setEnabled(fixModeEnabled);
@@ -1065,9 +1047,6 @@ public class SettingsActivity extends AppCompatActivity {
             if (switchFixMode != null && switchFixMode.isChecked() != currentFixMode) {
                 switchFixMode.setChecked(currentFixMode);
             }
-            if (switchLsposedFixMode != null && switchLsposedFixMode.isChecked() != currentFixMode) {
-                switchLsposedFixMode.setChecked(currentFixMode);
-            }
             if (restoreCrashFix && sp.getBoolean("periodic_check", false)) {
                 TimerReceiver.scheduleNext(this);
             }
@@ -1117,17 +1096,6 @@ public class SettingsActivity extends AppCompatActivity {
             lsposedModuleStatus.setText("未激活：需在 LSPosed 勾选并重启手机生效");
         } else {
             lsposedModuleStatus.setText("已激活：开启后由底层被动实时监听，0 轮询开销");
-        }
-
-        if (lsposedFixmodeLayout != null) {
-            lsposedFixmodeLayout.setVisibility(mode ? View.VISIBLE : View.GONE);
-            boolean fixModeOn = sp.getBoolean("fixmode", false);
-            if (switchLsposedFixMode != null && switchLsposedFixMode.isChecked() != fixModeOn) {
-                switchLsposedFixMode.setChecked(fixModeOn);
-            }
-            if (lsposedFixmodeServicesLayout != null) {
-                lsposedFixmodeServicesLayout.setVisibility(fixModeOn ? View.VISIBLE : View.GONE);
-            }
         }
 
         if (debugToolsRow != null) {
@@ -1922,45 +1890,6 @@ public class SettingsActivity extends AppCompatActivity {
             dialog.dismiss();
             if (onSaved != null)
                 onSaved.run();
-        });
-    }
-
-    private void showCooldownTimeDialog() {
-        int currentCooldown = sp.getInt("global_cooldown_time_minutes", 15);
-
-        View layout = getLayoutInflater().inflate(R.layout.dialog_time_input, null);
-        final com.google.android.material.textfield.TextInputEditText input = layout.findViewById(R.id.edit_text);
-        final com.google.android.material.textfield.TextInputLayout inputLayout = layout.findViewById(R.id.text_input_layout);
-        inputLayout.setHint("全局冷却时间");
-        input.setText(String.valueOf(currentCooldown));
-
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
-                .setTitle("设置全局冷却时间")
-                .setView(layout)
-                .setPositiveButton("确定", null)
-                .setNegativeButton("取消", null)
-                .create();
-        dialog.show();
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            String inputStr = input.getText().toString().trim();
-            int minutes;
-            try {
-                minutes = Integer.parseInt(inputStr);
-            } catch (NumberFormatException e) {
-                Toast.makeText(SettingsActivity.this,
-                        "请输入有效数字", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            if (minutes < 1 || minutes > 1440) {
-                Toast.makeText(SettingsActivity.this,
-                        "请输入1-1440之间的数字", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            sp.edit().putInt("global_cooldown_time_minutes", minutes).apply();
-            globalCooldownTimeLabel.setText(minutes + "分钟");
-            Toast.makeText(SettingsActivity.this,
-                    "全局冷却时间已设为 " + minutes + " 分钟", Toast.LENGTH_SHORT).show();
-            dialog.dismiss();
         });
     }
 
