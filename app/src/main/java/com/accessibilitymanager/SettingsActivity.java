@@ -560,7 +560,9 @@ public class SettingsActivity extends AppCompatActivity {
             switchLsposedFixMode.setOnCheckedChangeListener((btn, checked) -> {
                 sp.edit().putBoolean("fixmode", checked).apply();
                 if (switchFixMode != null && switchFixMode.isChecked() != checked) {
+                    switchFixMode.setOnCheckedChangeListener(null);
                     switchFixMode.setChecked(checked);
+                    switchFixMode.setOnCheckedChangeListener(fixModeListenerHolder[0]);
                 }
                 if (lsposedFixmodeServicesLayout != null) {
                     lsposedFixmodeServicesLayout.setVisibility(checked ? View.VISIBLE : View.GONE);
@@ -966,7 +968,11 @@ public class SettingsActivity extends AppCompatActivity {
                 return;
             }
 
+            boolean prevCrashFix = sp.getBoolean("crashfix", false);
+            boolean prevFixMode = sp.getBoolean("fixmode", false);
             sp.edit().putBoolean("lsposed_mode", true)
+                    .putBoolean("crashfix_before_lsposed", prevCrashFix)
+                    .putBoolean("fixmode_before_lsposed", prevFixMode)
                     .putBoolean("crashfix", false)
                     .putBoolean("crashfix_auto_disabled", false)
                     .apply();
@@ -991,10 +997,30 @@ public class SettingsActivity extends AppCompatActivity {
                     + " managed=" + ModuleConfig.getManagedServices(this));
             Toast.makeText(this, "LSPosed 模块模式已开启，崩溃修复由模块接管", Toast.LENGTH_SHORT).show();
         } else {
-            sp.edit().putBoolean("lsposed_mode", false).apply();
+            ShellUtil.reset();
+            boolean restoreCrashFix = sp.getBoolean("crashfix_before_lsposed", false)
+                    && ShellUtil.hasDumpPermission(this);
+            boolean currentFixMode = sp.getBoolean("fixmode", false);
+            if (currentFixMode && !ShellUtil.hasAnyPermission()) {
+                currentFixMode = sp.getBoolean("fixmode_before_lsposed", false) && ShellUtil.hasAnyPermission();
+            }
+            sp.edit().putBoolean("lsposed_mode", false)
+                    .putBoolean("crashfix", restoreCrashFix)
+                    .putBoolean("fixmode", currentFixMode)
+                    .apply();
+            setCrashFixCheckedSilently(restoreCrashFix);
+            if (switchFixMode != null && switchFixMode.isChecked() != currentFixMode) {
+                switchFixMode.setChecked(currentFixMode);
+            }
+            if (switchLsposedFixMode != null && switchLsposedFixMode.isChecked() != currentFixMode) {
+                switchLsposedFixMode.setChecked(currentFixMode);
+            }
+            if (restoreCrashFix && sp.getBoolean("periodic_check", false)) {
+                TimerReceiver.scheduleNext(this);
+            }
             ModuleConfig.setEnabled(this, false);
             ModuleConfig.drainLogs(this);
-            LogUtil.log(this, "[模块] 关闭 LSPosed 模式");
+            LogUtil.log(this, "[模块] 关闭 LSPosed 模式, 恢复崩溃检测=" + restoreCrashFix);
             Toast.makeText(this, "已切回应用层崩溃检测", Toast.LENGTH_SHORT).show();
         }
         refreshLsposedModeUi();
@@ -1052,7 +1078,7 @@ public class SettingsActivity extends AppCompatActivity {
         }
 
         if (debugToolsRow != null) {
-            debugToolsRow.setVisibility(mode ? View.VISIBLE : View.GONE);
+            debugToolsRow.setVisibility((BuildConfig.DEBUG && mode) ? View.VISIBLE : View.GONE);
             if (debugToolsStatus != null) {
                 if (!loaded) {
                     debugToolsStatus.setText("模块本次开机未加载，调试不可用");

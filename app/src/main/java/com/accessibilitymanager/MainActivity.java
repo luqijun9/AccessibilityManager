@@ -283,11 +283,12 @@ public class MainActivity extends Activity {
             }
             if (itemId == R.id.perm_status) {
                 boolean lsposedMode = sp.getBoolean("lsposed_mode", false);
-                if (!lsposedMode && sp.getBoolean("crashfix", false) && !ShellUtil.hasDumpPermission(this)) {
+                boolean crashFix = sp.getBoolean("crashfix", false);
+                if (!lsposedMode && crashFix && !ShellUtil.hasDumpPermission(this)) {
                     showDumpPermissionDialog();
                     return true;
                 }
-                if (!lsposedMode && sp.getBoolean("fixmode", false) && !ShellUtil.hasAnyPermission()) {
+                if (!lsposedMode && crashFix && sp.getBoolean("fixmode", false) && !ShellUtil.hasAnyPermission()) {
                     showFixModePermissionDialog();
                     return true;
                 }
@@ -1681,7 +1682,7 @@ public class MainActivity extends Activity {
                 // 崩溃检测仅依赖 DUMP 权限，没有 DUMP 就显示失效
                 text = "崩溃检测失效ⓘ";
                 color = Color.rgb(0xFF, 0x00, 0x00);
-            } else if (!lsposedMode && fixModeEnabled && !ShellUtil.hasAnyPermission()) {
+            } else if (!lsposedMode && crashFixEnabled && fixModeEnabled && !ShellUtil.hasAnyPermission()) {
                 // 普通模式下强杀功能需要 Root/Shizuku 权限（LSPosed 模式由 system_server 直接强杀，无需权限）
                 text = "强杀功能失效ⓘ";
                 color = Color.rgb(0xFF, 0x00, 0x00);
@@ -2492,7 +2493,11 @@ public class MainActivity extends Activity {
             boolean isLoaded = ModuleConfig.isModuleLoaded(MainActivity.this);
             if (isLoaded) {
                 dialog.dismiss();
+                boolean prevCrashFix = sp.getBoolean("crashfix", false);
+                boolean prevFixMode = sp.getBoolean("fixmode", false);
                 sp.edit().putBoolean("lsposed_mode", true)
+                        .putBoolean("crashfix_before_lsposed", prevCrashFix)
+                        .putBoolean("fixmode_before_lsposed", prevFixMode)
                         .putBoolean("crashfix", false)
                         .putBoolean("mode_chosen", true)
                         .apply();
@@ -2524,9 +2529,22 @@ public class MainActivity extends Activity {
     }
 
     void chooseNormalMode(Runnable onModeReady) {
+        ShellUtil.reset();
+        boolean restoreCrashFix = sp.getBoolean("crashfix_before_lsposed", false)
+                && ShellUtil.hasDumpPermission(this);
+        boolean currentFixMode = sp.getBoolean("fixmode", false);
+        if (currentFixMode && !ShellUtil.hasAnyPermission()) {
+            currentFixMode = sp.getBoolean("fixmode_before_lsposed", false) && ShellUtil.hasAnyPermission();
+        }
         sp.edit().putBoolean("lsposed_mode", false)
+                .putBoolean("crashfix", restoreCrashFix)
+                .putBoolean("fixmode", currentFixMode)
                 .putBoolean("mode_chosen", true)
                 .apply();
+        if (restoreCrashFix && sp.getBoolean("periodic_check", false)) {
+            TimerReceiver.scheduleNext(this);
+        }
+        updateToolbarMenu();
         if (checkPermission()) {
             createPermissionDialog();
         } else {
