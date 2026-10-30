@@ -329,13 +329,7 @@ public class SettingsActivity extends AppCompatActivity {
         globalCooldownWrapper.setBackgroundResource(globalCooldownEnabled ? R.drawable.bg_nested_setting : 0);
         globalCooldownTimeLabel.setText(sp.getInt("global_cooldown_time_minutes", 15) + "分钟");
         switchUnlockCrashCheck.setChecked(sp.getBoolean("unlock_crash_check", false));
-        boolean notifyCrashPref = sp.getBoolean(NotificationMonitorService.KEY_NOTIFY_CRASH_CHECK, false);
-        boolean hasNotifyListenerPerm = NotificationMonitorService.isNotificationListenerEnabled(this);
-        if (notifyCrashPref && !hasNotifyListenerPerm) {
-            sp.edit().putBoolean(NotificationMonitorService.KEY_NOTIFY_CRASH_CHECK, false).apply();
-            notifyCrashPref = false;
-        }
-        switchNotifyCrashCheck.setChecked(notifyCrashPref);
+        switchNotifyCrashCheck.setChecked(sp.getBoolean(NotificationMonitorService.KEY_NOTIFY_CRASH_CHECK, false));
         updateNotifyCrashAppsDesc();
         boolean fixMode = sp.getBoolean("fixmode", false);
         switchFixMode.setChecked(fixMode);
@@ -2203,11 +2197,6 @@ public class SettingsActivity extends AppCompatActivity {
             } else {
                 Toast.makeText(this, "未授予通知使用权，功能未开启", Toast.LENGTH_SHORT).show();
             }
-        } else if (sp.getBoolean(NotificationMonitorService.KEY_NOTIFY_CRASH_CHECK, false)
-                && !NotificationMonitorService.isNotificationListenerEnabled(this)) {
-            sp.edit().putBoolean(NotificationMonitorService.KEY_NOTIFY_CRASH_CHECK, false).apply();
-            setNotifyCrashCheckSilently(false);
-            refreshCrashFixDependent();
         }
         refreshLsposedModeUi();
     }

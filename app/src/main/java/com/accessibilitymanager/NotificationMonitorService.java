@@ -86,6 +86,17 @@ public class NotificationMonitorService extends NotificationListenerService {
     }
 
     /**
+     * 判断主界面顶部栏是否需要显示“通知监听失效ⓘ”警告
+     */
+    public static boolean isNotifyMonitorWarningNeeded(
+            boolean lsposedMode,
+            boolean crashFixEnabled,
+            boolean notifyCrashCheckEnabled,
+            boolean listenerPermissionGranted) {
+        return !lsposedMode && crashFixEnabled && notifyCrashCheckEnabled && !listenerPermissionGranted;
+    }
+
+    /**
      * 检查目标包名是否在以冒号分隔的监听包名列表中
      */
     public static boolean isPackageWatched(String watchedPackagesStr, String targetPkg) {

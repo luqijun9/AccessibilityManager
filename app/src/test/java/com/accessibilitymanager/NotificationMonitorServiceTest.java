@@ -75,5 +75,21 @@ public class NotificationMonitorServiceTest {
         assertFalse(NotificationMonitorService.isComponentInEnabledListeners(
                 null, pkg, cls));
     }
+
+    @Test
+    public void isNotifyMonitorWarningNeeded_showsWarningOnlyWhenEnabledAndPermissionMissing() {
+        // 开启了非 LSPosed 崩溃检测 + 开启了监听通知检测 + 未授权通知使用权 -> 需提示
+        assertTrue(NotificationMonitorService.isNotifyMonitorWarningNeeded(false, true, true, false));
+
+        // 已授予通知使用权 -> 不提示
+        assertFalse(NotificationMonitorService.isNotifyMonitorWarningNeeded(false, true, true, true));
+
+        // 未开启监听通知检测 -> 不提示
+        assertFalse(NotificationMonitorService.isNotifyMonitorWarningNeeded(false, true, false, false));
+
+        // LSPosed 模式或未开启崩溃检测总开关 -> 不提示
+        assertFalse(NotificationMonitorService.isNotifyMonitorWarningNeeded(true, true, true, false));
+        assertFalse(NotificationMonitorService.isNotifyMonitorWarningNeeded(false, false, true, false));
+    }
 }
 
