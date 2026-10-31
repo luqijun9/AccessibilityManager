@@ -621,6 +621,9 @@ public class LogActivity extends AppCompatActivity {
         String accessibilityInfo = getAccessibilityServiceInfo();
 
         StringBuilder fullLog = new StringBuilder();
+        fullLog.append("=============== Device & Environment ===============\n\n");
+        fullLog.append(getEnvironmentDump());
+        fullLog.append("\n");
         fullLog.append("=============== App Status & Settings ===============\n\n");
         fullLog.append("MyAccessibilityService Enabled: ").append(isAccessibilityServiceEnabled()).append("\n\n");
         fullLog.append(getSharedPreferencesDump());
@@ -633,9 +636,97 @@ public class LogActivity extends AppCompatActivity {
         return fullLog.toString();
     }
 
-    private void shareLog() {
-        String fullLogStr = buildCompleteLogContent();
+    /** 设备、系统版本、管理器版本、权限与无障碍设置原始值：便于在他人设备上定位问题 */
+    private String getEnvironmentDump() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("管理器版本: ").append(BuildConfig.VERSION_NAME)
+                .append(" (versionCode ").append(BuildConfig.VERSION_CODE).append(")\n");
+        sb.append("设备: ").append(Build.MANUFACTURER).append(" ").append(Build.BRAND)
+                .append(" ").append(Build.MODEL).append(" (").append(Build.DEVICE).append(")\n");
+        sb.append("Android 版本: ").append(Build.VERSION.RELEASE)
+                .append(" (SDK ").append(Build.VERSION.SDK_INT).append(")\n");
+        sb.append("ROM: ").append(Build.DISPLAY)
+                .append("  增量版本: ").append(Build.VERSION.INCREMENTAL);
+        String miui = getSystemProperty("ro.miui.ui.version.name");
+        String hyperOs = getSystemProperty("ro.mi.os.version.name");
+        if (!miui.isEmpty()) {
+            sb.append("  MIUI: ").append(miui);
+        }
+        if (!hyperOs.isEmpty()) {
+            sb.append("  HyperOS: ").append(hyperOs);
+        }
+        sb.append('\n');
 
+        int permState = ShellUtil.getPermissionState();
+        sb.append("权限: DUMP=").append(hasDumpPermission())
+                .append("  Root=").append(permState == ShellUtil.PERM_ROOT)
+                .append("  Shizuku=").append(permState == ShellUtil.PERM_SHIZUKU).append('\n');
+
+        android.content.SharedPreferences sp =
+                getSharedPreferences("data", android.content.Context.MODE_PRIVATE);
+        sb.append("LSPosed 模式: ").append(sp.getBoolean("lsposed_mode", false))
+                .append("  模块已加载: ").append(ModuleConfig.isModuleLoaded(this)).append('\n');
+
+        android.content.ContentResolver resolver = getContentResolver();
+        sb.append("无障碍总开关 (accessibility_enabled): ")
+                .append(rawSettingLabel(android.provider.Settings.Secure.getString(
+                        resolver, android.provider.Settings.Secure.ACCESSIBILITY_ENABLED))).append('\n');
+        sb.append("启用列表 (enabled_accessibility_services): ")
+                .append(rawSettingLabel(android.provider.Settings.Secure.getString(
+                        resolver, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES))).append('\n');
+        sb.append("模块配置: 心跳=")
+                .append(rawSettingLabel(android.provider.Settings.Secure.getString(
+                        resolver, ModuleConfig.KEY_LOADED)))
+                .append("  启用=").append(rawSettingLabel(android.provider.Settings.Secure.getString(
+                        resolver, ModuleConfig.KEY_ENABLE)))
+                .append("  演练=").append(rawSettingLabel(android.provider.Settings.Secure.getString(
+                        resolver, ModuleConfig.KEY_DRY_RUN)))
+                .append("  强杀=").append(rawSettingLabel(android.provider.Settings.Secure.getString(
+                        resolver, ModuleConfig.KEY_FIX_MODE)))
+                .append("  崩溃保护=").append(rawSettingLabel(android.provider.Settings.Secure.getString(
+                        resolver, ModuleConfig.KEY_CIRCUIT_CONFIG))).append('\n');
+        sb.append("模块锁定列表: ").append(rawSettingLabel(android.provider.Settings.Secure.getString(
+                resolver, ModuleConfig.KEY_SERVICES))).append('\n');
+        return sb.toString();
+    }
+
+    /** 设置项原始值：null 表示设备上根本没有这个设置项（全新设备或被 ROM 清除） */
+    private static String rawSettingLabel(String value) {
+        if (value == null) {
+            return "不存在";
+        }
+        return value.isEmpty() ? "空" : value;
+    }
+
+    private String getSystemProperty(String key) {
+        try {
+            Class<?> clazz = Class.forName("android.os.SystemProperties");
+            java.lang.reflect.Method get = clazz.getMethod("get", String.class);
+            Object value = get.invoke(null, key);
+            return value instanceof String ? (String) value : "";
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    private boolean hasDumpPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            return checkSelfPermission(android.Manifest.permission.DUMP)
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        }
+        return checkCallingOrSelfPermission(android.Manifest.permission.DUMP)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    /** 分享日志：构建流程可能等待模块诊断快照，放到后台线程避免卡住界面 */
+    private void shareLog() {
+        new Thread(() -> {
+            String fullLogStr = buildCompleteLogContent();
+            runOnUiThread(() -> startShareLog(fullLogStr));
+        }).start();
+    }
+
+    private void startShareLog(String fullLogStr) {
         try {
             String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(new java.util.Date());
             File cacheDir = getCacheDir();
@@ -674,10 +765,9 @@ public class LogActivity extends AppCompatActivity {
     private void uploadLogToGitee() {
         android.widget.Toast.makeText(this, "正在上传日志...", android.widget.Toast.LENGTH_SHORT).show();
 
-        final String finalLogContent = buildCompleteLogContent();
-
         new Thread(() -> {
             try {
+                final String finalLogContent = buildCompleteLogContent();
                 String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(new java.util.Date());
                 String fileName = "accessibility_log_" + timestamp + ".txt";
 
@@ -731,12 +821,7 @@ public class LogActivity extends AppCompatActivity {
     private String getAccessibilityServiceInfo() {
         StringBuilder sb = new StringBuilder();
         try {
-            boolean hasDump = false;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                hasDump = checkSelfPermission(android.Manifest.permission.DUMP) == android.content.pm.PackageManager.PERMISSION_GRANTED;
-            } else {
-                hasDump = checkCallingOrSelfPermission(android.Manifest.permission.DUMP) == android.content.pm.PackageManager.PERMISSION_GRANTED;
-            }
+            boolean hasDump = hasDumpPermission();
 
             if (hasDump) {
                 Process process = Runtime.getRuntime().exec("dumpsys accessibility");
@@ -769,7 +854,8 @@ public class LogActivity extends AppCompatActivity {
             } else if (permState == ShellUtil.PERM_SHIZUKU) {
                 process = Shizuku.newProcess(new String[]{"dumpsys", "accessibility"}, null, null);
             } else {
-                sb.append("无 DUMP、Root 或 Shizuku 权限，无法获取 Accessibility 服务信息");
+                sb.append("无 DUMP、Root 或 Shizuku 权限，无法执行 dumpsys accessibility\n");
+                appendModuleDump(sb);
                 return sb.toString();
             }
 
@@ -784,6 +870,19 @@ public class LogActivity extends AppCompatActivity {
             sb.append("无法获取 Accessibility 服务信息: ").append(e.getMessage());
         }
         return sb.toString();
+    }
+
+    /** 无 DUMP/Root/Shizuku 时，改用 LSPosed 模块在 system_server 内采集诊断快照 */
+    private void appendModuleDump(StringBuilder sb) {
+        if (!ModuleConfig.isModuleLoaded(this)) {
+            return;
+        }
+        String dump = ModuleConfig.requestModuleDump(this, 1200L);
+        sb.append("\n--- LSPosed 模块诊断 (system_server) ---\n");
+        sb.append(dump == null || dump.isEmpty()
+                ? "模块未响应诊断请求，请确认模块是否在系统进程中激活"
+                : dump);
+        sb.append('\n');
     }
 
     /** 直接使用 DUMP 权限执行 dumpsys accessibility（不依赖 Root/Shizuku） */

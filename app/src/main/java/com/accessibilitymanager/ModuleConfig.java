@@ -7,6 +7,7 @@ import android.content.SharedPreferences;
 import android.database.ContentObserver;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.Settings;
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
@@ -26,6 +27,8 @@ public final class ModuleConfig {
     public static final String KEY_DEBUG = "a11y_module_debug";
     public static final String KEY_DEBUG_KILL = "a11y_module_debug_kill";
     public static final String KEY_CMD_ACK = "a11y_module_cmd_ack";
+    /** 模块在 system_server 内采集的诊断快照（供无 DUMP/Root/Shizuku 权限时导出日志） */
+    public static final String KEY_DUMP = "a11y_module_dump";
 
     // 系统广播通信管道（直达 system_server，零延迟、免 Root/免 Shizuku、永不断联）
     public static final String ACTION_SERVICE_CMD = "com.accessibilitymanager.action.SERVICE_CMD";
@@ -164,6 +167,33 @@ public final class ModuleConfig {
         put(context, KEY_DEBUG_KILL,
                 component + "#" + System.currentTimeMillis());
         return sendServiceCommandPayload(context, "debug_kill:" + component);
+    }
+
+    /** 请求模块采集 system_server 诊断快照；阻塞等待，禁止在主线程调用 */
+    public static String requestModuleDump(Context context, long timeoutMs) {
+        if (context == null) {
+            return null;
+        }
+        final Context app = context.getApplicationContext();
+        String before = get(app, KEY_DUMP);
+        if (!sendServiceCommandPayload(app, "dump_info")) {
+            return null;
+        }
+        long deadline = SystemClock.elapsedRealtime() + timeoutMs;
+        while (SystemClock.elapsedRealtime() < deadline) {
+            String value = get(app, KEY_DUMP);
+            if (value != null && !value.isEmpty() && !value.equals(before)) {
+                return value;
+            }
+            try {
+                Thread.sleep(50L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        String value = get(app, KEY_DUMP);
+        return value == null || value.isEmpty() ? null : value;
     }
 
     public static final String KEY_FIX_MODE = "a11y_module_fix_mode";

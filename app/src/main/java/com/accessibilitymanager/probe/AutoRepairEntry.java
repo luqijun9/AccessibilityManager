@@ -54,6 +54,8 @@ public class AutoRepairEntry extends XposedModule {
     private static final String KEY_CMD_ACK = "a11y_module_cmd_ack";
     private static final String KEY_LOADED = "a11y_module_loaded";
     private static final String KEY_EVENTS = "a11y_module_events";
+    // system_server 视角的诊断快照，供管理器在无 DUMP/Root/Shizuku 权限时导出日志
+    private static final String KEY_DUMP = "a11y_module_dump";
     // 持久事件通道容量：噪音聚合后 120 条约可覆盖数天；Settings.Secure 单值不宜过大
     private static final int EVENT_LIMIT = 120;
     // 非保活服务（便签输入法等）连接日志聚合窗口：本身不重要，1 小时一条；明细仍全部写 logcat
@@ -153,6 +155,8 @@ public class AutoRepairEntry extends XposedModule {
     private static volatile String sCircuitConfigCache;
     private static volatile String sDryRunCache;
     private static volatile String sDebugCache;
+    // 启用列表读取为 null 时的原因：非 null 表示读取异常，null 表示设置项不存在（全新设备或被 ROM 清空）
+    private static volatile Throwable sLastEnabledReadError;
 
     // 反射缓存
     private static final Map<String, Field> sFieldCache = new ConcurrentHashMap<>();
@@ -551,8 +555,16 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
         String enabled = readEnabled();
-        if (enabled == null || enabled.isEmpty()) {
-            eventSkip("scan:no-enabled", "失败", "扫描跳过 (" + reason + ")：启用列表读取失败");
+        if (enabled == null) {
+            eventSkip("scan:no-enabled", sLastEnabledReadError != null ? "失败" : "扫描",
+                    "扫描跳过 (" + reason + ")：" + enabledReadSkipReason());
+            return;
+        }
+        if (enabled.isEmpty()) {
+            // 设置项存在但为空：没有任何已启用服务，无可扫描对象
+            if ("manual scan".equals(reason)) {
+                event("扫描", "扫描完成 (" + reason + ")，发现 0 个异常服务");
+            }
             return;
         }
         if (!hasConnectionState()) {
@@ -610,7 +622,8 @@ public class AutoRepairEntry extends XposedModule {
         String managed = readConfig(KEY_SERVICES);
         String enabled = readEnabled();
         if (enabled == null) {
-            eventSkip("reconcile:no-enabled", "失败", "补回跳过 (" + reason + ")：启用列表读取失败");
+            eventSkip("reconcile:no-enabled", sLastEnabledReadError != null ? "失败" : "保活",
+                    "补回跳过 (" + reason + ")：" + enabledReadSkipReason());
             return;
         }
         if (managed == null || managed.isEmpty()) {
@@ -719,7 +732,8 @@ public class AutoRepairEntry extends XposedModule {
         String managed = readConfig(KEY_SERVICES);
         String enabled = readEnabled();
         if (enabled == null) {
-            eventSkip("verify:no-enabled", "失败", "补回后校验跳过 (" + reason + ")：启用列表读取失败");
+            eventSkip("verify:no-enabled", sLastEnabledReadError != null ? "失败" : "保活",
+                    "补回后校验跳过 (" + reason + ")：" + enabledReadSkipReason());
             return;
         }
         if (managed == null || managed.isEmpty()) {
@@ -935,6 +949,12 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
 
+        if ("dump_info".equals(body)) {
+            writeModuleDump();
+            notifyCommandAck();
+            return;
+        }
+
         if ("scan".equals(body)) {
             scheduleScan(0L, "manual scan");
             event("扫描", "收到手动扫描指令");
@@ -1090,8 +1110,18 @@ public class AutoRepairEntry extends XposedModule {
         }
         String current = readEnabled();
         if (current == null) {
+            if (sLastEnabledReadError != null) {
+                // 读取异常时不写入，避免用空列表覆盖掉已有服务
+                event("失败", "手动" + (enable ? "开启" : "关闭") + "失败："
+                        + enabledReadSkipReason() + ": " + component);
+                notifyCommandAck();
+                return;
+            }
             // 设置项不存在（全新设备，或 ROM 在关闭无障碍总开关后清空该值）等价于空列表。
             // 旧逻辑在此直接返回，导致首次开启服务被静默跳过，管理器侧只能看到“模块响应超时”
+            if (enable) {
+                event("配置", "启用列表设置项不存在，按空列表处理");
+            }
             current = "";
         }
         boolean present = containsComponent(current, target);
@@ -1133,6 +1163,87 @@ public class AutoRepairEntry extends XposedModule {
         } catch (Throwable t) {
             log("enable accessibility switch error: " + t);
         }
+    }
+
+    /** 采集 system_server 视角的诊断快照，供管理器在无 DUMP/Root/Shizuku 权限时导出日志 */
+    private static void writeModuleDump() {
+        Context context = sContext;
+        if (context == null) {
+            context = getSystemContext();
+        }
+        if (context == null) {
+            return;
+        }
+        ContentResolver resolver = context.getContentResolver();
+        try {
+            String enabled = Settings.Secure.getString(resolver, SETTING_ENABLED);
+            int accessibilityEnabled;
+            try {
+                accessibilityEnabled = Settings.Secure.getInt(resolver,
+                        Settings.Secure.ACCESSIBILITY_ENABLED);
+            } catch (Throwable t) {
+                accessibilityEnabled = -1;
+            }
+            String heartbeat = readSecure(KEY_LOADED);
+            String managed = readConfig(KEY_SERVICES);
+            String circuit = readConfig(KEY_CIRCUIT_CONFIG);
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("采集时间: ").append(System.currentTimeMillis()).append('\n');
+            sb.append("模块心跳: ").append(heartbeat == null ? "不存在" : heartbeat)
+                    .append("  bootCount=")
+                    .append(Settings.Global.getInt(resolver, SETTING_BOOT_COUNT, -1)).append('\n');
+            sb.append("无障碍总开关: ").append(accessibilityEnabled < 0 ? "不存在" : accessibilityEnabled)
+                    .append("  启用列表: ").append(enabled == null ? "不存在"
+                            : (enabled.isEmpty() ? "空" : enabled))
+                    .append('\n');
+            sb.append("绑定状态可读: ").append(hasConnectionState())
+                    .append("  已记录连接: ").append(sConnections.size()).append('\n');
+            sb.append("模块启用: ").append(isModuleEnabled())
+                    .append("  演练模式: ").append(isDryRun())
+                    .append("  强杀模式: ").append("1".equals(readConfig(KEY_FIX_MODE)))
+                    .append("  崩溃保护: ").append(circuit == null ? "默认" : circuit).append('\n');
+            sb.append("锁定列表: ").append(managed == null || managed.isEmpty() ? "空" : managed)
+                    .append('\n');
+            if (managed != null && !managed.isEmpty()) {
+                long now = SystemClock.elapsedRealtime();
+                for (String raw : managed.split(":")) {
+                    ComponentName component = ComponentName.unflattenFromString(raw);
+                    if (component == null) {
+                        continue;
+                    }
+                    String key = component.flattenToString();
+                    sb.append("[服务] ").append(key)
+                            .append("  在启用列表=").append(containsComponent(enabled, component))
+                            .append("  已绑定=").append(findBoundConnection(component) != null)
+                            .append("  崩溃标记=").append(getCrashedMarker(component));
+                    Integer attempts = sAttempts.get(key);
+                    sb.append("  重试=").append(attempts == null ? 0 : attempts)
+                            .append('/').append(getMaxAttempts());
+                    Long blockedUntil = sBlockedUntil.get(key);
+                    long remain = blockedUntil == null ? 0L : Math.max(0L, blockedUntil - now) / 1000L;
+                    sb.append("  暂停修复剩余=").append(remain).append("s\n");
+                }
+            }
+            Settings.Secure.putString(resolver, KEY_DUMP, sb.toString());
+        } catch (Throwable t) {
+            log("dump info failed: " + t);
+            try {
+                Settings.Secure.putString(resolver, KEY_DUMP, "采集失败: " + t);
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    /** 读取连接上的崩溃标记；没有连接记录时返回“无记录” */
+    private static String getCrashedMarker(ComponentName component) {
+        Object connection = sConnections.get(component.flattenToString());
+        if (connection == null) {
+            return "无记录";
+        }
+        Object info = getFieldValue(connection, "mAccessibilityServiceInfo");
+        Object crashed = info == null ? null : getFieldValue(info, "crashed");
+        return crashed instanceof Boolean ? String.valueOf(crashed) : "未知";
     }
 
     private static void scheduleDebugKill() {
@@ -1795,17 +1906,27 @@ public class AutoRepairEntry extends XposedModule {
         return obj instanceof ComponentName ? (ComponentName) obj : null;
     }
 
+    /** 读取启用列表：返回 null 时原因见 sLastEnabledReadError，避免把“设置项不存在”误判成读取失败 */
     private static String readEnabled() {
         Context context = sContext;
         if (context == null) {
+            sLastEnabledReadError = null;
             return null;
         }
         try {
+            sLastEnabledReadError = null;
             return Settings.Secure.getString(context.getContentResolver(), SETTING_ENABLED);
         } catch (Throwable t) {
+            sLastEnabledReadError = t;
             log("read enabled failed: " + t);
             return null;
         }
+    }
+
+    private static String enabledReadSkipReason() {
+        return sLastEnabledReadError != null
+                ? "启用列表读取异常: " + sLastEnabledReadError
+                : "启用列表设置项不存在";
     }
 
     private static boolean writeEnabled(String value) {
