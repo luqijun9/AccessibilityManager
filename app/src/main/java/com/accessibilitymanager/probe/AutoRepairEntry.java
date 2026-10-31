@@ -1090,7 +1090,9 @@ public class AutoRepairEntry extends XposedModule {
         }
         String current = readEnabled();
         if (current == null) {
-            return;
+            // 设置项不存在（全新设备，或 ROM 在关闭无障碍总开关后清空该值）等价于空列表。
+            // 旧逻辑在此直接返回，导致首次开启服务被静默跳过，管理器侧只能看到“模块响应超时”
+            current = "";
         }
         boolean present = containsComponent(current, target);
         if (enable == present) {
@@ -1100,11 +1102,37 @@ public class AutoRepairEntry extends XposedModule {
         }
         String updated = enable ? addComponent(current, target) : removeComponent(current, target);
         if (writeEnabled(updated)) {
+            if (enable) {
+                ensureAccessibilitySwitchOn();
+            }
             event("保活", "手动" + (enable ? "开启" : "关闭") + ": " + component);
         } else {
             event("失败", "手动" + (enable ? "开启" : "关闭") + "写入失败: " + component);
         }
         notifyCommandAck();
+    }
+
+    /** 开启单个服务时确保无障碍总开关为开启状态，否则只写启用列表不会真正绑定服务 */
+    private static void ensureAccessibilitySwitchOn() {
+        Context context = sContext;
+        if (context == null) {
+            return;
+        }
+        try {
+            int enabled = Settings.Secure.getInt(context.getContentResolver(),
+                    Settings.Secure.ACCESSIBILITY_ENABLED, 0);
+            if (enabled == 1) {
+                return;
+            }
+            if (!Settings.Secure.putInt(context.getContentResolver(),
+                    Settings.Secure.ACCESSIBILITY_ENABLED, 1)) {
+                log("enable accessibility switch failed");
+                return;
+            }
+            event("保活", "无障碍总开关未开启，已代为开启");
+        } catch (Throwable t) {
+            log("enable accessibility switch error: " + t);
+        }
     }
 
     private static void scheduleDebugKill() {

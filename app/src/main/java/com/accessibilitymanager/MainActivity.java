@@ -2268,10 +2268,16 @@ public class MainActivity extends Activity {
                                 Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
                         boolean isNowEnabled = isServiceEnabled(targetService, current);
                         if (isNowEnabled != expected) {
+                            boolean moduleLoaded = ModuleConfig.isModuleLoaded(MainActivity.this);
                             LogUtil.log(MainActivity.this, "[异常] 模块响应超时: 服务 [" + targetService
                                     + "] " + (expected ? "开启" : "关闭")
-                                    + "未能生效，请检查 LSPosed 模块是否在系统进程中激活");
-                            Toast.makeText(MainActivity.this, "模块响应超时，请检查模块激活状态", Toast.LENGTH_SHORT).show();
+                                    + "未能生效，"
+                                    + (moduleLoaded ? "模块已激活但启用列表未更新，请查看日志"
+                                            : "请检查 LSPosed 模块是否在系统进程中激活"));
+                            Toast.makeText(MainActivity.this,
+                                    moduleLoaded ? "服务状态未在 3 秒内生效，请查看日志"
+                                            : "模块响应超时，请检查模块激活状态",
+                                    Toast.LENGTH_SHORT).show();
                         }
                     };
                     mPendingServiceTimeoutRunnables.put(targetService, timeoutRunnable);
