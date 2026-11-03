@@ -1002,10 +1002,19 @@ public class daemonService extends Service {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             notification.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(1, notification.build(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
-        } else {
-            startForeground(1, notification.build());
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(1, notification.build(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+            } else {
+                startForeground(1, notification.build());
+            }
+        } catch (SecurityException se) {
+            LogUtil.log(this, "[保活服务] 特殊前台服务权限受限，尝试常规启动: " + se.getMessage());
+            try {
+                startForeground(1, notification.build());
+            } catch (Throwable t) {
+                LogUtil.log(this, "[保活服务] 前台服务启动异常: " + t.getMessage());
+            }
         }
 
         // ★ 先无条件取消旧定时器，避免更新/重启后残留定时器触发

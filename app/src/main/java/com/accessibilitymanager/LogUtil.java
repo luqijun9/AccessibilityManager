@@ -9,6 +9,8 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -193,6 +195,28 @@ public class LogUtil {
                 reader.close();
             }
         } catch (Exception ignored) {
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 格式化崩溃异常信息，输出包含线程、异常类型、提示信息及完整堆栈追踪
+     */
+    public static String formatCrashLog(Thread t, Throwable e) {
+        String threadName = t != null ? t.getName() : "unknown";
+        String errorMsg = (e != null ? e.getClass().getName() : "Throwable")
+                + (e != null && e.getMessage() != null ? (": " + e.getMessage()) : "");
+        StringBuilder sb = new StringBuilder();
+        sb.append("[异常崩溃] 线程: ").append(threadName).append(", 错误: ").append(errorMsg);
+        if (e != null) {
+            StringWriter sw = new StringWriter();
+            PrintWriter pw = new PrintWriter(sw);
+            e.printStackTrace(pw);
+            pw.flush();
+            String trace = sw.toString().trim();
+            if (!trace.isEmpty()) {
+                sb.append("\n").append(trace);
+            }
         }
         return sb.toString();
     }

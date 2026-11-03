@@ -35,7 +35,7 @@ public class App extends Application {
         Thread.UncaughtExceptionHandler defaultHandler = Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
             try {
-                LogUtil.log(App.this, "[异常崩溃] 线程: " + t.getName() + ", 错误: " + e.getMessage());
+                LogUtil.log(App.this, LogUtil.formatCrashLog(t, e));
             } catch (Exception ignored) {}
             if (defaultHandler != null) {
                 defaultHandler.uncaughtException(t, e);
