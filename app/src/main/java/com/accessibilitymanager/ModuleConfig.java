@@ -350,11 +350,13 @@ public final class ModuleConfig {
             app.getContentResolver().registerContentObserver(
                     Settings.Secure.CONTENT_URI, true, observer);
             sLogObserver = observer;
+            // 先补读进程离线期间模块积压的历史事件，再记录当前启动时间，保证日志时间线严格递增
+            drainLogs(app);
             LogUtil.log(app, "[模块] 日志同步已启动");
         } catch (Throwable t) {
+            drainLogs(app);
             LogUtil.log(app, "[模块] 日志同步注册失败: " + t);
         }
-        drainLogs(app);
     }
 
     /** 把模块缓冲中尚未写入管理器日志的事件补上 */

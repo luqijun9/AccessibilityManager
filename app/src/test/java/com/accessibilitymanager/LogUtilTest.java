@@ -1,12 +1,25 @@
 package com.accessibilitymanager;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
 public class LogUtilTest {
+
+    @Test
+    public void shouldWriteDateHeader_skipsDuplicateHeaderWhenDailyFileAlreadyExists() {
+        // 首次创建当天新文件：应写入日期分隔行
+        assertTrue(LogUtil.shouldWriteDateHeader("2026-11-09", null, false));
+        // 进程重启后 sCurrentDate 为 null，但当天日志文件已非空：不应重复写入日期分隔行
+        assertFalse(LogUtil.shouldWriteDateHeader("2026-11-09", null, true));
+        // 同进程内同一天后续写入：不应重复写入
+        assertFalse(LogUtil.shouldWriteDateHeader("2026-11-09", "2026-11-09", true));
+        // 跨天切换到新文件：应写入日期分隔行
+        assertTrue(LogUtil.shouldWriteDateHeader("2026-11-10", "2026-11-09", false));
+    }
 
     @Test
     public void formatForDisplay_stripsMillisAndRawMetaAndShortensComponents() {

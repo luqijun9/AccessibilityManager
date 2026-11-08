@@ -64,20 +64,24 @@ public class LogUtil {
             File logFile = new File(dir, today + ".txt");
 
             if (!today.equals(sCurrentDate)) {
+                boolean fileExistsAndNonEmpty = logFile.exists() && logFile.length() > 0;
+                boolean writeHeader = shouldWriteDateHeader(today, sCurrentDate, fileExistsAndNonEmpty);
                 sCurrentDate = today;
                 sLastLogTime = 0;
 
-                String displayDate = DISPLAY_DATE_FMT.format(new Date(now));
-                FileOutputStream fos = new FileOutputStream(logFile, true);
-                OutputStreamWriter writer = new OutputStreamWriter(fos, "UTF-8");
-                String dateLine = DATE_SEPARATOR_PREFIX + displayDate;
-                writer.write(dateLine + "\n");
-                writer.flush();
-                writer.close();
+                if (writeHeader) {
+                    String displayDate = DISPLAY_DATE_FMT.format(new Date(now));
+                    FileOutputStream fos = new FileOutputStream(logFile, true);
+                    OutputStreamWriter writer = new OutputStreamWriter(fos, "UTF-8");
+                    String dateLine = DATE_SEPARATOR_PREFIX + displayDate;
+                    writer.write(dateLine + "\n");
+                    writer.flush();
+                    writer.close();
+                    // 通知日期分隔行
+                    notifyListeners(LogEntry.TYPE_DATE_SEPARATOR, displayDate);
+                }
 
                 cleanupOldLogs(dir);
-                // 通知日期分隔行
-                notifyListeners(LogEntry.TYPE_DATE_SEPARATOR, displayDate);
             }
 
             String timestamp = TIME_FMT.format(new Date(now));
@@ -202,6 +206,13 @@ public class LogUtil {
     private static final java.util.regex.Pattern FULL_COMPONENT_PATTERN =
             java.util.regex.Pattern.compile(
                     "([a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_]*)+)/([a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_$]*)+)");
+
+    static boolean shouldWriteDateHeader(String today, String currentDate, boolean fileExistsAndNonEmpty) {
+        if (today == null || today.equals(currentDate)) {
+            return false;
+        }
+        return !fileExistsAndNonEmpty;
+    }
 
     /**
      * 将落盘的完整原始日志行格式化为适合手机界面阅读的简洁文本：
