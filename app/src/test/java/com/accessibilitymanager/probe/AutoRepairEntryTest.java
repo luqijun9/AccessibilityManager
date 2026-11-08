@@ -86,4 +86,17 @@ public class AutoRepairEntryTest {
         assertFalse(RepairPolicy.shouldKillPackage(
                 pkg, "android", true, svcA, svcA, null, 100_000L));
     }
+
+    @Test
+    public void formatEventLine_appendsRawMetaAndUptime() {
+        assertEquals("142.3s", RepairPolicy.formatUptimeSeconds(142_340L));
+        assertEquals(
+                "[检测] 崩溃: com.foo/.BarService | hook=binderDied conn=@1a2b crashed=true up=142.3s",
+                RepairPolicy.formatEventLine(
+                        "检测", "崩溃: com.foo/.BarService",
+                        "hook=binderDied conn=@1a2b crashed=true", 142_340L));
+        assertEquals(
+                "[配置] 模块已启用 | up=5.0s",
+                RepairPolicy.formatEventLine("配置", "模块已启用", null, 5_000L));
+    }
 }

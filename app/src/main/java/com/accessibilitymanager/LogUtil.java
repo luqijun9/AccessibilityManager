@@ -43,7 +43,7 @@ public class LogUtil {
     private static final String GAP_MARKER = "__GAP__";
     private static final SimpleDateFormat FILE_DATE_FMT = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
     private static final SimpleDateFormat DISPLAY_DATE_FMT = new SimpleDateFormat("M月d日", Locale.getDefault());
-    private static final SimpleDateFormat TIME_FMT = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
+    private static final SimpleDateFormat TIME_FMT = new SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault());
     private static final long SEPARATOR_INTERVAL = 5 * 60 * 1000L;
     private static final int MAX_LOG_DAYS = 3;
     private static String sCurrentDate;
@@ -196,6 +196,63 @@ public class LogUtil {
             }
         } catch (Exception ignored) {
         }
+        return sb.toString();
+    }
+
+    private static final java.util.regex.Pattern FULL_COMPONENT_PATTERN =
+            java.util.regex.Pattern.compile(
+                    "([a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_]*)+)/([a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_$]*)+)");
+
+    /**
+     * 将落盘的完整原始日志行格式化为适合手机界面阅读的简洁文本：
+     * 1. 隐藏毫秒后缀（HH:mm:ss.SSS -> HH:mm:ss）；
+     * 2. 隐藏竖线 " | " 之后的底层 AI/诊断元数据；
+     * 3. 将冗长的完整组件名（pkg/pkg.sub.ClassName）缩写为 pkg/.ClassName。
+     */
+    public static String formatForDisplay(String rawLine) {
+        if (rawLine == null || rawLine.isEmpty()) {
+            return "";
+        }
+        String line = rawLine;
+        int rawSep = line.indexOf(" | ");
+        if (rawSep > 0) {
+            line = line.substring(0, rawSep);
+        }
+        if (line.length() >= 14
+                && line.charAt(2) == ':'
+                && line.charAt(5) == ':'
+                && line.charAt(8) == '.'
+                && Character.isDigit(line.charAt(9))
+                && Character.isDigit(line.charAt(10))
+                && Character.isDigit(line.charAt(11))
+                && line.charAt(12) == ' ') {
+            line = line.substring(0, 8) + line.substring(12);
+        }
+        return shortenComponents(line);
+    }
+
+    public static String shortenComponents(String text) {
+        if (text == null || text.indexOf('/') < 0) {
+            return text;
+        }
+        java.util.regex.Matcher matcher = FULL_COMPONENT_PATTERN.matcher(text);
+        StringBuffer sb = null;
+        while (matcher.find()) {
+            if (sb == null) {
+                sb = new StringBuffer(text.length());
+            }
+            String pkg = matcher.group(1);
+            String cls = matcher.group(2);
+            int lastDot = cls.lastIndexOf('.');
+            String shortComp = lastDot >= 0
+                    ? (pkg + "/." + cls.substring(lastDot + 1))
+                    : (pkg + "/" + cls);
+            matcher.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(shortComp));
+        }
+        if (sb == null) {
+            return text;
+        }
+        matcher.appendTail(sb);
         return sb.toString();
     }
 

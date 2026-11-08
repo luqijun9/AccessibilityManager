@@ -839,6 +839,7 @@ public class LogActivity extends AppCompatActivity {
                 errReader.close();
 
                 process.waitFor();
+                appendModuleDump(sb);
                 return sb.toString();
             }
 
@@ -866,8 +867,10 @@ public class LogActivity extends AppCompatActivity {
             }
             reader.close();
             process.waitFor();
+            appendModuleDump(sb);
         } catch (Exception e) {
             sb.append("无法获取 Accessibility 服务信息: ").append(e.getMessage());
+            appendModuleDump(sb);
         }
         return sb.toString();
     }
@@ -1083,7 +1086,7 @@ public class LogActivity extends AppCompatActivity {
                     convertView = createLongLineView();
                 }
                 LongLineHolder holder = (LongLineHolder) convertView.getTag();
-                String line = entry.text;
+                String line = LogUtil.formatForDisplay(entry.text);
                 boolean expanded = mExpandedLongLines.contains(entry.rawStart);
                 holder.text.setMaxLines(expanded ? Integer.MAX_VALUE : 1);
                 holder.text.setEllipsize(expanded ? null : TextUtils.TruncateAt.END);
@@ -1119,7 +1122,9 @@ public class LogActivity extends AppCompatActivity {
                 } else {
                     tv = (TextView) convertView;
                 }
-                String line = entry.text;
+                String line = entry.kind == LogItem.KIND_GROUP
+                        ? entry.text
+                        : LogUtil.formatForDisplay(entry.text);
                 SpannableStringBuilder ssb = new SpannableStringBuilder(line);
                 int color;
                 if (entry.kind == LogItem.KIND_GROUP) {

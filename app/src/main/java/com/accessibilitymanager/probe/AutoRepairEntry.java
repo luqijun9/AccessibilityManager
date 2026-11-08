@@ -118,8 +118,10 @@ public class AutoRepairEntry extends XposedModule {
     private static int sContextRetryCount;
 
     // 事件缓冲
+    private static final int RAW_TRACE_LIMIT = 200;
     private static final Object sEventLock = new Object();
     private static final Deque<String> sEventLines = new ArrayDeque<>();
+    private static final Deque<String> sRawTraceLines = new ArrayDeque<>();
     private static final String sEventSession =
             Long.toHexString(System.currentTimeMillis());
     private static long sEventSeq;
@@ -239,9 +241,20 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static void event(String category, String message) {
-        String line = "[" + category + "] " + message;
+        event(category, message, null);
+    }
+
+    private static void event(String category, String message, String rawMeta) {
+        String line = RepairPolicy.formatEventLine(
+                category, message, rawMeta, SystemClock.elapsedRealtime());
         log(line);
         appendEvent(line);
+    }
+
+    private static String connId(Object connection) {
+        return connection == null
+                ? "null"
+                : ("@" + Integer.toHexString(System.identityHashCode(connection)));
     }
 
     /** 非保活服务的连接/断开：logcat 保留全部明细，持久事件按组件 1 小时聚合，避免刷掉关键事件 */
@@ -635,7 +648,8 @@ public class AutoRepairEntry extends XposedModule {
         if (enabled.isEmpty()) {
             // 设置项存在但为空：没有任何已启用服务，无可扫描对象
             if ("manual scan".equals(reason)) {
-                event("扫描", "扫描完成 (" + reason + ")，发现 0 个异常服务");
+                event("扫描", "扫描完成 (" + reason + ")，发现 0 个异常服务",
+                        "action=scan_done reason=" + reason + " unbound=0");
             }
             return;
         }
@@ -666,11 +680,14 @@ public class AutoRepairEntry extends XposedModule {
                 return;
             }
             candidates++;
-            event("检测", "扫描发现未绑定服务: " + key);
+            event("检测", "扫描发现未绑定服务: " + key,
+                    "action=scan_hit reason=" + reason + " lastConn=" + connId(sConnections.get(key))
+                            + " crashedMarker=" + getCrashedMarker(component));
             scheduleCheck(component, key, SETTLE_MS);
         }
         if (candidates > 0 || "manual scan".equals(reason)) {
-            event("扫描", "扫描完成 (" + reason + ")，发现 " + candidates + " 个异常服务");
+            event("扫描", "扫描完成 (" + reason + ")，发现 " + candidates + " 个异常服务",
+                    "action=scan_done reason=" + reason + " unbound=" + candidates);
         }
     }
 
@@ -769,9 +786,10 @@ public class AutoRepairEntry extends XposedModule {
         }
 
         sLastReconcileWriteAt = now;
-        event("保活", "补回已关闭服务 (" + count + "): " + added + " [" + reason + "]");
+        event("保活", "补回已关闭服务 (" + count + "): " + added,
+                "action=reconcile reason=" + reason + " count=" + count);
         if (!writeEnabled(desired)) {
-            event("失败", "补回写入失败: " + added);
+            event("失败", "补回写入失败: " + added, "action=reconcile_write_fail reason=" + reason);
             return;
         }
         sPendingVerifyKeys.addAll(newlyAddedKeys);
@@ -854,7 +872,9 @@ public class AutoRepairEntry extends XposedModule {
             scheduleCheck(component, key, SETTLE_MS);
         }
         if (unbound > 0) {
-            event("检测", "补回后仍未绑定 " + unbound + " 个，准备修复 (" + reason + ")");
+            event("检测", "补回后仍未绑定 " + unbound + " 个，准备修复",
+                    "action=verify_bindings reason=" + reason + " unbound=" + unbound
+                            + " checked=" + targets.size());
         }
     }
 
@@ -1172,8 +1192,9 @@ public class AutoRepairEntry extends XposedModule {
         if ("debug_kill".equals(action)) {
             int slash = component.indexOf('/');
             String pkg = slash > 0 ? component.substring(0, slash) : component;
-            killAppProcesses(pkg);
-            event("调试", "已触发进程强杀: " + component);
+            String killMeta = killAppProcesses(pkg);
+            event("调试", "已触发进程强杀: " + component,
+                    "action=debug_kill pkg=" + pkg + " " + killMeta);
             notifyCommandAck();
             return;
         }
@@ -1310,6 +1331,15 @@ public class AutoRepairEntry extends XposedModule {
                     sb.append("  暂停修复剩余=").append(remain).append("s\n");
                 }
             }
+            synchronized (sEventLock) {
+                if (!sRawTraceLines.isEmpty()) {
+                    sb.append("\n--- 模块底层原始轨迹 (最近 ")
+                            .append(sRawTraceLines.size()).append(" 条) ---\n");
+                    for (String traceLine : sRawTraceLines) {
+                        sb.append(traceLine).append('\n');
+                    }
+                }
+            }
             Settings.Secure.putString(resolver, KEY_DUMP, sb.toString());
         } catch (Throwable t) {
             log("dump info failed: " + t);
@@ -1405,16 +1435,16 @@ public class AutoRepairEntry extends XposedModule {
         killAppProcesses(pkg);
     }
 
-    private static void killAppProcesses(String pkg) {
+    private static String killAppProcesses(String pkg) {
         if (sContext == null || pkg == null || pkg.isEmpty()) {
-            return;
+            return "uid=-1 killedPids=[]";
         }
         final int uid;
         try {
             uid = sContext.getPackageManager().getApplicationInfo(pkg, 0).uid;
         } catch (Throwable t) {
             log("killAppProcesses: package not found: " + pkg);
-            return;
+            return "uid=not_found killedPids=[]";
         }
 
         Set<Integer> pids = new LinkedHashSet<>();
@@ -1445,14 +1475,17 @@ public class AutoRepairEntry extends XposedModule {
             log("killAppProcesses enumerate failed: " + t);
         }
 
+        Set<Integer> killed = new LinkedHashSet<>();
         for (int pid : pids) {
             try {
                 Process.killProcess(pid);
+                killed.add(pid);
                 log("killAppProcesses: killed pid " + pid + " for " + pkg);
             } catch (Throwable t) {
                 log("killAppProcesses: kill pid " + pid + " failed: " + t);
             }
         }
+        return "uid=" + uid + " killedPids=" + killed;
     }
 
     private static void onBinderDied(ComponentName component, boolean crashed,
@@ -1496,7 +1529,8 @@ public class AutoRepairEntry extends XposedModule {
         Object currentBound = findBoundConnection(component);
         if (currentBound != null) {
             clearCrashedMarker(currentBound, component);
-            log("[监听] 忽略旧连接断开事件(当前新连接已正常绑定): " + key);
+            log("[监听] 忽略旧连接断开事件(当前新连接已正常绑定): " + key
+                    + " diedConn=" + connId(connection) + " activeConn=" + connId(currentBound));
             return;
         }
 
@@ -1518,9 +1552,10 @@ public class AutoRepairEntry extends XposedModule {
         }
 
         boolean enabled = isModuleEnabled();
-        event("检测", "崩溃: " + key + " (已启用=" + enabled
-                + ", 演练模式=" + (isDryRun() ? "开" : "关")
-                + ", 接口=" + hasInterface + ")");
+        event("检测", "崩溃: " + key,
+                "hook=binderDied conn=" + connId(connection) + " crashed=" + crashed
+                        + " iface=" + hasInterface + " enabled=" + enabled
+                        + " dryRun=" + isDryRun());
         if (!enabled) {
             return;
         }
@@ -1572,12 +1607,18 @@ public class AutoRepairEntry extends XposedModule {
             finishRepair(key);
             clearCrashedMarker(connection, component);
             if (managed) {
+                String baseMeta = "hook=initializeService conn=" + connId(connection)
+                        + " crashed=" + crashed + " iface=" + hasInterface;
                 if (cancelled) {
-                    event("保活", "服务已恢复就绪（无需额外重启）: " + key);
+                    event("保活", "服务已恢复就绪（无需额外重启）: " + key,
+                            baseMeta + " state=recovered_before_check");
                 } else if (wasRepairing) {
-                    event("修复", "恢复成功: " + key);
+                    long costMs = sRepairStartedAt > 0L ? Math.max(0L, now - sRepairStartedAt) : -1L;
+                    event("修复", "恢复成功: " + key,
+                            baseMeta + " state=repair_ok cost=" + costMs + "ms");
                 } else {
-                    event("服务", "服务已就绪: " + key);
+                    event("服务", "服务已就绪: " + key,
+                            baseMeta + " state=connected");
                 }
             } else {
                 eventNonManaged(key, "非保活服务连接(忽略)");
@@ -1590,8 +1631,9 @@ public class AutoRepairEntry extends XposedModule {
                     + ", iface=" + hasInterface);
             return;
         }
-        event("检测", "重绑失败 (crashed=" + crashed + ", iface=" + hasInterface
-                + "): " + key);
+        event("检测", "重绑失败: " + key,
+                "hook=initializeService conn=" + connId(connection)
+                        + " crashed=" + crashed + " iface=" + hasInterface);
         if (sContext != null && isModuleEnabled() && !sPendingCheck.containsKey(key)) {
             scheduleCheck(component, key, SETTLE_MS);
         }
@@ -1728,9 +1770,10 @@ public class AutoRepairEntry extends XposedModule {
         sRepairKey = key;
 
         event("修复", "第 " + (attempts + 1) + "/" + maxAttempts
-                + " 次关开，先关闭: " + key);
+                + " 次关开，先关闭: " + key,
+                "action=repair_disable attempt=" + (attempts + 1) + "/" + maxAttempts);
         if (!writeEnabled(removed)) {
-            event("失败", "关闭写入失败: " + key);
+            event("失败", "关闭写入失败: " + key, "action=repair_disable_fail");
             finishRepair(key);
             block(key, "disable write failed");
             return;
@@ -1751,8 +1794,9 @@ public class AutoRepairEntry extends XposedModule {
         if (allowKill) {
             sLastPackageKillAt.put(pkg, now);
             suppressPackageServices(pkg, now + SUPPRESS_MS);
-            killAppProcesses(pkg);
-            event("修复", "强杀应用进程后重启: " + pkg);
+            String killMeta = killAppProcesses(pkg);
+            event("修复", "强杀应用进程后重启: " + pkg,
+                    "action=kill_package pkg=" + pkg + " " + killMeta);
         } else if (fixMode && lastPkgKillAt != null && now - lastPkgKillAt < PACKAGE_KILL_COOLDOWN_MS) {
             log("skip duplicate kill for package within cooldown: " + pkg);
         }
@@ -1765,12 +1809,14 @@ public class AutoRepairEntry extends XposedModule {
                 } else {
                     String readd = addComponent(current == null ? "" : current, component);
                     if (!writeEnabled(readd)) {
-                        event("失败", "重新开启写入失败: " + key);
+                        event("失败", "重新开启写入失败: " + key, "action=repair_enable_fail");
                         finishRepair(key);
                         block(key, "enable write failed");
                         return;
                     }
-                    event("修复", "已重新开启: " + key);
+                    event("修复", "已重新开启: " + key,
+                            "action=repair_enable toggleOffMs="
+                                    + Math.max(0L, SystemClock.elapsedRealtime() - now));
                 }
                 scheduleVerify(component, key);
             } catch (Throwable t) {
@@ -1788,19 +1834,25 @@ public class AutoRepairEntry extends XposedModule {
         Runnable runnable = () -> {
             sVerifyRun.remove(key);
             try {
+                long verifyNow = SystemClock.elapsedRealtime();
+                long costMs = sRepairStartedAt > 0L ? Math.max(0L, verifyNow - sRepairStartedAt) : -1L;
                 Object boundConnection = findBoundConnection(component);
                 if (boundConnection != null) {
                     clearCrashedMarker(boundConnection, component);
                     sAttempts.remove(key);
-                    sSuppressUntil.put(key, SystemClock.elapsedRealtime() + SETTLE_MS);
-                    event("修复", "恢复成功: " + key);
+                    sSuppressUntil.put(key, verifyNow + SETTLE_MS);
+                    event("修复", "恢复成功: " + key,
+                            "action=verify_ok conn=" + connId(boundConnection) + " cost=" + costMs + "ms");
                 } else if (!sBoundCheckAvailable) {
-                    event("失败", "无法确认绑定状态，结束修复: " + key);
+                    event("失败", "无法确认绑定状态，结束修复: " + key,
+                            "action=verify_unknown cost=" + costMs + "ms");
                 } else {
                     int attempts = sAttempts.getOrDefault(key, 0);
                     int maxAttempts = getMaxAttempts();
                     event("失败", "恢复失败 (" + attempts + "/" + maxAttempts
-                            + "): " + key);
+                            + "): " + key,
+                            "action=verify_fail attempt=" + attempts + "/" + maxAttempts
+                                    + " cost=" + costMs + "ms lastConn=" + connId(sConnections.get(key)));
                     if (attempts < maxAttempts) {
                         scheduleCheck(component, key, RETRY_COOLDOWN_MS);
                     } else {
@@ -2295,6 +2347,18 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static void log(String message) {
+        try {
+            synchronized (sEventLock) {
+                String trace = System.currentTimeMillis()
+                        + " (up=" + RepairPolicy.formatUptimeSeconds(SystemClock.elapsedRealtime())
+                        + ") " + message;
+                sRawTraceLines.addLast(trace);
+                while (sRawTraceLines.size() > RAW_TRACE_LIMIT) {
+                    sRawTraceLines.removeFirst();
+                }
+            }
+        } catch (Throwable ignored) {
+        }
         try {
             Log.i(TAG, message);
         } catch (Throwable ignored) {

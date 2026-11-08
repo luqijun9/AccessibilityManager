@@ -60,5 +60,27 @@ final class RepairPolicy {
         }
         return true;
     }
+
+    /** 将开机相对毫秒格式化为秒（保留 1 位小数，如 142.3s） */
+    static String formatUptimeSeconds(long elapsedRealtimeMs) {
+        long tenths = Math.max(0L, elapsedRealtimeMs) / 100L;
+        return (tenths / 10L) + "." + (tenths % 10L) + "s";
+    }
+
+    /**
+     * 组合面向用户展示的中文描述与面向 AI/排障的原始技术参数：
+     * 格式为 "[分类] 中文描述 | rawKey=val ... up=142.3s"
+     */
+    static String formatEventLine(String category, String message, String rawMeta,
+            long elapsedRealtimeMs) {
+        StringBuilder sb = new StringBuilder();
+        sb.append('[').append(category).append("] ").append(message);
+        sb.append(" | ");
+        if (rawMeta != null && !rawMeta.isEmpty()) {
+            sb.append(rawMeta).append(' ');
+        }
+        sb.append("up=").append(formatUptimeSeconds(elapsedRealtimeMs));
+        return sb.toString();
+    }
 }
 
