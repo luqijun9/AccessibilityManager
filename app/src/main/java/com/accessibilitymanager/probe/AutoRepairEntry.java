@@ -94,7 +94,10 @@ public class AutoRepairEntry extends XposedModule {
     // 补回写入后延迟检查是否真正绑定（force-stop 后可能“列表已恢复但未绑定”）
     private static final long BIND_VERIFY_DELAY_MS = 2000L;
     private static final long REPAIR_REMOVE_WINDOW_MS = TOGGLE_OFF_MS + 1500L;
-    private static final long BOOT_GRACE_MS = 60000L;
+    static final long BOOT_GRACE_MS = RepairPolicy.BOOT_GRACE_MS;
+    static final long BOOT_FIRST_CONNECT_WINDOW_MS = RepairPolicy.BOOT_FIRST_CONNECT_WINDOW_MS;
+    static final long BOOT_WAVE_GRACE_MS = RepairPolicy.BOOT_WAVE_GRACE_MS;
+    static final long PACKAGE_KILL_COOLDOWN_MS = RepairPolicy.PACKAGE_KILL_COOLDOWN_MS;
 
     private static volatile AutoRepairEntry sModuleInstance;
     private static volatile Context sContext;
@@ -146,6 +149,10 @@ public class AutoRepairEntry extends XposedModule {
     private static boolean sReconcileRetryPending;
     private static boolean sBindVerifyPending;
     private static long sLastReconcileWriteAt;
+    private static long sFirstServiceConnectAt;
+    private static Runnable sPostBootCheckRunnable;
+    private static final Map<String, Long> sLastPackageKillAt = new HashMap<>();
+    private static final Set<String> sPendingVerifyKeys = new LinkedHashSet<>();
     private static final Map<String, Long> sSelfRemovedUntil = new HashMap<>();
     private static final Map<String, Long> sManualHiddenUntil = new HashMap<>();
     private static volatile String sModuleEnabledCache;
@@ -360,11 +367,24 @@ public class AutoRepairEntry extends XposedModule {
             final boolean finalCrashed = crashed;
             handler.post(() -> {
                 try {
-                    sConnections.put(component.flattenToString(), connection);
-                    if (died) {
-                        onBinderDied(component, finalCrashed, hasInterface, connection);
-                    } else {
+                    long now = SystemClock.elapsedRealtime();
+                    if (!died && sFirstServiceConnectAt == 0L) {
+                        sFirstServiceConnectAt = now;
+                        long remainingBoot = getRemainingBootGraceMs(now, sFirstServiceConnectAt);
+                        if (remainingBoot > 0L) {
+                            schedulePostBootCheck(remainingBoot + 1000L);
+                        }
+                    }
+                    String connKey = component.flattenToString();
+                    if (!died) {
+                        sConnections.put(connKey, connection);
                         onInitializeService(component, finalCrashed, hasInterface, connection);
+                    } else {
+                        Object existing = sConnections.get(connKey);
+                        if (existing == null || existing == connection || !isConnectionBound(existing)) {
+                            sConnections.put(connKey, connection);
+                        }
+                        onBinderDied(component, finalCrashed, hasInterface, connection);
                     }
                 } catch (Throwable t) {
                     event("失败", "事件处理异常: " + t);
@@ -508,11 +528,14 @@ public class AutoRepairEntry extends XposedModule {
             sObserverAttempts = 0;
             event("配置", "配置监听已注册 (含 boot_count 实时同步)");
             writeHeartbeatOnce("observer_ready");
-            scheduleScan(SCAN_INIT_DELAY_MS, "init");
             long sinceBoot = SystemClock.elapsedRealtime();
-            long reconcileDelay = sinceBoot < BOOT_GRACE_MS
-                    ? BOOT_GRACE_MS - sinceBoot + 5000L : SCAN_INIT_DELAY_MS;
-            scheduleReconcile("init", reconcileDelay);
+            long remainingBoot = getRemainingBootGraceMs(sinceBoot, sFirstServiceConnectAt);
+            if (remainingBoot > 0L) {
+                schedulePostBootCheck(remainingBoot + 1000L);
+            } else {
+                scheduleScan(SCAN_INIT_DELAY_MS, "init");
+                scheduleReconcile("init", SCAN_INIT_DELAY_MS);
+            }
         } catch (Throwable t) {
             sObserver = null;
             sObserverAttempts++;
@@ -523,6 +546,45 @@ public class AutoRepairEntry extends XposedModule {
                 event("失败", "配置监听注册失败 (" + sObserverAttempts + "): " + t);
             }
         }
+    }
+
+    /**
+     * 计算开机冷却期截止时间（elapsedRealtime 毫秒）：
+     * 基础冷却 BOOT_GRACE_MS（90s）；若在开机 180s 内首次收到无障碍服务连接（用户解锁后系统开始批量绑定），
+     * 则从首个服务连接起至少给予 BOOT_WAVE_GRACE_MS（30s）的缓冲期，等待系统将队列中的慢启动服务自然绑定完毕。
+     */
+    static long getBootGraceDeadlineMs(long firstConnectAt) {
+        return RepairPolicy.getBootGraceDeadlineMs(firstConnectAt);
+    }
+
+    static long getRemainingBootGraceMs(long now, long firstConnectAt) {
+        return RepairPolicy.getRemainingBootGraceMs(now, firstConnectAt);
+    }
+
+    private static void schedulePostBootCheck(long delayMs) {
+        if (sHandler == null) {
+            return;
+        }
+        if (sPostBootCheckRunnable != null) {
+            sHandler.removeCallbacks(sPostBootCheckRunnable);
+        }
+        sPostBootCheckRunnable = () -> {
+            sPostBootCheckRunnable = null;
+            long now = SystemClock.elapsedRealtime();
+            long remaining = getRemainingBootGraceMs(now, sFirstServiceConnectAt);
+            if (remaining > 0L) {
+                schedulePostBootCheck(remaining + 500L);
+                return;
+            }
+            try {
+                reconcileMissing("boot_ready");
+                runScan("boot_ready");
+            } catch (Throwable t) {
+                event("失败", "开机巡检异常: " + t);
+            }
+        };
+        sHandler.postDelayed(sPostBootCheckRunnable, delayMs);
+        log("post-boot check scheduled in " + delayMs + "ms");
     }
 
     private static void scheduleScan(long delayMs, String reason) {
@@ -548,6 +610,16 @@ public class AutoRepairEntry extends XposedModule {
         if (!isModuleEnabled()) {
             eventSkip("scan:disabled", "扫描", "跳过 (" + reason + ")：模块已停用");
             return;
+        }
+        boolean isManual = "manual scan".equals(reason) || "reset_circuit".equals(reason);
+        if (!isManual) {
+            long now = SystemClock.elapsedRealtime();
+            long remainingBoot = getRemainingBootGraceMs(now, sFirstServiceConnectAt);
+            if (remainingBoot > 0L) {
+                eventSkip("scan:boot-grace", "扫描", "跳过扫描 (" + reason + ")：开机冷却期内");
+                schedulePostBootCheck(remainingBoot + 1000L);
+                return;
+            }
         }
         String managed = readConfig(KEY_SERVICES);
         if (managed == null || managed.isEmpty()) {
@@ -615,8 +687,10 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
         long now = SystemClock.elapsedRealtime();
-        if (now < BOOT_GRACE_MS) {
+        long remainingBoot = getRemainingBootGraceMs(now, sFirstServiceConnectAt);
+        if (remainingBoot > 0L) {
             eventSkip("reconcile:boot-grace", "保活", "跳过补回 (" + reason + ")：开机保护期内");
+            schedulePostBootCheck(remainingBoot + 1000L);
             return;
         }
         String managed = readConfig(KEY_SERVICES);
@@ -633,6 +707,7 @@ public class AutoRepairEntry extends XposedModule {
 
         String desired = enabled;
         StringBuilder added = new StringBuilder();
+        Set<String> newlyAddedKeys = new LinkedHashSet<>();
         int count = 0;
         for (String raw : managed.split(":")) {
             ComponentName component = ComponentName.unflattenFromString(raw);
@@ -666,6 +741,7 @@ public class AutoRepairEntry extends XposedModule {
                 added.append(' ');
             }
             added.append(key);
+            newlyAddedKeys.add(key);
             count++;
         }
         if (count == 0) {
@@ -698,10 +774,11 @@ public class AutoRepairEntry extends XposedModule {
             event("失败", "补回写入失败: " + added);
             return;
         }
+        sPendingVerifyKeys.addAll(newlyAddedKeys);
         scheduleBindVerify(reason);
     }
 
-    /** 补回后等待 AMS 绑定，再确认是否真的起来了；force-stop 后可能只写了列表但没绑定 */
+    /** 补回后等待 AMS 绑定，仅校验本次实际补回的服务是否起来了，避免误伤其他正常服务 */
     private static void scheduleBindVerify(String reason) {
         if (sBindVerifyPending) {
             return;
@@ -718,6 +795,11 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static void verifyBindings(String reason) {
+        if (sPendingVerifyKeys.isEmpty()) {
+            return;
+        }
+        Set<String> targets = new LinkedHashSet<>(sPendingVerifyKeys);
+        sPendingVerifyKeys.clear();
         if (sContext == null) {
             return;
         }
@@ -725,25 +807,27 @@ public class AutoRepairEntry extends XposedModule {
             eventSkip("verify:disabled", "保活", "跳过补回后校验 (" + reason + ")：模块已停用");
             return;
         }
+        long now = SystemClock.elapsedRealtime();
+        long remainingBoot = getRemainingBootGraceMs(now, sFirstServiceConnectAt);
+        if (remainingBoot > 0L) {
+            eventSkip("verify:boot-grace", "保活", "跳过补回后校验 (" + reason + ")：开机冷却期内");
+            schedulePostBootCheck(remainingBoot + 1000L);
+            return;
+        }
         if (!hasConnectionState()) {
             eventSkip("verify:no-conn", "失败", "补回后校验跳过 (" + reason + ")：没有可用的连接状态");
             return;
         }
-        String managed = readConfig(KEY_SERVICES);
         String enabled = readEnabled();
         if (enabled == null) {
             eventSkip("verify:no-enabled", sLastEnabledReadError != null ? "失败" : "保活",
                     "补回后校验跳过 (" + reason + ")：" + enabledReadSkipReason());
             return;
         }
-        if (managed == null || managed.isEmpty()) {
-            return;
-        }
-        long now = SystemClock.elapsedRealtime();
         int unbound = 0;
-        for (String raw : managed.split(":")) {
+        for (String raw : targets) {
             ComponentName component = ComponentName.unflattenFromString(raw);
-            if (component == null) {
+            if (component == null || !isManaged(component)) {
                 continue;
             }
             String key = component.flattenToString();
@@ -967,6 +1051,7 @@ public class AutoRepairEntry extends XposedModule {
             sBlockedUntil.clear();
             sAttempts.clear();
             sLastAttemptAt.clear();
+            sLastPackageKillAt.clear();
             sCrashHistory.clear();
             event("配置", "已手动恢复暂停修复的服务 (清除 " + count + " 个暂停记录)");
             scheduleScan(0L, "reset_circuit");
@@ -1394,9 +1479,24 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
 
+        long remainingBoot = getRemainingBootGraceMs(now, sFirstServiceConnectAt);
+        if (remainingBoot > 0L) {
+            eventSkip("died:boot-grace:" + key, "检测", "忽略（开机冷却期内）: " + key);
+            schedulePostBootCheck(remainingBoot + 1000L);
+            return;
+        }
+
         Long suppress = sSuppressUntil.get(key);
         if (suppress != null && now < suppress) {
             eventSkip("died:suppress:" + key, "检测", "忽略（修复抑制窗口）: " + key);
+            return;
+        }
+
+        // 若新连接已就绪（当前已存在有效绑定），说明收到的是旧连接退役时的延迟 binderDied，直接清理标记并忽略
+        Object currentBound = findBoundConnection(component);
+        if (currentBound != null) {
+            clearCrashedMarker(currentBound, component);
+            log("[监听] 忽略旧连接断开事件(当前新连接已正常绑定): " + key);
             return;
         }
 
@@ -1451,15 +1551,24 @@ public class AutoRepairEntry extends XposedModule {
         boolean managed = isManaged(component);
 
         if (!crashed && hasInterface) {
-            boolean cancelled = sPendingCheck.remove(key) != null;
+            Runnable pendingCheck = sPendingCheck.remove(key);
+            boolean cancelled = pendingCheck != null;
+            if (pendingCheck != null && sHandler != null) {
+                sHandler.removeCallbacks(pendingCheck);
+            }
             Runnable verify = sVerifyRun.remove(key);
-            if (verify != null) {
+            if (verify != null && sHandler != null) {
                 sHandler.removeCallbacks(verify);
             }
-            sSuppressUntil.remove(key);
             Integer attempts = sAttempts.remove(key);
             boolean wasRepairing = (attempts != null && attempts > 0) || key.equals(sRepairKey);
-            sLastAttemptAt.remove(key);
+            if (wasRepairing) {
+                // 保留短暂抑制期，防止强杀修复后旧连接的延迟 binderDied 穿透造成假崩溃报警
+                sSuppressUntil.put(key, now + SETTLE_MS);
+            } else {
+                sSuppressUntil.remove(key);
+                sLastAttemptAt.remove(key);
+            }
             finishRepair(key);
             clearCrashedMarker(connection, component);
             if (managed) {
@@ -1507,6 +1616,13 @@ public class AutoRepairEntry extends XposedModule {
 
     private static void runCheck(ComponentName component, String key) {
         long now = SystemClock.elapsedRealtime();
+
+        long remainingBoot = getRemainingBootGraceMs(now, sFirstServiceConnectAt);
+        if (remainingBoot > 0L) {
+            eventSkip("check:boot-grace:" + key, "检测", "跳过检查（开机冷却期内）: " + key);
+            schedulePostBootCheck(remainingBoot + 1000L);
+            return;
+        }
 
         Long suppress = sSuppressUntil.get(key);
         if (suppress != null && now < suppress) {
@@ -1558,6 +1674,32 @@ public class AutoRepairEntry extends XposedModule {
         repair(component, key, attempts);
     }
 
+    static boolean isSelfOrSystemPackage(String pkg, String contextPkg) {
+        return RepairPolicy.isSelfOrSystemPackage(pkg, contextPkg);
+    }
+
+    static boolean shouldKillPackage(String pkg, String contextPkg, boolean fixMode,
+            String disabledList, String componentKey, Long lastPkgKillAt, long now) {
+        return RepairPolicy.shouldKillPackage(
+                pkg, contextPkg, fixMode, disabledList, componentKey, lastPkgKillAt, now);
+    }
+
+    private static void suppressPackageServices(String pkg, long suppressUntilMs) {
+        if (pkg == null || pkg.isEmpty()) {
+            return;
+        }
+        String managed = readConfig(KEY_SERVICES);
+        if (managed == null || managed.isEmpty()) {
+            return;
+        }
+        for (String raw : managed.split(":")) {
+            ComponentName cn = ComponentName.unflattenFromString(raw);
+            if (cn != null && pkg.equals(cn.getPackageName())) {
+                sSuppressUntil.put(cn.flattenToString(), suppressUntilMs);
+            }
+        }
+    }
+
     private static void repair(ComponentName component, String key, int attempts) {
         long now = SystemClock.elapsedRealtime();
         if (isRepairInProgress(now)) {
@@ -1600,13 +1742,19 @@ public class AutoRepairEntry extends XposedModule {
         String disabled = sFixDisabledCache != null
                 ? sFixDisabledCache
                 : readConfig(KEY_FIX_DISABLED);
-        boolean allowKill = fixMode
-                && (disabled == null || !disabled.contains(component.flattenToString()))
-                && sContext != null && !component.getPackageName().equals(sContext.getPackageName());
+        String pkg = component.getPackageName();
+        String contextPkg = sContext != null ? sContext.getPackageName() : null;
+        Long lastPkgKillAt = sLastPackageKillAt.get(pkg);
+        boolean allowKill = shouldKillPackage(
+                pkg, contextPkg, fixMode, disabled, key, lastPkgKillAt, now);
 
         if (allowKill) {
-            killAppProcesses(component.getPackageName());
-            event("修复", "强杀应用进程后重启: " + component.getPackageName());
+            sLastPackageKillAt.put(pkg, now);
+            suppressPackageServices(pkg, now + SUPPRESS_MS);
+            killAppProcesses(pkg);
+            event("修复", "强杀应用进程后重启: " + pkg);
+        } else if (fixMode && lastPkgKillAt != null && now - lastPkgKillAt < PACKAGE_KILL_COOLDOWN_MS) {
+            log("skip duplicate kill for package within cooldown: " + pkg);
         }
 
         sHandler.postDelayed(() -> {
@@ -1644,7 +1792,7 @@ public class AutoRepairEntry extends XposedModule {
                 if (boundConnection != null) {
                     clearCrashedMarker(boundConnection, component);
                     sAttempts.remove(key);
-                    sLastAttemptAt.remove(key);
+                    sSuppressUntil.put(key, SystemClock.elapsedRealtime() + SETTLE_MS);
                     event("修复", "恢复成功: " + key);
                 } else if (!sBoundCheckAvailable) {
                     event("失败", "无法确认绑定状态，结束修复: " + key);
