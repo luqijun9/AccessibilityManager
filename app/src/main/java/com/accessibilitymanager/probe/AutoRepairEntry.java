@@ -1883,17 +1883,20 @@ public class AutoRepairEntry extends XposedModule {
 
         Long blocked = sBlockedUntil.get(key);
         if (blocked != null) {
-            if (now < blocked) {
+            if (!RepairPolicy.isBlockExpired(blocked, now)) {
+                long delay = RepairPolicy.getRemainingBlockDelayMs(blocked, now);
+                scheduleCheck(component, key, delay);
                 eventSkip("died:blocked:" + key, "检测", "忽略（暂停修复中）: " + key);
                 return;
             }
             sBlockedUntil.remove(key);
             sAttempts.remove(key);
             sLastAttemptAt.remove(key);
+            sCrashHistory.remove(key);
         }
 
         Long lastAttempt = sLastAttemptAt.get(key);
-        if (lastAttempt != null && now - lastAttempt > RESET_AFTER_MS) {
+        if (RepairPolicy.shouldResetAttempts(lastAttempt, now, RESET_AFTER_MS)) {
             sAttempts.remove(key);
             sCrashHistory.remove(key);
         }
@@ -1907,14 +1910,21 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
 
-        recordCrash(key, now);
+        recordCrash(component, key, now);
         Long afterRecord = sBlockedUntil.get(key);
         if (afterRecord != null && now < afterRecord) {
-            event("失败", "连续崩溃，暂停修复跳过: " + key);
+            long delay = RepairPolicy.getRemainingBlockDelayMs(afterRecord, now);
+            scheduleCheck(component, key, delay);
+            event("失败", "连续崩溃，暂停修复跳过（到期将自动复查）: " + key,
+                    "action=circuit_pause_skip recheckInMs=" + delay);
             return;
         }
         if (sAttempts.getOrDefault(key, 0) >= getMaxAttempts()) {
-            event("失败", "重试次数已用完，跳过: " + key);
+            long delay = RepairPolicy.getRemainingResetDelayMs(
+                    sLastAttemptAt.get(key), now, RESET_AFTER_MS);
+            scheduleCheck(component, key, delay);
+            event("失败", "重试次数已用完，等待冷却后自动复查: " + key,
+                    "action=max_attempts_wait recheckInMs=" + delay);
             return;
         }
 
@@ -2045,18 +2055,40 @@ public class AutoRepairEntry extends XposedModule {
         }
 
         Long blocked = sBlockedUntil.get(key);
-        if (blocked != null && now < blocked) {
-            event("失败", "跳过（暂停修复中）: " + key);
-            return;
+        if (blocked != null) {
+            if (!RepairPolicy.isBlockExpired(blocked, now)) {
+                long delay = RepairPolicy.getRemainingBlockDelayMs(blocked, now);
+                scheduleCheck(component, key, delay);
+                eventSkip("check:blocked:" + key, "失败", "跳过（暂停修复中，到期自动复查）: " + key);
+                return;
+            }
+            sBlockedUntil.remove(key);
+            sAttempts.remove(key);
+            sLastAttemptAt.remove(key);
+            sCrashHistory.remove(key);
+            log("circuit breaker expired in runCheck, resuming repair: " + key);
         }
+
+        Long last = sLastAttemptAt.get(key);
+        if (RepairPolicy.shouldResetAttempts(last, now, RESET_AFTER_MS)) {
+            sAttempts.remove(key);
+            sCrashHistory.remove(key);
+            last = null;
+            log("retry attempts reset after cooldown window in runCheck: " + key);
+        }
+
         int attempts = sAttempts.getOrDefault(key, 0);
         if (attempts >= getMaxAttempts()) {
-            event("失败", "跳过（重试次数已用完）: " + key);
+            long delay = RepairPolicy.getRemainingResetDelayMs(last, now, RESET_AFTER_MS);
+            scheduleCheck(component, key, delay);
+            eventSkip("check:max-attempts:" + key, "失败",
+                    "跳过（已达单轮重试上限，冷却后自动复查）: " + key);
             return;
         }
-        Long last = sLastAttemptAt.get(key);
         if (last != null && now - last < RETRY_COOLDOWN_MS) {
-            event("检测", "跳过（重试冷却中）: " + key);
+            long remainCooldown = (RETRY_COOLDOWN_MS - (now - last)) + 200L;
+            scheduleCheck(component, key, remainCooldown);
+            log("skip check within retry cooldown, rescheduled in " + remainCooldown + "ms: " + key);
             return;
         }
 
@@ -2122,7 +2154,7 @@ public class AutoRepairEntry extends XposedModule {
         if (!writeEnabled(removed)) {
             event("失败", "关闭写入失败: " + key, "action=repair_disable_fail");
             finishRepair(key);
-            block(key, "disable write failed");
+            block(component, key, "disable write failed");
             return;
         }
 
@@ -2158,7 +2190,7 @@ public class AutoRepairEntry extends XposedModule {
                     if (!writeEnabled(readd)) {
                         event("失败", "重新开启写入失败: " + key, "action=repair_enable_fail");
                         finishRepair(key);
-                        block(key, "enable write failed");
+                        block(component, key, "enable write failed");
                         return;
                     }
                     event("修复", "已重新开启: " + key,
@@ -2203,7 +2235,12 @@ public class AutoRepairEntry extends XposedModule {
                     if (attempts < maxAttempts) {
                         scheduleCheck(component, key, RETRY_COOLDOWN_MS);
                     } else {
-                        event("失败", "放弃修复（已达重试上限）: " + key);
+                        long resetDelay = RepairPolicy.getRemainingResetDelayMs(
+                                sLastAttemptAt.get(key), verifyNow, RESET_AFTER_MS);
+                        event("失败", "已达单轮重试上限，将在 " + (RESET_AFTER_MS / 60000L)
+                                + " 分钟后自动复查: " + key,
+                                "action=verify_cooldown_scheduled recheckInMs=" + resetDelay);
+                        scheduleCheck(component, key, resetDelay);
                     }
                 }
             } catch (Throwable t) {
@@ -2232,17 +2269,24 @@ public class AutoRepairEntry extends XposedModule {
         }
     }
 
-    private static void block(String key, String reason) {
+    private static void block(ComponentName component, String key, String reason) {
         long cooldownMs = getUnstableCooldownMs();
         if (cooldownMs <= 0L) {
             return;
         }
-        sBlockedUntil.put(key, SystemClock.elapsedRealtime() + cooldownMs);
-        event("失败", "暂停修复 " + (cooldownMs / 60000L) + " 分钟 ("
-                + reason + "): " + key);
+        long now = SystemClock.elapsedRealtime();
+        long blockedUntil = now + cooldownMs;
+        sBlockedUntil.put(key, blockedUntil);
+        long delay = RepairPolicy.getRemainingBlockDelayMs(blockedUntil, now);
+        if (component != null) {
+            scheduleCheck(component, key, delay);
+        }
+        event("失败", "暂停修复 " + (cooldownMs / 60000L) + " 分钟（到期将自动复查, "
+                + reason + "）: " + key,
+                "action=block reason=" + reason + " recheckInMs=" + delay);
     }
 
-    private static void recordCrash(String key, long now) {
+    private static void recordCrash(ComponentName component, String key, long now) {
         Deque<Long> history = sCrashHistory.get(key);
         if (history == null) {
             history = new ArrayDeque<>();
@@ -2254,10 +2298,16 @@ public class AutoRepairEntry extends XposedModule {
         history.addLast(now);
         long cooldownMs = getUnstableCooldownMs();
         if (cooldownMs > 0L && history.size() >= getUnstableThreshold()) {
-            sBlockedUntil.put(key, now + cooldownMs);
+            long blockedUntil = now + cooldownMs;
+            sBlockedUntil.put(key, blockedUntil);
+            long delay = RepairPolicy.getRemainingBlockDelayMs(blockedUntil, now);
+            if (component != null) {
+                scheduleCheck(component, key, delay);
+            }
             event("失败", "连续 " + history.size() + " 次崩溃（"
                     + (UNSTABLE_WINDOW_MS / 1000) + " 秒内），暂停自动修复 "
-                    + (cooldownMs / 60000L) + " 分钟: " + key);
+                    + (cooldownMs / 60000L) + " 分钟（到期自动复查）: " + key,
+                    "action=circuit_open crashes=" + history.size() + " recheckInMs=" + delay);
         }
     }
 

@@ -245,4 +245,22 @@ public class AutoRepairEntryTest {
         assertEquals(0L,
                 RepairPolicy.getRemainingBootGraceMs(6_685_000L, moduleStartAt, firstConnectAt));
     }
+
+    @Test
+    public void circuitBreakerAndRetryReset_calculatesExpirationAndWakeupDelays() {
+        long blockedUntil = 600_000L;
+        assertFalse(RepairPolicy.isBlockExpired(blockedUntil, 500_000L));
+        assertEquals(100_500L, RepairPolicy.getRemainingBlockDelayMs(blockedUntil, 500_000L));
+        assertTrue(RepairPolicy.isBlockExpired(blockedUntil, 600_000L));
+        assertEquals(0L, RepairPolicy.getRemainingBlockDelayMs(blockedUntil, 600_000L));
+
+        long resetAfterMs = 5 * 60 * 1000L; // 300_000ms
+        long lastAttemptAt = 100_000L;
+        assertFalse(RepairPolicy.shouldResetAttempts(lastAttemptAt, 350_000L, resetAfterMs));
+        assertEquals(50_500L,
+                RepairPolicy.getRemainingResetDelayMs(lastAttemptAt, 350_000L, resetAfterMs));
+        assertTrue(RepairPolicy.shouldResetAttempts(lastAttemptAt, 400_000L, resetAfterMs));
+        assertEquals(500L,
+                RepairPolicy.getRemainingResetDelayMs(lastAttemptAt, 400_000L, resetAfterMs));
+    }
 }
