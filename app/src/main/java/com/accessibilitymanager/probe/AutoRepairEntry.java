@@ -47,6 +47,7 @@ public class AutoRepairEntry extends XposedModule {
 
     // 热重载跨代状态键（仅使用 JDK/Android 标准类型，跨 ClassLoader 安全传递）
     private static final String STATE_CONNECTIONS = "connections";
+    private static final String STATE_MODULE_START_AT = "module_start_at";
     private static final String STATE_FIRST_CONNECT_AT = "first_connect_at";
     private static final String STATE_BLOCKED_UNTIL = "blocked_until";
     private static final String STATE_ATTEMPTS = "attempts";
@@ -175,6 +176,7 @@ public class AutoRepairEntry extends XposedModule {
     private static boolean sReconcileRetryPending;
     private static boolean sBindVerifyPending;
     private static long sLastReconcileWriteAt;
+    private static long sModuleStartAt = SystemClock.elapsedRealtime();
     private static long sFirstServiceConnectAt;
     private static Runnable sPostBootCheckRunnable;
     private static final Map<String, Long> sLastPackageKillAt = new HashMap<>();
@@ -257,6 +259,7 @@ public class AutoRepairEntry extends XposedModule {
         try {
             Map<String, Object> state = new HashMap<>();
             state.put(STATE_CONNECTIONS, new HashMap<>(sConnections));
+            state.put(STATE_MODULE_START_AT, sModuleStartAt);
             state.put(STATE_FIRST_CONNECT_AT, sFirstServiceConnectAt);
             state.put(STATE_BLOCKED_UNTIL, new HashMap<>(sBlockedUntil));
             state.put(STATE_ATTEMPTS, new HashMap<>(sAttempts));
@@ -396,6 +399,12 @@ public class AutoRepairEntry extends XposedModule {
             Object firstConnect = state.get(STATE_FIRST_CONNECT_AT);
             if (firstConnect instanceof Long) {
                 sFirstServiceConnectAt = (Long) firstConnect;
+            }
+            Object moduleStart = state.get(STATE_MODULE_START_AT);
+            if (moduleStart instanceof Long && (Long) moduleStart > 0L) {
+                sModuleStartAt = (Long) moduleStart;
+            } else if (sFirstServiceConnectAt > 0L) {
+                sModuleStartAt = Math.max(1L, sFirstServiceConnectAt - BOOT_GRACE_MS);
             }
             Object reloadCount = state.get(STATE_HOT_RELOAD_COUNT);
             if (reloadCount instanceof Integer) {
@@ -586,8 +595,8 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static void event(String category, String message, String rawMeta) {
-        String line = RepairPolicy.formatEventLine(
-                category, message, rawMeta, SystemClock.elapsedRealtime());
+        long sinceStart = Math.max(0L, SystemClock.elapsedRealtime() - sModuleStartAt);
+        String line = RepairPolicy.formatEventLine(category, message, rawMeta, sinceStart);
         log(line);
         appendEvent(line);
     }
@@ -598,17 +607,9 @@ public class AutoRepairEntry extends XposedModule {
                 : ("@" + Integer.toHexString(System.identityHashCode(connection)));
     }
 
-    /** 非保活服务的连接/断开：logcat 保留全部明细，持久事件按组件 1 小时聚合，避免刷掉关键事件 */
+    /** 非保活服务的连接/断开：仅记录到底层诊断轨迹与 logcat，不再写入持久主日志列表干扰用户 */
     private static void eventNonManaged(String key, String summary) {
-        EventThrottle.Decision decision =
-                sNonManagedThrottle.onEvent(key, SystemClock.elapsedRealtime());
-        if (!decision.emit) {
-            log("[监听] " + summary + ": " + key);
-            return;
-        }
-        String suffix = decision.suppressed > 0
-                ? "（窗口内已省略 " + decision.suppressed + " 条）" : "";
-        event("监听", "非保活服务(聚合): " + key + " — " + summary + suffix);
+        log("[监听] " + summary + ": " + key);
     }
 
     /** 高频跳过路径降噪：同一原因 10 分钟内只写一条持久事件，明细仍写 logcat */
@@ -776,7 +777,7 @@ public class AutoRepairEntry extends XposedModule {
                     bootCount + "|1");
             if (ok) {
                 sHeartbeatTracker.onWriteSuccess(bootCount);
-                event("配置", "心跳已写入, bootCount=" + bootCount + " (" + reason + ")");
+                log("[配置] 心跳已写入, bootCount=" + bootCount + " (" + reason + ")");
             } else {
                 if (sHeartbeatTracker.onWriteFailure()) {
                     scheduleHeartbeatRetry();
@@ -880,7 +881,7 @@ public class AutoRepairEntry extends XposedModule {
             resolver.registerContentObserver(Settings.Secure.getUriFor(SETTING_ENABLED),
                     false, sObserver);
             sObserverAttempts = 0;
-            event("配置", "配置监听已注册 (含 boot_count 实时同步)");
+            log("[配置] 配置监听已注册 (含 boot_count 实时同步)");
             writeHeartbeatOnce("observer_ready");
             long sinceBoot = SystemClock.elapsedRealtime();
             long remainingBoot = getRemainingBootGraceMs(sinceBoot, sFirstServiceConnectAt);
@@ -912,7 +913,7 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     static long getRemainingBootGraceMs(long now, long firstConnectAt) {
-        return RepairPolicy.getRemainingBootGraceMs(now, firstConnectAt);
+        return RepairPolicy.getRemainingBootGraceMs(now, sModuleStartAt, firstConnectAt);
     }
 
     private static void schedulePostBootCheck(long delayMs) {
@@ -1342,7 +1343,7 @@ public class AutoRepairEntry extends XposedModule {
             }
             if (registered) {
                 sCommandReceiver = receiver;
-                event("配置", "系统广播指令监听已就绪 (方案A)");
+                log("[配置] 系统广播指令监听已就绪 (方案A)");
             }
         } catch (Throwable t) {
             event("失败", "注册广播接收器异常: " + t);

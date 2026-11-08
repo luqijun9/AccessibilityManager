@@ -613,9 +613,11 @@ public class daemonService extends Service {
         if (sp.getBoolean("lsposed_mode", false)) {
             if (!mModuleModeLogged) {
                 mModuleModeLogged = true;
-                LogUtil.log(this, ModuleConfig.isModuleLoaded(this)
-                        ? "[LSPosed] 崩溃与关闭恢复交由模块处理，管理器不再主动检测/保活"
-                        : "[LSPosed] 模块未加载，当前没有服务在守护，请检查模块激活状态");
+                if (ModuleConfig.isModuleLoaded(this)) {
+                    Log.d("AccMgr", "[LSPosed] 崩溃与关闭恢复交由模块处理，管理器不再主动检测/保活");
+                } else {
+                    LogUtil.log(this, "[LSPosed] 模块未加载，当前没有服务在守护，请检查模块激活状态");
+                }
             }
             return;
         }

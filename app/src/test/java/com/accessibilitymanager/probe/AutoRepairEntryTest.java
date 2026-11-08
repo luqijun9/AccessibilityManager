@@ -230,4 +230,19 @@ public class AutoRepairEntryTest {
 
         assertFalse("非 system_server 进程应拒绝热重载", accepted);
     }
+
+    @Test
+    public void bootGrace_softRebootWithLargeKernelUptime_stillEnforcesGraceWindow() {
+        // 模拟手机已开机 6585s 后执行软重启（system_server 重启但内核 elapsedRealtime 未清零）
+        long moduleStartAt = 6_585_000L;
+        // 软重启后 30s（6615s），无障碍尚未连接，仍处于 90s 冷却期内（剩余 60s）
+        assertEquals(60_000L,
+                RepairPolicy.getRemainingBootGraceMs(6_615_000L, moduleStartAt, 0L));
+        // 软重启后 70s（6655s）首个服务连接，冷却期应延展至软重启后 100s（6685s）
+        long firstConnectAt = 6_655_000L;
+        assertEquals(20_000L,
+                RepairPolicy.getRemainingBootGraceMs(6_665_000L, moduleStartAt, firstConnectAt));
+        assertEquals(0L,
+                RepairPolicy.getRemainingBootGraceMs(6_685_000L, moduleStartAt, firstConnectAt));
+    }
 }

@@ -32,6 +32,23 @@ final class RepairPolicy {
         return now < deadline ? (deadline - now) : 0L;
     }
 
+    /**
+     * 基于模块在 system_server 中的启动时刻（moduleStartAt）计算剩余开机/软重启冷却时间，
+     * 解决软重启不重置内核 elapsedRealtime 导致开机冷却期失效的问题。
+     */
+    static long getRemainingBootGraceMs(long now, long moduleStartAt, long firstConnectAt) {
+        long relativeNow = moduleStartAt > 0L && now >= moduleStartAt
+                ? (now - moduleStartAt)
+                : now;
+        long relativeFirstConnect = 0L;
+        if (firstConnectAt > 0L) {
+            relativeFirstConnect = moduleStartAt > 0L && firstConnectAt >= moduleStartAt
+                    ? (firstConnectAt - moduleStartAt)
+                    : firstConnectAt;
+        }
+        return getRemainingBootGraceMs(relativeNow, relativeFirstConnect);
+    }
+
     static boolean isSelfOrSystemPackage(String pkg, String contextPkg) {
         if (pkg == null || pkg.isEmpty()) {
             return true;
