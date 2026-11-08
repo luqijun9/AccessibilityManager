@@ -2,11 +2,34 @@ package com.accessibilitymanager.probe;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
+import android.os.Bundle;
+
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
+import io.github.libxposed.api.XposedInterface;
+import io.github.libxposed.api.XposedModuleInterface;
+
 public class AutoRepairEntryTest {
+
+    @Before
+    public void setUp() {
+        AutoRepairEntry.resetForTesting();
+    }
+
+    @After
+    public void tearDown() {
+        AutoRepairEntry.resetForTesting();
+    }
 
     @Test
     public void bootGraceDeadline_withoutFirstConnect_usesBaseBootGrace() {
@@ -98,5 +121,113 @@ public class AutoRepairEntryTest {
         assertEquals(
                 "[配置] 模块已启用 | up=5.0s",
                 RepairPolicy.formatEventLine("配置", "模块已启用", null, 5_000L));
+    }
+
+    @Test
+    public void hotReload_preservesConnectionsAndStateAcrossGenerations() {
+        AutoRepairEntry oldGen = new AutoRepairEntry();
+        Object fakeConnA = new Object();
+        Object fakeConnB = new Object();
+        String svcA = "com.foo/.ServiceA";
+        String svcB = "com.bar/.ServiceB";
+
+        AutoRepairEntry.putConnectionForTesting(svcA, fakeConnA);
+        AutoRepairEntry.putConnectionForTesting(svcB, fakeConnB);
+        AutoRepairEntry.setFirstServiceConnectAtForTesting(68_500L);
+        AutoRepairEntry.putRetryStateForTesting(svcA, 1, 300_000L, 120_000L, "com.foo");
+
+        final Object[] savedStateBox = new Object[1];
+        XposedModuleInterface.HotReloadingParam reloadingParam =
+                new XposedModuleInterface.HotReloadingParam() {
+                    @Override
+                    public Bundle getExtras() {
+                        return null;
+                    }
+
+                    @Override
+                    public void setSavedInstanceState(Object outState) {
+                        savedStateBox[0] = outState;
+                    }
+                };
+
+        assertTrue(oldGen.onHotReloading(reloadingParam));
+
+        // 验证旧代内存已被清理，且保存状态为跨 ClassLoader 安全的标准 Map
+        assertTrue("onHotReloading 后旧代连接映射应已清空",
+                AutoRepairEntry.getConnectionsForTesting().isEmpty());
+        assertEquals(0, AutoRepairEntry.getAttemptsForTesting(svcA));
+        assertNotNull("savedInstanceState 不应为空", savedStateBox[0]);
+        assertTrue("savedInstanceState 应为标准 Map", savedStateBox[0] instanceof Map);
+
+        // 模拟新代实例通过 onHotReloaded 接管
+        AutoRepairEntry newGen = new AutoRepairEntry();
+        XposedModuleInterface.HotReloadedParam reloadedParam =
+                new XposedModuleInterface.HotReloadedParam() {
+                    @Override
+                    public boolean isSystemServer() {
+                        return true;
+                    }
+
+                    @Override
+                    public String getProcessName() {
+                        return "system_server";
+                    }
+
+                    @Override
+                    public Bundle getExtras() {
+                        return null;
+                    }
+
+                    @Override
+                    public Object getSavedInstanceState() {
+                        return savedStateBox[0];
+                    }
+
+                    @Override
+                    public List<XposedInterface.HookHandle> getOldHookHandles() {
+                        return Collections.emptyList();
+                    }
+                };
+
+        newGen.onHotReloaded(reloadedParam);
+
+        Map<String, Object> restoredConns = AutoRepairEntry.getConnectionsForTesting();
+        assertEquals(2, restoredConns.size());
+        assertSame(fakeConnA, restoredConns.get(svcA));
+        assertSame(fakeConnB, restoredConns.get(svcB));
+        assertEquals(68_500L, AutoRepairEntry.getFirstServiceConnectAtForTesting());
+        assertEquals(1, AutoRepairEntry.getAttemptsForTesting(svcA));
+        assertEquals(Long.valueOf(300_000L), AutoRepairEntry.getBlockedUntilForTesting(svcA));
+        assertEquals(Long.valueOf(120_000L), AutoRepairEntry.getLastPackageKillAtForTesting("com.foo"));
+        assertEquals(1, AutoRepairEntry.getHotReloadCountForTesting());
+    }
+
+    @Test
+    public void hotReload_skipsNonSystemProcess() {
+        AutoRepairEntry entry = new AutoRepairEntry();
+        entry.onModuleLoaded(new XposedModuleInterface.ModuleLoadedParam() {
+            @Override
+            public boolean isSystemServer() {
+                return false;
+            }
+
+            @Override
+            public String getProcessName() {
+                return "com.example.userapp";
+            }
+        });
+
+        boolean accepted = entry.onHotReloading(new XposedModuleInterface.HotReloadingParam() {
+            @Override
+            public Bundle getExtras() {
+                return null;
+            }
+
+            @Override
+            public void setSavedInstanceState(Object outState) {
+            }
+        });
+
+        assertFalse("非 system_server 进程应拒绝热重载", accepted);
     }
 }

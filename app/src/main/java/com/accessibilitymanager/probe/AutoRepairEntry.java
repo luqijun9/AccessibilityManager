@@ -21,6 +21,7 @@ import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -31,6 +32,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
+import io.github.libxposed.api.XposedModuleInterface;
 
 /**
  * 无障碍服务崩溃自动恢复模块（基于 Modern Xposed API 102，运行在 system_server 内）。
@@ -40,6 +42,22 @@ public class AutoRepairEntry extends XposedModule {
     private static final String TAG = "A11yRepair";
     private static final String CONNECTION_CLASS =
             "com.android.server.accessibility.AccessibilityServiceConnection";
+    static final String HOOK_ID_BINDER_DIED = "a11y_repair_binder_died";
+    static final String HOOK_ID_INIT_SERVICE = "a11y_repair_init_service";
+
+    // 热重载跨代状态键（仅使用 JDK/Android 标准类型，跨 ClassLoader 安全传递）
+    private static final String STATE_CONNECTIONS = "connections";
+    private static final String STATE_FIRST_CONNECT_AT = "first_connect_at";
+    private static final String STATE_BLOCKED_UNTIL = "blocked_until";
+    private static final String STATE_ATTEMPTS = "attempts";
+    private static final String STATE_LAST_ATTEMPT_AT = "last_attempt_at";
+    private static final String STATE_LAST_PKG_KILL_AT = "last_pkg_kill_at";
+    private static final String STATE_EVENT_LINES = "event_lines";
+    private static final String STATE_RAW_TRACE_LINES = "raw_trace_lines";
+    private static final String STATE_EVENT_SEQ = "event_seq";
+    private static final String STATE_HOT_RELOAD_COUNT = "hot_reload_count";
+    private static final String STATE_CONTEXT = "context";
+    private static final String STATE_CLASS_LOADER = "class_loader";
 
     // 配置项（Settings.Secure，由管理器写入）
     private static final String KEY_ENABLE = "a11y_module_enable";
@@ -101,8 +119,14 @@ public class AutoRepairEntry extends XposedModule {
 
     private static volatile AutoRepairEntry sModuleInstance;
     private static volatile Context sContext;
+    private static volatile ClassLoader sClassLoader;
+    private static volatile HandlerThread sHandlerThread;
     private static Handler sHandler;
     private static boolean sInstalled;
+    private static volatile String sProcessName;
+    private static volatile boolean sIsSystemServer;
+    private static volatile int sHotReloadCount;
+    private static volatile long sLastHotReloadAt;
     private static volatile ContentObserver sObserver;
     private static int sObserverAttempts;
     private static boolean sScanPending;
@@ -176,43 +200,352 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     @Override
+    public void onModuleLoaded(XposedModuleInterface.ModuleLoadedParam param) {
+        sModuleInstance = this;
+        sProcessName = param.getProcessName();
+        sIsSystemServer = param.isSystemServer();
+        log("Modern API " + safeApiVersion() + " loaded in " + sProcessName
+                + " (isSystemServer=" + sIsSystemServer + ")");
+    }
+
+    private int safeApiVersion() {
+        try {
+            return getApiVersion();
+        } catch (Throwable ignored) {
+            return 102;
+        }
+    }
+
+    @Override
     public void onSystemServerStarting(SystemServerStartingParam param) {
-        initAndInstall(param.getClassLoader());
+        sIsSystemServer = true;
+        initAndInstall(param.getClassLoader(), false);
     }
 
     @Override
     public void onPackageReady(PackageReadyParam param) {
-        if ("android".equals(param.getPackageName())) {
-            initAndInstall(param.getClassLoader());
+        if ("android".equals(param.getPackageName()) || "system".equals(param.getPackageName())) {
+            sIsSystemServer = true;
+            initAndInstall(param.getClassLoader(), false);
         }
     }
 
-    private synchronized void initAndInstall(ClassLoader classLoader) {
+    /**
+     * 热重载准备阶段（运行在旧代实例中）：
+     * 1. 将跨代状态（已绑定连接、开机首连时间戳、熔断与重试计数、事件缓冲、Context/ClassLoader）
+     *    封装为纯 JDK/Android 框架类型 Map 保存；
+     * 2. 注销旧代注册的 ContentObserver 与 BroadcastReceiver，并安全退出旧代 HandlerThread，
+     *    彻底杜绝热重载后新旧两代实例在 system_server 内双倍响应或线程泄漏。
+     */
+    @Override
+    public synchronized boolean onHotReloading(XposedModuleInterface.HotReloadingParam param) {
+        if (!sIsSystemServer
+                && sProcessName != null
+                && !"system".equals(sProcessName)
+                && !"android".equals(sProcessName)
+                && !"system_server".equals(sProcessName)) {
+            log("skipping hot reload in non-system process: " + sProcessName);
+            return false;
+        }
+        log("onHotReloading in " + (sProcessName != null ? sProcessName : "system_server")
+                + " (connections=" + sConnections.size() + ", hotReloadCount=" + sHotReloadCount + ")");
+
+        // 1. 先停止旧代后台线程与系统监听器，确保后续状态快照无并发竞争
+        stopActiveResourcesForHotReload();
+
+        // 2. 保存跨 ClassLoader 安全的状态快照
+        try {
+            Map<String, Object> state = new HashMap<>();
+            state.put(STATE_CONNECTIONS, new HashMap<>(sConnections));
+            state.put(STATE_FIRST_CONNECT_AT, sFirstServiceConnectAt);
+            state.put(STATE_BLOCKED_UNTIL, new HashMap<>(sBlockedUntil));
+            state.put(STATE_ATTEMPTS, new HashMap<>(sAttempts));
+            state.put(STATE_LAST_ATTEMPT_AT, new HashMap<>(sLastAttemptAt));
+            state.put(STATE_LAST_PKG_KILL_AT, new HashMap<>(sLastPackageKillAt));
+            state.put(STATE_HOT_RELOAD_COUNT, sHotReloadCount);
+            if (sContext != null) {
+                state.put(STATE_CONTEXT, sContext);
+            }
+            if (sClassLoader != null) {
+                state.put(STATE_CLASS_LOADER, sClassLoader);
+            }
+            synchronized (sEventLock) {
+                state.put(STATE_EVENT_LINES, new ArrayList<>(sEventLines));
+                state.put(STATE_RAW_TRACE_LINES, new ArrayList<>(sRawTraceLines));
+                state.put(STATE_EVENT_SEQ, sEventSeq);
+            }
+            param.setSavedInstanceState(state);
+        } catch (Throwable t) {
+            log("onHotReloading state save failed: " + t);
+        }
+
+        // 3. 清理旧代内存引用
+        clearInMemoryStateForHotReload();
+        return true;
+    }
+
+    /**
+     * 热重载完成阶段（运行在新代实例中）：
+     * 1. 恢复上一代传承的连接状态、事件缓冲与熔断计数；
+     * 2. 提取 system_server ClassLoader，通过相同 Hook ID (setId) 原子替换旧 Hook；
+     * 3. 立即重新注册广播与配置监听（无需像开机冷启动那样等待 10s）。
+     */
+    @Override
+    public synchronized void onHotReloaded(XposedModuleInterface.HotReloadedParam param) {
+        sModuleInstance = this;
+        sProcessName = param.getProcessName();
+        sIsSystemServer = param.isSystemServer();
+        int oldHookCount = param.getOldHookHandles() != null ? param.getOldHookHandles().size() : 0;
+
+        restoreStateFromHotReload(param.getSavedInstanceState());
+        sHotReloadCount++;
+        sLastHotReloadAt = System.currentTimeMillis();
+
+        ClassLoader targetLoader = resolveHotReloadClassLoader(param);
+        sInstalled = false;
+        initAndInstall(targetLoader, true);
+
+        event("配置", "模块已热重载生效 (第" + sHotReloadCount + "次, 继承连接="
+                + sConnections.size() + ", 原子替换Hook=" + oldHookCount + ")",
+                "action=hot_reloaded count=" + sHotReloadCount
+                        + " inheritedConns=" + sConnections.size()
+                        + " oldHooks=" + oldHookCount);
+    }
+
+    private static void stopActiveResourcesForHotReload() {
+        Handler handler = sHandler;
+        sHandler = null;
+        if (handler != null) {
+            try {
+                handler.removeCallbacksAndMessages(null);
+            } catch (Throwable ignored) {
+            }
+        }
+        HandlerThread thread = sHandlerThread;
+        sHandlerThread = null;
+        if (thread != null) {
+            try {
+                thread.quitSafely();
+            } catch (Throwable ignored) {
+            }
+        }
+        Context ctx = sContext;
+        ContentObserver observer = sObserver;
+        sObserver = null;
+        if (observer != null && ctx != null) {
+            try {
+                ctx.getContentResolver().unregisterContentObserver(observer);
+            } catch (Throwable t) {
+                log("unregister observer on hot reload failed: " + t);
+            }
+        }
+        BroadcastReceiver receiver = sCommandReceiver;
+        sCommandReceiver = null;
+        if (receiver != null && ctx != null) {
+            try {
+                ctx.unregisterReceiver(receiver);
+            } catch (Throwable t) {
+                log("unregister receiver on hot reload failed: " + t);
+            }
+        }
+    }
+
+    private static void clearInMemoryStateForHotReload() {
+        sInstalled = false;
+        sScanPending = false;
+        sReconcilePending = false;
+        sReconcileRetryPending = false;
+        sBindVerifyPending = false;
+        sHeartbeatRetryPending = false;
+        sRepairInProgress = false;
+        sRepairKey = null;
+        sPostBootCheckRunnable = null;
+        sConnections.clear();
+        sPendingCheck.clear();
+        sVerifyRun.clear();
+        sLastDied.clear();
+        sLastInit.clear();
+        sSuppressUntil.clear();
+        sBlockedUntil.clear();
+        sAttempts.clear();
+        sLastAttemptAt.clear();
+        sLastPackageKillAt.clear();
+        sCrashHistory.clear();
+        sPendingVerifyKeys.clear();
+        sSelfRemovedUntil.clear();
+        sManualHiddenUntil.clear();
+        sFieldCache.clear();
+        sMethodCache.clear();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void restoreStateFromHotReload(Object savedObj) {
+        if (!(savedObj instanceof Map)) {
+            return;
+        }
+        Map<?, ?> state = (Map<?, ?>) savedObj;
+        try {
+            Object ctx = state.get(STATE_CONTEXT);
+            if (ctx instanceof Context) {
+                sContext = (Context) ctx;
+            }
+            Object loader = state.get(STATE_CLASS_LOADER);
+            if (loader instanceof ClassLoader) {
+                sClassLoader = (ClassLoader) loader;
+            }
+            Object firstConnect = state.get(STATE_FIRST_CONNECT_AT);
+            if (firstConnect instanceof Long) {
+                sFirstServiceConnectAt = (Long) firstConnect;
+            }
+            Object reloadCount = state.get(STATE_HOT_RELOAD_COUNT);
+            if (reloadCount instanceof Integer) {
+                sHotReloadCount = (Integer) reloadCount;
+            }
+            Object conns = state.get(STATE_CONNECTIONS);
+            if (conns instanceof Map) {
+                sConnections.clear();
+                for (Map.Entry<?, ?> entry : ((Map<?, ?>) conns).entrySet()) {
+                    if (entry.getKey() instanceof String && entry.getValue() != null) {
+                        sConnections.put((String) entry.getKey(), entry.getValue());
+                    }
+                }
+            }
+            Object blocked = state.get(STATE_BLOCKED_UNTIL);
+            if (blocked instanceof Map) {
+                sBlockedUntil.clear();
+                for (Map.Entry<?, ?> entry : ((Map<?, ?>) blocked).entrySet()) {
+                    if (entry.getKey() instanceof String && entry.getValue() instanceof Long) {
+                        sBlockedUntil.put((String) entry.getKey(), (Long) entry.getValue());
+                    }
+                }
+            }
+            Object attempts = state.get(STATE_ATTEMPTS);
+            if (attempts instanceof Map) {
+                sAttempts.clear();
+                for (Map.Entry<?, ?> entry : ((Map<?, ?>) attempts).entrySet()) {
+                    if (entry.getKey() instanceof String && entry.getValue() instanceof Integer) {
+                        sAttempts.put((String) entry.getKey(), (Integer) entry.getValue());
+                    }
+                }
+            }
+            Object lastAttempt = state.get(STATE_LAST_ATTEMPT_AT);
+            if (lastAttempt instanceof Map) {
+                sLastAttemptAt.clear();
+                for (Map.Entry<?, ?> entry : ((Map<?, ?>) lastAttempt).entrySet()) {
+                    if (entry.getKey() instanceof String && entry.getValue() instanceof Long) {
+                        sLastAttemptAt.put((String) entry.getKey(), (Long) entry.getValue());
+                    }
+                }
+            }
+            Object lastPkgKill = state.get(STATE_LAST_PKG_KILL_AT);
+            if (lastPkgKill instanceof Map) {
+                sLastPackageKillAt.clear();
+                for (Map.Entry<?, ?> entry : ((Map<?, ?>) lastPkgKill).entrySet()) {
+                    if (entry.getKey() instanceof String && entry.getValue() instanceof Long) {
+                        sLastPackageKillAt.put((String) entry.getKey(), (Long) entry.getValue());
+                    }
+                }
+            }
+            synchronized (sEventLock) {
+                Object seq = state.get(STATE_EVENT_SEQ);
+                if (seq instanceof Long) {
+                    sEventSeq = (Long) seq;
+                }
+                Object lines = state.get(STATE_EVENT_LINES);
+                if (lines instanceof List) {
+                    sEventLines.clear();
+                    for (Object item : (List<?>) lines) {
+                        if (item instanceof String) {
+                            sEventLines.addLast((String) item);
+                        }
+                    }
+                }
+                Object traces = state.get(STATE_RAW_TRACE_LINES);
+                if (traces instanceof List) {
+                    sRawTraceLines.clear();
+                    for (Object item : (List<?>) traces) {
+                        if (item instanceof String) {
+                            sRawTraceLines.addLast((String) item);
+                        }
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            log("restoreStateFromHotReload error: " + t);
+        }
+    }
+
+    private static ClassLoader resolveHotReloadClassLoader(
+            XposedModuleInterface.HotReloadedParam param) {
+        if (param != null && param.getOldHookHandles() != null) {
+            for (XposedInterface.HookHandle handle : param.getOldHookHandles()) {
+                if (handle != null && handle.getExecutable() != null) {
+                    ClassLoader cl = handle.getExecutable().getDeclaringClass().getClassLoader();
+                    if (cl != null) {
+                        return cl;
+                    }
+                }
+            }
+        }
+        if (sClassLoader != null) {
+            return sClassLoader;
+        }
+        for (Object conn : sConnections.values()) {
+            if (conn != null && conn.getClass().getClassLoader() != null) {
+                return conn.getClass().getClassLoader();
+            }
+        }
+        ClassLoader ctxLoader = Thread.currentThread().getContextClassLoader();
+        return ctxLoader != null ? ctxLoader : ClassLoader.getSystemClassLoader();
+    }
+
+    private synchronized void initAndInstall(ClassLoader classLoader, boolean isHotReload) {
         if (sInstalled) {
             return;
         }
         sInstalled = true;
         sModuleInstance = this;
+        if (classLoader != null) {
+            sClassLoader = classLoader;
+        }
         try {
-            installHooks(classLoader);
+            installHooks(classLoader, isHotReload);
         } catch (Throwable t) {
             log("install failed: " + t);
         }
     }
 
-    private void installHooks(ClassLoader classLoader) {
-        HandlerThread thread = new HandlerThread("A11yAutoRepair");
-        thread.start();
-        sHandler = new Handler(thread.getLooper());
-        // onSystemServerStarting 时 ActivityManagerService/ContentService 尚未就绪，延迟启动轮询避免早期空指针刷屏
-        sHandler.postDelayed(AutoRepairEntry::scheduleReceiverInit, 10000L);
+    private void installHooks(ClassLoader classLoader, boolean isHotReload) {
+        try {
+            HandlerThread thread = new HandlerThread("A11yAutoRepair");
+            thread.start();
+            sHandlerThread = thread;
+            if (thread.getLooper() != null) {
+                sHandler = new Handler(thread.getLooper());
+                if (isHotReload) {
+                    // 热重载时 system_server 早已就绪，立即恢复广播与配置监听
+                    sHandler.post(AutoRepairEntry::scheduleReceiverInit);
+                } else {
+                    // onSystemServerStarting 时 ActivityManagerService/ContentService 尚未就绪，延迟启动轮询避免早期空指针刷屏
+                    sHandler.postDelayed(AutoRepairEntry::scheduleReceiverInit, 10000L);
+                }
+            }
+        } catch (Throwable t) {
+            log("handler thread init skipped or failed: " + t);
+        }
+
+        if (classLoader == null) {
+            return;
+        }
 
         try {
             Class<?> connClass = classLoader.loadClass(CONNECTION_CLASS);
 
             Method binderDiedMethod = findMethod(connClass, "binderDied");
             if (binderDiedMethod != null) {
-                hook(binderDiedMethod).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                hook(binderDiedMethod)
+                        .setId(HOOK_ID_BINDER_DIED)
+                        .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                         .intercept(chain -> {
                             Object result = chain.proceed();
                             postEvent(true, chain.getThisObject());
@@ -224,7 +557,9 @@ public class AutoRepairEntry extends XposedModule {
 
             Method initServiceMethod = findMethod(connClass, "initializeService");
             if (initServiceMethod != null) {
-                hook(initServiceMethod).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                hook(initServiceMethod)
+                        .setId(HOOK_ID_INIT_SERVICE)
+                        .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                         .intercept(chain -> {
                             Object result = chain.proceed();
                             postEvent(false, chain.getThisObject());
@@ -234,9 +569,15 @@ public class AutoRepairEntry extends XposedModule {
                 event("失败", "未找到 initializeService 方法");
             }
 
-            event("配置", "Modern API 102 模块已加载");
+            if (!isHotReload) {
+                event("配置", "Modern API 102 模块已加载");
+            }
         } catch (Throwable t) {
-            event("失败", "Hook 挂载异常: " + t);
+            if (!isHotReload) {
+                event("失败", "Hook 挂载异常: " + t);
+            } else {
+                log("hook re-bind skipped or failed during hot reload: " + t);
+            }
         }
     }
 
@@ -1298,7 +1639,12 @@ public class AutoRepairEntry extends XposedModule {
             sb.append("采集时间: ").append(System.currentTimeMillis()).append('\n');
             sb.append("模块心跳: ").append(heartbeat == null ? "不存在" : heartbeat)
                     .append("  bootCount=")
-                    .append(Settings.Global.getInt(resolver, SETTING_BOOT_COUNT, -1)).append('\n');
+                    .append(Settings.Global.getInt(resolver, SETTING_BOOT_COUNT, -1))
+                    .append("  热重载次数=").append(sHotReloadCount);
+            if (sLastHotReloadAt > 0L) {
+                sb.append(" (最近=").append(sLastHotReloadAt).append(')');
+            }
+            sb.append('\n');
             sb.append("无障碍总开关: ").append(accessibilityEnabled < 0 ? "不存在" : accessibilityEnabled)
                     .append("  启用列表: ").append(enabled == null ? "不存在"
                             : (enabled.isEmpty() ? "空" : enabled))
@@ -2370,5 +2716,65 @@ public class AutoRepairEntry extends XposedModule {
             }
         } catch (Throwable ignored) {
         }
+    }
+
+    // 仅供单元测试验证热重载跨代状态保存与清理
+    static void resetForTesting() {
+        stopActiveResourcesForHotReload();
+        clearInMemoryStateForHotReload();
+        sContext = null;
+        sClassLoader = null;
+        sProcessName = null;
+        sIsSystemServer = false;
+        sFirstServiceConnectAt = 0L;
+        sHotReloadCount = 0;
+        sLastHotReloadAt = 0L;
+        synchronized (sEventLock) {
+            sEventLines.clear();
+            sRawTraceLines.clear();
+            sEventSeq = 0L;
+        }
+    }
+
+    static void putConnectionForTesting(String key, Object conn) {
+        sConnections.put(key, conn);
+    }
+
+    static Map<String, Object> getConnectionsForTesting() {
+        return new HashMap<>(sConnections);
+    }
+
+    static void setFirstServiceConnectAtForTesting(long firstConnectAt) {
+        sFirstServiceConnectAt = firstConnectAt;
+    }
+
+    static long getFirstServiceConnectAtForTesting() {
+        return sFirstServiceConnectAt;
+    }
+
+    static void putRetryStateForTesting(
+            String key, int attempts, long blockedUntil, long lastPkgKillAt, String pkg) {
+        sAttempts.put(key, attempts);
+        sBlockedUntil.put(key, blockedUntil);
+        if (pkg != null) {
+            sLastPackageKillAt.put(pkg, lastPkgKillAt);
+        }
+    }
+
+    static int getAttemptsForTesting(String key) {
+        Integer val = sAttempts.get(key);
+        return val != null ? val : 0;
+    }
+
+    static Long getBlockedUntilForTesting(String key) {
+        return sBlockedUntil.get(key);
+    }
+
+    static Long getLastPackageKillAtForTesting(String pkg) {
+        return sLastPackageKillAt.get(pkg);
+    }
+
+    static int getHotReloadCountForTesting() {
+        return sHotReloadCount;
     }
 }
