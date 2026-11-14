@@ -27,6 +27,7 @@ public final class ModuleConfig {
     public static final String KEY_DEBUG = "a11y_module_debug";
     public static final String KEY_DEBUG_KILL = "a11y_module_debug_kill";
     public static final String KEY_CMD_ACK = "a11y_module_cmd_ack";
+    public static final String KEY_TOAST = "a11y_module_toast";
     /** 模块在 system_server 内采集的诊断快照（供无 DUMP/Root/Shizuku 权限时导出日志） */
     public static final String KEY_DUMP = "a11y_module_dump";
 
@@ -135,6 +136,11 @@ public final class ModuleConfig {
         return sendServiceCommandPayload(context, "debug:" + (enabled ? "1" : "0"));
     }
 
+    public static boolean setToastEnabled(Context context, boolean enabled) {
+        put(context, KEY_TOAST, enabled ? "1" : "0");
+        return sendServiceCommandPayload(context, "toast:" + (enabled ? "1" : "0"));
+    }
+
     /** 让模块代为开启/关闭无障碍服务（方案 A：广播直达 system_server，无需 WRITE_SECURE_SETTINGS） */
     public static boolean sendServiceCommand(Context context, boolean enable, String component) {
         if (component == null || component.isEmpty()) {
@@ -203,11 +209,22 @@ public final class ModuleConfig {
     public static final String SP_UNSTABLE_THRESHOLD = "lsposed_unstable_threshold";
     public static final String SP_UNSTABLE_COOLDOWN = "lsposed_unstable_cooldown";
     public static final String SP_MAX_ATTEMPTS = "lsposed_max_attempts";
+    public static final String SP_UNLIMITED_MIGRATED = "lsposed_unlimited_v1_migrated";
     public static final int DEFAULT_UNSTABLE_THRESHOLD = 3;
-    public static final int DEFAULT_UNSTABLE_COOLDOWN = 10;
+    public static final int DEFAULT_UNSTABLE_COOLDOWN = 0;
     public static final int DEFAULT_MAX_ATTEMPTS = 2;
 
     private static volatile String sLastSyncedServices = null;
+
+    public static void ensureUnlimitedDefaultMigrated(SharedPreferences prefs) {
+        if (prefs == null || prefs.getBoolean(SP_UNLIMITED_MIGRATED, false)) {
+            return;
+        }
+        prefs.edit()
+                .putInt(SP_UNSTABLE_COOLDOWN, DEFAULT_UNSTABLE_COOLDOWN)
+                .putBoolean(SP_UNLIMITED_MIGRATED, true)
+                .apply();
+    }
 
     public static boolean setFixMode(Context context, boolean fixMode, String disabledServices) {
         put(context, KEY_FIX_MODE, fixMode ? "1" : "0");
@@ -221,6 +238,7 @@ public final class ModuleConfig {
             return false;
         }
         SharedPreferences prefs = context.getSharedPreferences("data", 0);
+        ensureUnlimitedDefaultMigrated(prefs);
         int threshold = prefs.getInt(SP_UNSTABLE_THRESHOLD, DEFAULT_UNSTABLE_THRESHOLD);
         int cooldownMin = prefs.getInt(SP_UNSTABLE_COOLDOWN, DEFAULT_UNSTABLE_COOLDOWN);
         int maxAttempts = prefs.getInt(SP_MAX_ATTEMPTS, DEFAULT_MAX_ATTEMPTS);
@@ -236,6 +254,7 @@ public final class ModuleConfig {
                 .putInt(SP_UNSTABLE_THRESHOLD, threshold)
                 .putInt(SP_UNSTABLE_COOLDOWN, cooldownMin)
                 .putInt(SP_MAX_ATTEMPTS, maxAttempts)
+                .putBoolean(SP_UNLIMITED_MIGRATED, true)
                 .apply();
         String value = threshold + "|" + cooldownMin + "|" + maxAttempts;
         put(context, KEY_CIRCUIT_CONFIG, value);

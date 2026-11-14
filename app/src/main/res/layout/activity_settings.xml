@@ -168,7 +168,7 @@
                                     android:id="@+id/lsposed_circuit_desc"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="2分钟内连续崩溃 3 次则暂停修复 10 分钟 · 单次最多重试 2 次"
+                                    android:text="无限制：持续自动重试，不暂停修复"
                                     android:textColor="@color/text_secondary"
                                     android:textSize="13sp"
                                     android:layout_marginTop="2dp" />

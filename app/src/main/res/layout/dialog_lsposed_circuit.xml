@@ -31,7 +31,7 @@
         android:layout_marginTop="12dp"
         style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
         android:hint="暂停自动修复时长"
-        app:helperText="触发后暂停修复多久（0-1440，填 0 永不暂停，默认 10 分钟）"
+        app:helperText="触发后暂停修复多久（0-1440，填 0 为无限制永不暂停，默认 0）"
         app:suffixText="分钟">
 
         <com.google.android.material.textfield.TextInputEditText

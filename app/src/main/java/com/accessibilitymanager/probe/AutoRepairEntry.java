@@ -7,15 +7,20 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.database.ContentObserver;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.os.Looper;
+import android.os.PowerManager;
 import android.os.Process;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.Log;
+import android.widget.Toast;
 
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
@@ -71,19 +76,40 @@ public class AutoRepairEntry extends XposedModule {
     private static final String KEY_FIX_DISABLED = "a11y_module_fix_disabled";
     private static final String KEY_CIRCUIT_CONFIG = "a11y_module_circuit_config";
     private static final String KEY_CMD_ACK = "a11y_module_cmd_ack";
+    private static final String KEY_TOAST = "a11y_module_toast";
     private static final String KEY_LOADED = "a11y_module_loaded";
     private static final String KEY_EVENTS = "a11y_module_events";
     // system_server 视角的诊断快照，供管理器在无 DUMP/Root/Shizuku 权限时导出日志
     private static final String KEY_DUMP = "a11y_module_dump";
-    // 持久事件通道容量：噪音聚合后 120 条约可覆盖数天；Settings.Secure 单值不宜过大
-    private static final int EVENT_LIMIT = 120;
+    // 持久事件通道容量：扩容至 600 条，确保超级省电离线期间事件完整保留
+    private static final int EVENT_LIMIT = 600;
     // 非保活服务（便签输入法等）连接日志聚合窗口：本身不重要，1 小时一条；明细仍全部写 logcat
     private static final long NON_MANAGED_EVENT_WINDOW_MS = 60 * 60 * 1000L;
     // 跳过路径聚合窗口：原因有诊断价值，保留 10 分钟粒度
     private static final long SKIP_EVENT_WINDOW_MS = 10 * 60 * 1000L;
     private static final String SETTING_ENABLED =
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES;
+    private static final String SETTING_ACCESSIBILITY_ENABLED =
+            Settings.Secure.ACCESSIBILITY_ENABLED;
     private static final String SETTING_BOOT_COUNT = "boot_count";
+    // 常见国产 ROM 超级省电/低电量 Settings 键名（用于诊断日志与变更监听）
+    private static final String[] OEM_POWER_SAVE_KEYS = {
+            "super_powersave_mode_state",
+            "super_powersave_launcher_enter",
+            "power_save_mode",
+            "power_supersave_mode_open",
+            "EXTREME_POWER_MODE",
+            "bbk_super_save_power_mode",
+            "pem_in_sleepmode",
+            "SmartModeStatus",
+            "low_power"
+    };
+    private static final String[] OBSERVED_POWER_SAVE_KEYS = {
+            "super_powersave_mode_state",
+            "super_powersave_launcher_enter",
+            "power_supersave_mode_open",
+            "low_power"
+    };
 
     // 方案 A：系统广播通信管道（直达 system_server，免 Root/免 Shizuku、零延迟）
     public static final String ACTION_SERVICE_CMD =
@@ -102,7 +128,7 @@ public class AutoRepairEntry extends XposedModule {
     private static final long RESET_AFTER_MS = 5 * 60 * 1000L;
     private static final long UNSTABLE_WINDOW_MS = 2 * 60 * 1000L;
     private static final int DEFAULT_UNSTABLE_THRESHOLD = 3;
-    private static final int DEFAULT_UNSTABLE_COOLDOWN_MIN = 10;
+    private static final int DEFAULT_UNSTABLE_COOLDOWN_MIN = 0;
     private static final long REPAIR_STUCK_MS = 15000L;
     private static final long SCAN_INIT_DELAY_MS = 10000L;
     private static final long SCAN_CONFIG_DELAY_MS = 1500L;
@@ -140,10 +166,11 @@ public class AutoRepairEntry extends XposedModule {
             new HeartbeatTracker(MAX_HEARTBEAT_ATTEMPTS);
     private static boolean sHeartbeatRetryPending;
     private static volatile BroadcastReceiver sCommandReceiver;
+    private static volatile BroadcastReceiver sSystemStateReceiver;
     private static int sContextRetryCount;
 
     // 事件缓冲
-    private static final int RAW_TRACE_LIMIT = 200;
+    private static final int RAW_TRACE_LIMIT = 1000;
     private static final Object sEventLock = new Object();
     private static final Deque<String> sEventLines = new ArrayDeque<>();
     private static final Deque<String> sRawTraceLines = new ArrayDeque<>();
@@ -190,6 +217,8 @@ public class AutoRepairEntry extends XposedModule {
     private static volatile String sCircuitConfigCache;
     private static volatile String sDryRunCache;
     private static volatile String sDebugCache;
+    private static volatile String sToastCache;
+    private static String sLastObservedEnabled;
     // 启用列表读取为 null 时的原因：非 null 表示读取异常，null 表示设置项不存在（全新设备或被 ROM 清空）
     private static volatile Throwable sLastEnabledReadError;
 
@@ -351,6 +380,15 @@ public class AutoRepairEntry extends XposedModule {
                 log("unregister receiver on hot reload failed: " + t);
             }
         }
+        BroadcastReceiver stateReceiver = sSystemStateReceiver;
+        sSystemStateReceiver = null;
+        if (stateReceiver != null && ctx != null) {
+            try {
+                ctx.unregisterReceiver(stateReceiver);
+            } catch (Throwable t) {
+                log("unregister system state receiver on hot reload failed: " + t);
+            }
+        }
     }
 
     private static void clearInMemoryStateForHotReload() {
@@ -363,6 +401,8 @@ public class AutoRepairEntry extends XposedModule {
         sRepairInProgress = false;
         sRepairKey = null;
         sPostBootCheckRunnable = null;
+        sLastObservedEnabled = null;
+        sToastCache = null;
         sConnections.clear();
         sPendingCheck.clear();
         sVerifyRun.clear();
@@ -703,7 +743,8 @@ public class AutoRepairEntry extends XposedModule {
             Context context = ctxObj instanceof Context ? (Context) ctxObj : null;
 
             Handler handler = sHandler;
-            if (context != null && (sContext == null || sObserver == null || sCommandReceiver == null)) {
+            if (context != null && (sContext == null || sObserver == null
+                    || sCommandReceiver == null || sSystemStateReceiver == null)) {
                 final boolean changed = sContext != context;
                 sContext = context;
                 if (handler != null) {
@@ -713,6 +754,7 @@ public class AutoRepairEntry extends XposedModule {
                         }
                         ensureObserver();
                         ensureCommandReceiver();
+                        ensureSystemStateReceiver();
                     });
                 }
             }
@@ -813,11 +855,15 @@ public class AutoRepairEntry extends XposedModule {
         writeHeartbeatOnce("observer_check");
         flushEvents();
         ensureCommandReceiver();
+        ensureSystemStateReceiver();
         if (sObserver != null) {
             return;
         }
         try {
             ContentResolver resolver = sContext.getContentResolver();
+            if (sLastObservedEnabled == null) {
+                sLastObservedEnabled = readEnabled();
+            }
             sObserver = new ContentObserver(new Handler(sHandler.getLooper())) {
                 @Override
                 public void onChange(boolean selfChange, Uri uri) {
@@ -828,6 +874,14 @@ public class AutoRepairEntry extends XposedModule {
                     }
                     if (SETTING_ENABLED.equals(key)) {
                         onEnabledListChanged();
+                        return;
+                    }
+                    if (SETTING_ACCESSIBILITY_ENABLED.equals(key)) {
+                        onAccessibilitySwitchChanged();
+                        return;
+                    }
+                    if (isObservedPowerSaveKey(key)) {
+                        event("省电", "省电设置项变更: " + key, getPowerStateSummary());
                         return;
                     }
                     if (KEY_DEBUG_KILL.equals(key)) {
@@ -844,6 +898,10 @@ public class AutoRepairEntry extends XposedModule {
                     }
                     if (KEY_DEBUG.equals(key)) {
                         sDebugCache = readSecure(KEY_DEBUG);
+                        return;
+                    }
+                    if (KEY_TOAST.equals(key)) {
+                        sToastCache = readSecure(KEY_TOAST);
                         return;
                     }
                     if (KEY_CIRCUIT_CONFIG.equals(key)) {
@@ -874,14 +932,19 @@ public class AutoRepairEntry extends XposedModule {
                     false, sObserver);
             resolver.registerContentObserver(Settings.Secure.getUriFor(KEY_DEBUG),
                     false, sObserver);
+            resolver.registerContentObserver(Settings.Secure.getUriFor(KEY_TOAST),
+                    false, sObserver);
             resolver.registerContentObserver(Settings.Secure.getUriFor(KEY_DEBUG_KILL),
                     false, sObserver);
             resolver.registerContentObserver(Settings.Secure.getUriFor(KEY_CIRCUIT_CONFIG),
                     false, sObserver);
             resolver.registerContentObserver(Settings.Secure.getUriFor(SETTING_ENABLED),
                     false, sObserver);
+            resolver.registerContentObserver(Settings.Secure.getUriFor(SETTING_ACCESSIBILITY_ENABLED),
+                    false, sObserver);
+            registerPowerSaveSettingObservers(resolver, sObserver);
             sObserverAttempts = 0;
-            log("[配置] 配置监听已注册 (含 boot_count 实时同步)");
+            log("[配置] 配置监听已注册 (含 boot_count 实时同步与省电状态监听)");
             writeHeartbeatOnce("observer_ready");
             long sinceBoot = SystemClock.elapsedRealtime();
             long remainingBoot = getRemainingBootGraceMs(sinceBoot, sFirstServiceConnectAt);
@@ -1034,7 +1097,65 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static void onEnabledListChanged() {
+        String current = readEnabled();
+        if (current != null) {
+            String prev = sLastObservedEnabled;
+            if (prev != null && !current.equals(prev)) {
+                String removed = diffComponents(current, prev);
+                String added = diffComponents(prev, current);
+                if (!removed.isEmpty() || !added.isEmpty()) {
+                    event("监听", "启用列表变更: 移除=" + (removed.isEmpty() ? "无" : removed)
+                                    + " 新增=" + (added.isEmpty() ? "无" : added),
+                            getPowerStateSummary());
+                }
+            }
+            sLastObservedEnabled = current;
+        }
         reconcileMissing("enabled change");
+    }
+
+    private static void onAccessibilitySwitchChanged() {
+        if (sContext == null) {
+            return;
+        }
+        try {
+            int enabled = Settings.Secure.getInt(
+                    sContext.getContentResolver(), SETTING_ACCESSIBILITY_ENABLED, -1);
+            event("监听", "无障碍总开关变更: accessibility_enabled=" + enabled,
+                    getPowerStateSummary());
+            if (enabled != 1 && isModuleEnabled()) {
+                String managed = readConfig(KEY_SERVICES);
+                if (managed != null && !managed.isEmpty()) {
+                    ensureAccessibilitySwitchOn();
+                    scheduleReconcile("accessibility_switch", RECONCILE_CONFIG_DELAY_MS);
+                }
+            }
+        } catch (Throwable t) {
+            log("onAccessibilitySwitchChanged error: " + t);
+        }
+    }
+
+    private static String diffComponents(String baseSetting, String compareSetting) {
+        if (compareSetting == null || compareSetting.isEmpty()) {
+            return "";
+        }
+        StringBuilder diff = new StringBuilder();
+        for (String raw : compareSetting.split(":")) {
+            if (raw.isEmpty()) {
+                continue;
+            }
+            ComponentName cn = ComponentName.unflattenFromString(raw);
+            if (cn == null) {
+                continue;
+            }
+            if (!containsComponent(baseSetting, cn)) {
+                if (diff.length() > 0) {
+                    diff.append(',');
+                }
+                diff.append(cn.flattenToShortString());
+            }
+        }
+        return diff.toString();
     }
 
     private static void reconcileMissing(String reason) {
@@ -1066,6 +1187,7 @@ public class AutoRepairEntry extends XposedModule {
 
         String desired = enabled;
         StringBuilder added = new StringBuilder();
+        Set<String> addedLabels = new LinkedHashSet<>();
         Set<String> newlyAddedKeys = new LinkedHashSet<>();
         int count = 0;
         for (String raw : managed.split(":")) {
@@ -1100,6 +1222,7 @@ public class AutoRepairEntry extends XposedModule {
                 added.append(' ');
             }
             added.append(key);
+            addedLabels.add(getAppLabel(component));
             newlyAddedKeys.add(key);
             count++;
         }
@@ -1129,11 +1252,16 @@ public class AutoRepairEntry extends XposedModule {
 
         sLastReconcileWriteAt = now;
         event("保活", "补回已关闭服务 (" + count + "): " + added,
-                "action=reconcile reason=" + reason + " count=" + count);
+                "action=reconcile reason=" + reason + " count=" + count
+                        + " " + getPowerStateSummary());
         if (!writeEnabled(desired)) {
-            event("失败", "补回写入失败: " + added, "action=reconcile_write_fail reason=" + reason);
+            event("失败", "补回写入失败: " + added,
+                    "action=reconcile_write_fail reason=" + reason
+                            + " " + getPowerStateSummary());
             return;
         }
+        ensureAccessibilitySwitchOn();
+        showModuleToast("保活 " + joinLabels(addedLabels));
         sPendingVerifyKeys.addAll(newlyAddedKeys);
         scheduleBindVerify(reason);
     }
@@ -1356,14 +1484,94 @@ public class AutoRepairEntry extends XposedModule {
         }
         if (sContext != null) {
             ensureCommandReceiver();
+            ensureSystemStateReceiver();
             ensureObserver();
         }
-        if ((sCommandReceiver == null || sObserver == null) && sContextRetryCount < MAX_INIT_RETRY) {
+        if ((sCommandReceiver == null || sSystemStateReceiver == null || sObserver == null)
+                && sContextRetryCount < MAX_INIT_RETRY) {
             sContextRetryCount++;
             if (sHandler != null) {
                 sHandler.postDelayed(AutoRepairEntry::scheduleReceiverInit, INIT_RETRY_DELAY_MS);
             }
         }
+    }
+
+    private static synchronized void ensureSystemStateReceiver() {
+        if (sSystemStateReceiver != null) {
+            return;
+        }
+        Context ctx = sContext;
+        if (ctx == null) {
+            ctx = getSystemContext();
+        }
+        if (ctx == null) {
+            return;
+        }
+        try {
+            BroadcastReceiver receiver = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    if (intent == null || intent.getAction() == null) {
+                        return;
+                    }
+                    final String action = intent.getAction();
+                    Handler handler = sHandler;
+                    if (handler != null) {
+                        handler.post(() -> handleSystemStateBroadcast(action));
+                    } else {
+                        handleSystemStateBroadcast(action);
+                    }
+                }
+            };
+            IntentFilter filter = new IntentFilter();
+            filter.addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                filter.addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED);
+            }
+            filter.addAction(Intent.ACTION_SCREEN_OFF);
+            filter.addAction(Intent.ACTION_SCREEN_ON);
+            filter.addAction(Intent.ACTION_USER_PRESENT);
+            if (Build.VERSION.SDK_INT >= 33) {
+                ctx.registerReceiver(receiver, filter, null, sHandler, Context.RECEIVER_EXPORTED);
+            } else {
+                ctx.registerReceiver(receiver, filter, null, sHandler);
+            }
+            sSystemStateReceiver = receiver;
+            log("[配置] 系统省电与屏幕广播监听已就绪");
+        } catch (Throwable t) {
+            event("失败", "注册系统省电/屏幕监听失败: " + t);
+        }
+    }
+
+    private static void handleSystemStateBroadcast(String action) {
+        if (PowerManager.ACTION_POWER_SAVE_MODE_CHANGED.equals(action)
+                || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                        && PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED.equals(action))) {
+            String enabled = readEnabled();
+            event("省电", "系统省电状态变更: " + shortActionName(action),
+                    getPowerStateSummary() + " enabled=" + (enabled == null ? "null" : enabled));
+            return;
+        }
+        if (Intent.ACTION_SCREEN_OFF.equals(action)) {
+            event("监听", "屏幕已熄屏 (SCREEN_OFF)", getPowerStateSummary());
+            return;
+        }
+        if (Intent.ACTION_SCREEN_ON.equals(action)) {
+            event("监听", "屏幕已点亮 (SCREEN_ON)", getPowerStateSummary());
+            return;
+        }
+        if (Intent.ACTION_USER_PRESENT.equals(action)) {
+            event("监听", "用户解锁屏幕 (USER_PRESENT)", getPowerStateSummary());
+            if (isModuleEnabled()) {
+                scheduleReconcile("user_present", 500L);
+                scheduleScan(1000L, "user_present");
+            }
+        }
+    }
+
+    private static String shortActionName(String action) {
+        int lastDot = action.lastIndexOf('.');
+        return lastDot >= 0 ? action.substring(lastDot + 1) : action;
     }
 
     private static void notifyCommandAck() {
@@ -1472,6 +1680,18 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
 
+        if ("toast".equals(action)) {
+            sToastCache = "1".equals(component) ? "1" : "0";
+            if (sContext != null) {
+                try {
+                    Settings.Secure.putString(sContext.getContentResolver(), KEY_TOAST, sToastCache);
+                } catch (Throwable ignored) {
+                }
+            }
+            notifyCommandAck();
+            return;
+        }
+
         if ("sync_services".equals(action)) {
             String prev = sManagedServicesCache != null ? sManagedServicesCache : readConfig(KEY_SERVICES);
             boolean changed = !component.equals(prev);
@@ -1507,7 +1727,7 @@ public class AutoRepairEntry extends XposedModule {
             if (changed) {
                 int[] parsed = parseCircuitConfig(component);
                 event("配置", "模块已生效崩溃保护配置: 连续崩溃阈值=" + parsed[0] + "次, 暂停修复="
-                        + (parsed[1] == 0 ? "关闭" : (parsed[1] + "分钟")) + ", 最大重试=" + parsed[2] + "次");
+                        + (parsed[1] == 0 ? "无限制(不暂停)" : (parsed[1] + "分钟")));
             }
             notifyCommandAck();
             return;
@@ -1655,7 +1875,9 @@ public class AutoRepairEntry extends XposedModule {
             sb.append("模块启用: ").append(isModuleEnabled())
                     .append("  演练模式: ").append(isDryRun())
                     .append("  强杀模式: ").append("1".equals(readConfig(KEY_FIX_MODE)))
-                    .append("  崩溃保护: ").append(circuit == null ? "默认" : circuit).append('\n');
+                    .append("  Toast提示: ").append(isToastEnabled())
+                    .append("  崩溃保护: ").append(circuit == null ? "默认(无限制)" : circuit).append('\n');
+            sb.append("省电与屏幕状态: ").append(getPowerStateSummary()).append('\n');
             sb.append("锁定列表: ").append(managed == null || managed.isEmpty() ? "空" : managed)
                     .append('\n');
             if (managed != null && !managed.isEmpty()) {
@@ -1669,10 +1891,10 @@ public class AutoRepairEntry extends XposedModule {
                     sb.append("[服务] ").append(key)
                             .append("  在启用列表=").append(containsComponent(enabled, component))
                             .append("  已绑定=").append(findBoundConnection(component) != null)
-                            .append("  崩溃标记=").append(getCrashedMarker(component));
+                            .append("  崩溃标记=").append(getCrashedMarker(component))
+                            .append("  ").append(getPackageProcessSummary(component.getPackageName()));
                     Integer attempts = sAttempts.get(key);
-                    sb.append("  重试=").append(attempts == null ? 0 : attempts)
-                            .append('/').append(getMaxAttempts());
+                    sb.append("  重试次数=").append(attempts == null ? 0 : attempts);
                     Long blockedUntil = sBlockedUntil.get(key);
                     long remain = blockedUntil == null ? 0L : Math.max(0L, blockedUntil - now) / 1000L;
                     sb.append("  暂停修复剩余=").append(remain).append("s\n");
@@ -1850,10 +2072,6 @@ public class AutoRepairEntry extends XposedModule {
             eventNonManaged(key, "非保活服务挂掉(忽略) crashed=" + crashed);
             return;
         }
-        if (!crashed) {
-            log("[监听] 受管服务正常断开(忽略非崩溃): " + key);
-            return;
-        }
         if (sContext == null) {
             event("失败", "缺少系统 Context，忽略: " + key);
             return;
@@ -1881,50 +2099,56 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
 
-        Long blocked = sBlockedUntil.get(key);
-        if (blocked != null) {
-            if (!RepairPolicy.isBlockExpired(blocked, now)) {
-                long delay = RepairPolicy.getRemainingBlockDelayMs(blocked, now);
-                scheduleCheck(component, key, delay);
-                eventSkip("died:blocked:" + key, "检测", "忽略（暂停修复中）: " + key);
-                return;
+        if (!crashed) {
+            String currentEnabled = readEnabled();
+            boolean inEnabled = containsComponent(currentEnabled, component);
+            event("监听", "受管服务连接断开 (crashed=false, 仍在启用列表=" + inEnabled + "): " + key,
+                    "hook=binderDied conn=" + connId(connection) + " iface=" + hasInterface
+                            + " " + getPackageProcessSummary(component.getPackageName())
+                            + " " + getPowerStateSummary());
+            if (inEnabled && isModuleEnabled()) {
+                scheduleCheck(component, key, SETTLE_MS);
             }
-            sBlockedUntil.remove(key);
-            sAttempts.remove(key);
-            sLastAttemptAt.remove(key);
-            sCrashHistory.remove(key);
+            return;
         }
 
-        Long lastAttempt = sLastAttemptAt.get(key);
-        if (RepairPolicy.shouldResetAttempts(lastAttempt, now, RESET_AFTER_MS)) {
-            sAttempts.remove(key);
-            sCrashHistory.remove(key);
+        if (getUnstableCooldownMs() <= 0L) {
+            sBlockedUntil.remove(key);
+        } else {
+            Long blocked = sBlockedUntil.get(key);
+            if (blocked != null) {
+                if (!RepairPolicy.isBlockExpired(blocked, now)) {
+                    long delay = RepairPolicy.getRemainingBlockDelayMs(blocked, now);
+                    scheduleCheck(component, key, delay);
+                    eventSkip("died:blocked:" + key, "检测", "忽略（暂停修复中）: " + key);
+                    return;
+                }
+                sBlockedUntil.remove(key);
+                sAttempts.remove(key);
+                sLastAttemptAt.remove(key);
+                sCrashHistory.remove(key);
+            }
         }
 
         boolean enabled = isModuleEnabled();
         event("检测", "崩溃: " + key,
                 "hook=binderDied conn=" + connId(connection) + " crashed=" + crashed
                         + " iface=" + hasInterface + " enabled=" + enabled
-                        + " dryRun=" + isDryRun());
+                        + " dryRun=" + isDryRun()
+                        + " " + getPackageProcessSummary(component.getPackageName())
+                        + " " + getPowerStateSummary());
         if (!enabled) {
             return;
         }
 
         recordCrash(component, key, now);
         Long afterRecord = sBlockedUntil.get(key);
-        if (afterRecord != null && now < afterRecord) {
+        if (getUnstableCooldownMs() > 0L && afterRecord != null && now < afterRecord) {
             long delay = RepairPolicy.getRemainingBlockDelayMs(afterRecord, now);
             scheduleCheck(component, key, delay);
             event("失败", "连续崩溃，暂停修复跳过（到期将自动复查）: " + key,
-                    "action=circuit_pause_skip recheckInMs=" + delay);
-            return;
-        }
-        if (sAttempts.getOrDefault(key, 0) >= getMaxAttempts()) {
-            long delay = RepairPolicy.getRemainingResetDelayMs(
-                    sLastAttemptAt.get(key), now, RESET_AFTER_MS);
-            scheduleCheck(component, key, delay);
-            event("失败", "重试次数已用完，等待冷却后自动复查: " + key,
-                    "action=max_attempts_wait recheckInMs=" + delay);
+                    "action=circuit_pause_skip recheckInMs=" + delay
+                            + " " + getPowerStateSummary());
             return;
         }
 
@@ -1973,6 +2197,7 @@ public class AutoRepairEntry extends XposedModule {
                     long costMs = sRepairStartedAt > 0L ? Math.max(0L, now - sRepairStartedAt) : -1L;
                     event("修复", "恢复成功: " + key,
                             baseMeta + " state=repair_ok cost=" + costMs + "ms");
+                    showModuleToast("保活崩溃服务 " + getAppLabel(component));
                 } else {
                     event("服务", "服务已就绪: " + key,
                             baseMeta + " state=connected");
@@ -2054,37 +2279,27 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
 
-        Long blocked = sBlockedUntil.get(key);
-        if (blocked != null) {
-            if (!RepairPolicy.isBlockExpired(blocked, now)) {
-                long delay = RepairPolicy.getRemainingBlockDelayMs(blocked, now);
-                scheduleCheck(component, key, delay);
-                eventSkip("check:blocked:" + key, "失败", "跳过（暂停修复中，到期自动复查）: " + key);
-                return;
-            }
+        if (getUnstableCooldownMs() <= 0L) {
             sBlockedUntil.remove(key);
-            sAttempts.remove(key);
-            sLastAttemptAt.remove(key);
-            sCrashHistory.remove(key);
-            log("circuit breaker expired in runCheck, resuming repair: " + key);
+        } else {
+            Long blocked = sBlockedUntil.get(key);
+            if (blocked != null) {
+                if (!RepairPolicy.isBlockExpired(blocked, now)) {
+                    long delay = RepairPolicy.getRemainingBlockDelayMs(blocked, now);
+                    scheduleCheck(component, key, delay);
+                    eventSkip("check:blocked:" + key, "失败", "跳过（暂停修复中，到期自动复查）: " + key);
+                    return;
+                }
+                sBlockedUntil.remove(key);
+                sAttempts.remove(key);
+                sLastAttemptAt.remove(key);
+                sCrashHistory.remove(key);
+                log("circuit breaker expired in runCheck, resuming repair: " + key);
+            }
         }
 
         Long last = sLastAttemptAt.get(key);
-        if (RepairPolicy.shouldResetAttempts(last, now, RESET_AFTER_MS)) {
-            sAttempts.remove(key);
-            sCrashHistory.remove(key);
-            last = null;
-            log("retry attempts reset after cooldown window in runCheck: " + key);
-        }
-
         int attempts = sAttempts.getOrDefault(key, 0);
-        if (attempts >= getMaxAttempts()) {
-            long delay = RepairPolicy.getRemainingResetDelayMs(last, now, RESET_AFTER_MS);
-            scheduleCheck(component, key, delay);
-            eventSkip("check:max-attempts:" + key, "失败",
-                    "跳过（已达单轮重试上限，冷却后自动复查）: " + key);
-            return;
-        }
         if (last != null && now - last < RETRY_COOLDOWN_MS) {
             long remainCooldown = (RETRY_COOLDOWN_MS - (now - last)) + 200L;
             scheduleCheck(component, key, remainCooldown);
@@ -2139,8 +2354,8 @@ public class AutoRepairEntry extends XposedModule {
         }
         String removed = removeComponent(original, component);
 
-        int maxAttempts = getMaxAttempts();
-        sAttempts.put(key, attempts + 1);
+        int nextAttempt = attempts + 1;
+        sAttempts.put(key, nextAttempt);
         sLastAttemptAt.put(key, now);
         sSuppressUntil.put(key, now + SUPPRESS_MS);
         sSelfRemovedUntil.put(key, now + REPAIR_REMOVE_WINDOW_MS);
@@ -2148,13 +2363,16 @@ public class AutoRepairEntry extends XposedModule {
         sRepairInProgress = true;
         sRepairKey = key;
 
-        event("修复", "第 " + (attempts + 1) + "/" + maxAttempts
-                + " 次关开，先关闭: " + key,
-                "action=repair_disable attempt=" + (attempts + 1) + "/" + maxAttempts);
+        event("修复", "第 " + nextAttempt + " 次关开，先关闭: " + key,
+                "action=repair_disable attempt=" + nextAttempt + " " + getPowerStateSummary());
         if (!writeEnabled(removed)) {
-            event("失败", "关闭写入失败: " + key, "action=repair_disable_fail");
+            event("失败", "关闭写入失败: " + key, "action=repair_disable_fail " + getPowerStateSummary());
             finishRepair(key);
-            block(component, key, "disable write failed");
+            if (getUnstableCooldownMs() > 0L) {
+                block(component, key, "disable write failed");
+            } else {
+                scheduleCheck(component, key, RETRY_COOLDOWN_MS);
+            }
             return;
         }
 
@@ -2188,14 +2406,21 @@ public class AutoRepairEntry extends XposedModule {
                 } else {
                     String readd = addComponent(current == null ? "" : current, component);
                     if (!writeEnabled(readd)) {
-                        event("失败", "重新开启写入失败: " + key, "action=repair_enable_fail");
+                        event("失败", "重新开启写入失败: " + key,
+                                "action=repair_enable_fail " + getPowerStateSummary());
                         finishRepair(key);
-                        block(component, key, "enable write failed");
+                        if (getUnstableCooldownMs() > 0L) {
+                            block(component, key, "enable write failed");
+                        } else {
+                            scheduleCheck(component, key, RETRY_COOLDOWN_MS);
+                        }
                         return;
                     }
+                    ensureAccessibilitySwitchOn();
                     event("修复", "已重新开启: " + key,
                             "action=repair_enable toggleOffMs="
-                                    + Math.max(0L, SystemClock.elapsedRealtime() - now));
+                                    + Math.max(0L, SystemClock.elapsedRealtime() - now)
+                                    + " " + getPowerStateSummary());
                 }
                 scheduleVerify(component, key);
             } catch (Throwable t) {
@@ -2221,27 +2446,20 @@ public class AutoRepairEntry extends XposedModule {
                     sAttempts.remove(key);
                     sSuppressUntil.put(key, verifyNow + SETTLE_MS);
                     event("修复", "恢复成功: " + key,
-                            "action=verify_ok conn=" + connId(boundConnection) + " cost=" + costMs + "ms");
+                            "action=verify_ok conn=" + connId(boundConnection) + " cost=" + costMs + "ms"
+                                    + " " + getPowerStateSummary());
+                    showModuleToast("保活崩溃服务 " + getAppLabel(component));
                 } else if (!sBoundCheckAvailable) {
                     event("失败", "无法确认绑定状态，结束修复: " + key,
                             "action=verify_unknown cost=" + costMs + "ms");
                 } else {
                     int attempts = sAttempts.getOrDefault(key, 0);
-                    int maxAttempts = getMaxAttempts();
-                    event("失败", "恢复失败 (" + attempts + "/" + maxAttempts
-                            + "): " + key,
-                            "action=verify_fail attempt=" + attempts + "/" + maxAttempts
-                                    + " cost=" + costMs + "ms lastConn=" + connId(sConnections.get(key)));
-                    if (attempts < maxAttempts) {
-                        scheduleCheck(component, key, RETRY_COOLDOWN_MS);
-                    } else {
-                        long resetDelay = RepairPolicy.getRemainingResetDelayMs(
-                                sLastAttemptAt.get(key), verifyNow, RESET_AFTER_MS);
-                        event("失败", "已达单轮重试上限，将在 " + (RESET_AFTER_MS / 60000L)
-                                + " 分钟后自动复查: " + key,
-                                "action=verify_cooldown_scheduled recheckInMs=" + resetDelay);
-                        scheduleCheck(component, key, resetDelay);
-                    }
+                    event("失败", "恢复失败 (第 " + attempts + " 次重试，20秒后继续重试): " + key,
+                            "action=verify_fail attempt=" + attempts + " cost=" + costMs + "ms"
+                                    + " lastConn=" + connId(sConnections.get(key))
+                                    + " " + getPackageProcessSummary(component.getPackageName())
+                                    + " " + getPowerStateSummary());
+                    scheduleCheck(component, key, RETRY_COOLDOWN_MS);
                 }
             } catch (Throwable t) {
                 event("失败", "恢复校验异常: " + t);
@@ -2280,6 +2498,7 @@ public class AutoRepairEntry extends XposedModule {
         long delay = RepairPolicy.getRemainingBlockDelayMs(blockedUntil, now);
         if (component != null) {
             scheduleCheck(component, key, delay);
+            showModuleToast(getAppLabel(component) + " 频繁崩溃，已暂停自动修复");
         }
         event("失败", "暂停修复 " + (cooldownMs / 60000L) + " 分钟（到期将自动复查, "
                 + reason + "）: " + key,
@@ -2303,6 +2522,7 @@ public class AutoRepairEntry extends XposedModule {
             long delay = RepairPolicy.getRemainingBlockDelayMs(blockedUntil, now);
             if (component != null) {
                 scheduleCheck(component, key, delay);
+                showModuleToast(getAppLabel(component) + " 频繁崩溃，已暂停自动修复");
             }
             event("失败", "连续 " + history.size() + " 次崩溃（"
                     + (UNSTABLE_WINDOW_MS / 1000) + " 秒内），暂停自动修复 "
@@ -2372,6 +2592,200 @@ public class AutoRepairEntry extends XposedModule {
     private static boolean isDryRun() {
         String value = readConfig(KEY_DRY_RUN);
         return "1".equals(value);
+    }
+
+    private static boolean isToastEnabled() {
+        String value = readConfig(KEY_TOAST);
+        return value == null || "1".equals(value);
+    }
+
+    private static String getAppLabel(ComponentName component) {
+        if (component == null) {
+            return "";
+        }
+        String pkg = component.getPackageName();
+        Context ctx = sContext;
+        if (ctx != null) {
+            try {
+                PackageManager pm = ctx.getPackageManager();
+                ApplicationInfo info = pm.getApplicationInfo(pkg, 0);
+                CharSequence label = info.loadLabel(pm);
+                if (label != null && label.length() > 0) {
+                    return label.toString();
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return pkg;
+    }
+
+    private static String joinLabels(Set<String> labels) {
+        StringBuilder sb = new StringBuilder();
+        for (String label : labels) {
+            if (label == null || label.isEmpty()) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append(' ');
+            }
+            sb.append(label);
+        }
+        return sb.toString();
+    }
+
+    private static void showModuleToast(String text) {
+        if (text == null || text.isEmpty() || !isToastEnabled()) {
+            return;
+        }
+        final Context ctx = sContext != null ? sContext : getSystemContext();
+        if (ctx == null) {
+            return;
+        }
+        try {
+            new Handler(Looper.getMainLooper()).post(() -> {
+                try {
+                    Toast.makeText(ctx, text, Toast.LENGTH_SHORT).show();
+                } catch (Throwable t) {
+                    log("showModuleToast failed: " + t);
+                }
+            });
+        } catch (Throwable t) {
+            log("post showModuleToast failed: " + t);
+        }
+    }
+
+    private static boolean isObservedPowerSaveKey(String key) {
+        if (key == null) {
+            return false;
+        }
+        for (String item : OBSERVED_POWER_SAVE_KEYS) {
+            if (item.equals(key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void registerPowerSaveSettingObservers(
+            ContentResolver resolver, ContentObserver observer) {
+        for (String key : OBSERVED_POWER_SAVE_KEYS) {
+            try {
+                resolver.registerContentObserver(Settings.System.getUriFor(key), false, observer);
+            } catch (Throwable ignored) {
+            }
+            try {
+                resolver.registerContentObserver(Settings.Secure.getUriFor(key), false, observer);
+            } catch (Throwable ignored) {
+            }
+            try {
+                resolver.registerContentObserver(Settings.Global.getUriFor(key), false, observer);
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    private static String getPowerStateSummary() {
+        Context ctx = sContext;
+        if (ctx == null) {
+            return "powerSave=unknown";
+        }
+        StringBuilder sb = new StringBuilder();
+        try {
+            PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    sb.append("powerSave=").append(pm.isPowerSaveMode());
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    if (sb.length() > 0) sb.append(' ');
+                    sb.append("idle=").append(pm.isDeviceIdleMode());
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) {
+                    if (sb.length() > 0) sb.append(' ');
+                    sb.append("interactive=").append(pm.isInteractive());
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        ContentResolver resolver = ctx.getContentResolver();
+        StringBuilder oem = new StringBuilder();
+        for (String key : OEM_POWER_SAVE_KEYS) {
+            String val = readAnySetting(resolver, key);
+            if (val != null && !val.isEmpty()) {
+                if (oem.length() > 0) {
+                    oem.append(',');
+                }
+                oem.append(key).append('=').append(val);
+            }
+        }
+        if (oem.length() > 0) {
+            if (sb.length() > 0) sb.append(' ');
+            sb.append("oemPower={").append(oem).append('}');
+        }
+        return sb.length() == 0 ? "powerSave=unknown" : sb.toString();
+    }
+
+    private static String readAnySetting(ContentResolver resolver, String key) {
+        try {
+            String val = Settings.Global.getString(resolver, key);
+            if (val != null) return val;
+        } catch (Throwable ignored) {
+        }
+        try {
+            String val = Settings.System.getString(resolver, key);
+            if (val != null) return val;
+        } catch (Throwable ignored) {
+        }
+        try {
+            String val = Settings.Secure.getString(resolver, key);
+            if (val != null) return val;
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    private static String getPackageProcessSummary(String pkg) {
+        Context ctx = sContext;
+        if (ctx == null || pkg == null || pkg.isEmpty()) {
+            return "runningPids=[]";
+        }
+        final int uid;
+        try {
+            uid = ctx.getPackageManager().getApplicationInfo(pkg, 0).uid;
+        } catch (Throwable t) {
+            return "runningPids=pkg_not_found";
+        }
+        StringBuilder sb = new StringBuilder("runningPids=[");
+        Set<Integer> seen = new LinkedHashSet<>();
+        try {
+            ActivityManager am =
+                    (ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE);
+            if (am != null) {
+                List<ActivityManager.RunningAppProcessInfo> procs = am.getRunningAppProcesses();
+                if (procs != null) {
+                    for (ActivityManager.RunningAppProcessInfo info : procs) {
+                        if (info != null && info.uid == uid) {
+                            if (!seen.isEmpty()) sb.append(',');
+                            seen.add(info.pid);
+                            sb.append(info.pid).append(":imp").append(info.importance);
+                        }
+                    }
+                }
+                List<ActivityManager.RunningServiceInfo> svcs = am.getRunningServices(Integer.MAX_VALUE);
+                if (svcs != null) {
+                    for (ActivityManager.RunningServiceInfo info : svcs) {
+                        if (info != null && info.uid == uid && info.pid > 0 && !seen.contains(info.pid)) {
+                            if (!seen.isEmpty()) sb.append(',');
+                            seen.add(info.pid);
+                            sb.append(info.pid).append(":svc");
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        sb.append(']');
+        return sb.toString();
     }
 
     private static Object findBoundConnection(ComponentName target) {
@@ -2532,8 +2946,12 @@ public class AutoRepairEntry extends XposedModule {
             return false;
         }
         try {
-            return Settings.Secure.putString(
+            boolean ok = Settings.Secure.putString(
                     context.getContentResolver(), SETTING_ENABLED, value);
+            if (ok) {
+                sLastObservedEnabled = value;
+            }
+            return ok;
         } catch (Throwable t) {
             log("write enabled failed: " + t);
             return false;
@@ -2602,6 +3020,15 @@ public class AutoRepairEntry extends XposedModule {
             String secureVal = readSecure(KEY_DEBUG);
             if (secureVal != null) {
                 sDebugCache = secureVal;
+                return secureVal;
+            }
+            return null;
+        }
+        if (KEY_TOAST.equals(key)) {
+            if (sToastCache != null) return sToastCache;
+            String secureVal = readSecure(KEY_TOAST);
+            if (secureVal != null) {
+                sToastCache = secureVal;
                 return secureVal;
             }
             return null;

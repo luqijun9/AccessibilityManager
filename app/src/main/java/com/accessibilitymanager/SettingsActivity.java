@@ -361,7 +361,10 @@ public class SettingsActivity extends AppCompatActivity {
 
         switchBoot.setOnCheckedChangeListener((btn, checked) -> sp.edit().putBoolean("boot", checked).apply());
 
-        switchToast.setOnCheckedChangeListener((btn, checked) -> sp.edit().putBoolean("toast", checked).apply());
+        switchToast.setOnCheckedChangeListener((btn, checked) -> {
+            sp.edit().putBoolean("toast", checked).apply();
+            ModuleConfig.setToastEnabled(SettingsActivity.this, checked);
+        });
 
         switchUserOnly.setOnCheckedChangeListener((btn, checked) -> sp.edit().putBoolean("useronly", checked).apply());
 
@@ -1044,6 +1047,7 @@ public class SettingsActivity extends AppCompatActivity {
                     "开启模块模式");
             ModuleConfig.setFixMode(this, sp.getBoolean("fixmode", false),
                     sp.getString("fixmode_disabled_services", ""));
+            ModuleConfig.setToastEnabled(this, sp.getBoolean("toast", true));
             ModuleConfig.syncCircuitConfig(this);
             ModuleConfig.triggerScan(this);
             ModuleConfig.startLogSync(this);
@@ -1142,18 +1146,18 @@ public class SettingsActivity extends AppCompatActivity {
         if (lsposedCircuitDesc == null) {
             return;
         }
+        ModuleConfig.ensureUnlimitedDefaultMigrated(sp);
         int threshold = sp.getInt(ModuleConfig.SP_UNSTABLE_THRESHOLD, ModuleConfig.DEFAULT_UNSTABLE_THRESHOLD);
         int cooldown = sp.getInt(ModuleConfig.SP_UNSTABLE_COOLDOWN, ModuleConfig.DEFAULT_UNSTABLE_COOLDOWN);
-        int maxAttempts = sp.getInt(ModuleConfig.SP_MAX_ATTEMPTS, ModuleConfig.DEFAULT_MAX_ATTEMPTS);
         if (cooldown <= 0) {
-            lsposedCircuitDesc.setText("不限制连续崩溃 · 单次最多重试 " + maxAttempts + " 次");
+            lsposedCircuitDesc.setText("无限制：持续自动重试，不暂停修复");
         } else {
-            lsposedCircuitDesc.setText("2分钟内连续崩溃 " + threshold + " 次则暂停修复 " + cooldown
-                    + " 分钟 · 单次最多重试 " + maxAttempts + " 次");
+            lsposedCircuitDesc.setText("2分钟内连续崩溃 " + threshold + " 次则暂停修复 " + cooldown + " 分钟");
         }
     }
 
     private void showLsposedCircuitDialog() {
+        ModuleConfig.ensureUnlimitedDefaultMigrated(sp);
         View layout = getLayoutInflater().inflate(R.layout.dialog_lsposed_circuit, null);
         final com.google.android.material.textfield.TextInputEditText inputThreshold =
                 layout.findViewById(R.id.input_threshold);

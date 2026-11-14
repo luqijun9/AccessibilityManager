@@ -2870,6 +2870,7 @@ public class MainActivity extends Activity {
             ModuleConfig.setEnabled(this, true);
         }
         ModuleConfig.setDryRun(this, false);
+        ModuleConfig.setToastEnabled(this, sp.getBoolean("toast", true));
         ModuleConfig.syncCircuitConfig(this);
         ModuleConfig.syncManagedServices(this,
                 sp.getString("daemon", ""),
