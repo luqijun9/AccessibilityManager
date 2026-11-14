@@ -682,7 +682,9 @@ public class LogActivity extends AppCompatActivity {
                 .append("  演练=").append(rawSettingLabel(android.provider.Settings.Secure.getString(
                         resolver, ModuleConfig.KEY_DRY_RUN)))
                 .append("  强杀=").append(rawSettingLabel(android.provider.Settings.Secure.getString(
-                        resolver, ModuleConfig.KEY_FIX_MODE))).append('\n');
+                        resolver, ModuleConfig.KEY_FIX_MODE)))
+                .append("  忽略系统=").append(rawSettingLabel(android.provider.Settings.Secure.getString(
+                        resolver, ModuleConfig.KEY_IGNORE_SYSTEM))).append('\n');
         sb.append("模块锁定列表: ").append(rawSettingLabel(android.provider.Settings.Secure.getString(
                 resolver, ModuleConfig.KEY_SERVICES))).append('\n');
         return sb.toString();

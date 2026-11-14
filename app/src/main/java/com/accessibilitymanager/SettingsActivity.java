@@ -56,6 +56,9 @@ public class SettingsActivity extends AppCompatActivity {
     private MaterialSwitch switchLsposedMode;
     private View lsposedModeRow, crashFixRow, crashFixFixmodeDivider, fixmodeRow, crashFixSectionContainer;
     private LinearLayout workModeFixmodeSlot, normalModeFixmodeSlot;
+    private LinearLayout workModeIgnoreSystemSlot, normalModeIgnoreSystemSlot;
+    private View ignoreSystemWrapper;
+    private TextView ignoreSystemTitle, ignoreSystemDesc;
     private TextView lsposedModuleStatus, fixmodeDesc;
     private View debugToolsRow;
     private TextView debugToolsStatus;
@@ -276,6 +279,11 @@ public class SettingsActivity extends AppCompatActivity {
         crashFixFixmodeDivider = findViewById(R.id.crashfix_fixmode_divider);
         workModeFixmodeSlot = findViewById(R.id.work_mode_fixmode_slot);
         normalModeFixmodeSlot = findViewById(R.id.normal_mode_fixmode_slot);
+        workModeIgnoreSystemSlot = findViewById(R.id.work_mode_ignore_system_slot);
+        normalModeIgnoreSystemSlot = findViewById(R.id.normal_mode_ignore_system_slot);
+        ignoreSystemWrapper = findViewById(R.id.ignore_system_wrapper);
+        ignoreSystemTitle = findViewById(R.id.ignore_system_title);
+        ignoreSystemDesc = findViewById(R.id.ignore_system_desc);
         switchLsposedMode = findViewById(R.id.lsposed_mode);
         lsposedModeRow = findViewById(R.id.lsposed_mode_row);
         lsposedModuleStatus = findViewById(R.id.lsposed_module_status);
@@ -329,7 +337,11 @@ public class SettingsActivity extends AppCompatActivity {
         switchFixMode.setChecked(fixMode);
         switchPeriodicCheck.setChecked(sp.getBoolean("periodic_check", false));
         switchWakeIdle.setChecked(sp.getBoolean("periodic_check_wake_idle", true));
-        switchIgnoreSystemCrash.setChecked(sp.getBoolean("ignore_system_crash_trigger", true));
+        boolean ignoreSystem = sp.getBoolean("ignore_system_crash_trigger", true);
+        switchIgnoreSystemCrash.setChecked(ignoreSystem);
+        if (lsposedMode) {
+            ModuleConfig.setIgnoreSystem(this, ignoreSystem);
+        }
         intervalLabel.setText(sp.getInt("periodic_check_interval", 10) + "分钟");
 
         SharedPreferences mainSp = getSharedPreferences("Main", Context.MODE_PRIVATE);
@@ -618,9 +630,16 @@ public class SettingsActivity extends AppCompatActivity {
         }
 
         switchIgnoreSystemCrash.setOnCheckedChangeListener(
-                (btn, checked) -> sp.edit().putBoolean("ignore_system_crash_trigger", checked).apply());
-        if (switchIgnoreSystemCrash.getParent() instanceof View) {
-            ((View) switchIgnoreSystemCrash.getParent()).setOnClickListener(v -> switchIgnoreSystemCrash.toggle());
+                (btn, checked) -> {
+                    sp.edit().putBoolean("ignore_system_crash_trigger", checked).apply();
+                    ModuleConfig.setIgnoreSystem(SettingsActivity.this, checked);
+                });
+        if (ignoreSystemWrapper != null) {
+            ignoreSystemWrapper.setOnClickListener(v -> {
+                if (switchIgnoreSystemCrash.isEnabled()) {
+                    switchIgnoreSystemCrash.toggle();
+                }
+            });
         }
 
         View.OnClickListener intervalClickListener = v -> {
@@ -977,6 +996,31 @@ public class SettingsActivity extends AppCompatActivity {
                     ? "由系统底层直接杀掉卡死应用进程后恢复，无需 Shizuku/Root"
                     : "需shizuku/root权限。若普通重启后仍失效，可尝试强杀App进程后再恢复服务");
         }
+        boolean showIgnoreSystemSection = lsposedMode || crashFixEnabled;
+        if (ignoreSystemWrapper != null) {
+            LinearLayout targetSlot = lsposedMode ? workModeIgnoreSystemSlot : normalModeIgnoreSystemSlot;
+            if (targetSlot != null && ignoreSystemWrapper.getParent() != targetSlot) {
+                if (ignoreSystemWrapper.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) ignoreSystemWrapper.getParent()).removeView(ignoreSystemWrapper);
+                }
+                targetSlot.addView(ignoreSystemWrapper);
+            }
+            ignoreSystemWrapper.setVisibility(showIgnoreSystemSection ? View.VISIBLE : View.GONE);
+        }
+        if (workModeIgnoreSystemSlot != null) {
+            workModeIgnoreSystemSlot.setVisibility(lsposedMode ? View.VISIBLE : View.GONE);
+        }
+        if (normalModeIgnoreSystemSlot != null) {
+            normalModeIgnoreSystemSlot.setVisibility(!lsposedMode ? View.VISIBLE : View.GONE);
+        }
+        if (ignoreSystemTitle != null) {
+            ignoreSystemTitle.setText(lsposedMode ? "忽略系统应用" : "系统应用变化不触发检测");
+        }
+        if (ignoreSystemDesc != null) {
+            ignoreSystemDesc.setText(lsposedMode
+                    ? "忽略系统应用的无障碍服务变化、崩溃检测与旧连接清理"
+                    : "系统应用的无障碍服务可能会频繁改变，引起多次崩溃检测，从而增加耗电");
+        }
         if (crashDependentLayout != null) {
             crashDependentLayout.setVisibility(crashFixEnabled ? View.VISIBLE : View.GONE);
         }
@@ -991,7 +1035,7 @@ public class SettingsActivity extends AppCompatActivity {
         switchFixMode.setEnabled(showFixModeSection);
         switchPeriodicCheck.setEnabled(crashFixEnabled);
         switchWakeIdle.setEnabled(periodicEnabled);
-        switchIgnoreSystemCrash.setEnabled(crashFixEnabled);
+        switchIgnoreSystemCrash.setEnabled(showIgnoreSystemSection);
         intervalLabel.setEnabled(periodicEnabled);
 
         boolean notifyCrashEnabled = crashFixEnabled && switchNotifyCrashCheck != null && switchNotifyCrashCheck.isChecked();
@@ -1051,6 +1095,7 @@ public class SettingsActivity extends AppCompatActivity {
             ModuleConfig.setFixMode(this, sp.getBoolean("fixmode", false),
                     sp.getString("fixmode_disabled_services", ""));
             ModuleConfig.setToastEnabled(this, sp.getBoolean("toast", true));
+            ModuleConfig.setIgnoreSystem(this, sp.getBoolean("ignore_system_crash_trigger", true));
             ModuleConfig.triggerScan(this);
             ModuleConfig.startLogSync(this);
             ModuleConfig.drainLogs(this);

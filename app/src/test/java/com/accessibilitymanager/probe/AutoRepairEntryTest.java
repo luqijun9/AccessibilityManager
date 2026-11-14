@@ -114,6 +114,58 @@ public class AutoRepairEntryTest {
     }
 
     @Test
+    public void isWellKnownSystemPackage_identifiesOemAndAndroidPackages() {
+        assertTrue(RepairPolicy.isWellKnownSystemPackage("android"));
+        assertTrue(RepairPolicy.isWellKnownSystemPackage("com.android.settings"));
+        assertTrue(RepairPolicy.isWellKnownSystemPackage("com.coloros.codebook"));
+        assertTrue(RepairPolicy.isWellKnownSystemPackage("com.oplus.autofill"));
+        assertTrue(RepairPolicy.isWellKnownSystemPackage("com.miui.securitycenter"));
+        assertTrue(RepairPolicy.isWellKnownSystemPackage("com.huawei.systemmanager"));
+        assertTrue(RepairPolicy.isWellKnownSystemPackage("com.samsung.accessibility"));
+
+        assertFalse(RepairPolicy.isWellKnownSystemPackage("com.arlosoft.macrodroid"));
+        assertFalse(RepairPolicy.isWellKnownSystemPackage("li.songe.gkd"));
+        assertFalse(RepairPolicy.isWellKnownSystemPackage("com.moting.linkgo"));
+        assertFalse(RepairPolicy.isWellKnownSystemPackage("com.ksxkq.loaftoday"));
+    }
+
+    @Test
+    public void shouldIgnoreApp_respectsToggleAndChecker() {
+        // 开启忽略系统应用：系统应用被忽略，第三方应用不被忽略
+        assertTrue(RepairPolicy.shouldIgnoreApp(true, "com.coloros.codebook", null));
+        assertFalse(RepairPolicy.shouldIgnoreApp(true, "com.arlosoft.macrodroid", null));
+
+        // 支持自定义系统包检查器识别特殊厂商系统应用
+        RepairPolicy.PackageSystemChecker customChecker = pkg -> "com.custom.vendor.service".equals(pkg);
+        assertTrue(RepairPolicy.shouldIgnoreApp(true, "com.custom.vendor.service", customChecker));
+        assertFalse(RepairPolicy.shouldIgnoreApp(true, "com.other.userapp", customChecker));
+
+        // 关闭忽略系统应用：无论系统还是第三方均不忽略
+        assertFalse(RepairPolicy.shouldIgnoreApp(false, "com.coloros.codebook", null));
+        assertFalse(RepairPolicy.shouldIgnoreApp(false, "com.custom.vendor.service", customChecker));
+    }
+
+    @Test
+    public void filterOutSystemComponents_filtersSystemAppsFromDiffString() {
+        String mixed = "com.coloros.codebook/com.oplus.autofill.service.AutofillAccessibilityServiceText,"
+                + "com.arlosoft.macrodroid/com.arlosoft.macrodroid.action.services.UIInteractionAccessibilityService,"
+                + "com.android.settings/com.android.settings.accessibility.MyService";
+
+        // 开启忽略系统应用时，过滤掉 coloros 和 android 组件，仅保留 macrodroid
+        assertEquals(
+                "com.arlosoft.macrodroid/com.arlosoft.macrodroid.action.services.UIInteractionAccessibilityService",
+                RepairPolicy.filterOutSystemComponents(mixed, true, null));
+
+        // 纯系统应用列表被全部过滤为空字符串
+        String onlySystem = "com.coloros.codebook/com.oplus.autofill.service.AutofillAccessibilityServiceText,"
+                + "com.oplus.test/com.oplus.test.Service";
+        assertEquals("", RepairPolicy.filterOutSystemComponents(onlySystem, true, null));
+
+        // 关闭忽略系统应用时，原样保留
+        assertEquals(mixed, RepairPolicy.filterOutSystemComponents(mixed, false, null));
+    }
+
+    @Test
     public void formatEventLine_appendsRawMetaAndUptime() {
         assertEquals("142.3s", RepairPolicy.formatUptimeSeconds(142_340L));
         assertEquals(

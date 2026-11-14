@@ -49,11 +49,67 @@ final class RepairPolicy {
         return getRemainingBootGraceMs(relativeNow, relativeFirstConnect);
     }
 
+    public interface PackageSystemChecker {
+        boolean isSystemPackage(String pkg);
+    }
+
+    public static boolean isWellKnownSystemPackage(String pkg) {
+        if (pkg == null || pkg.isEmpty()) {
+            return true;
+        }
+        return pkg.equals("android")
+                || pkg.startsWith("android.")
+                || pkg.startsWith("com.android.")
+                || pkg.startsWith("com.coloros.")
+                || pkg.startsWith("com.oplus.")
+                || pkg.startsWith("com.miui.")
+                || pkg.startsWith("com.xiaomi.")
+                || pkg.startsWith("com.huawei.")
+                || pkg.startsWith("com.honor.")
+                || pkg.startsWith("com.samsung.")
+                || pkg.startsWith("com.vivo.");
+    }
+
+    public static boolean shouldIgnoreApp(boolean ignoreSystem, String pkg,
+            PackageSystemChecker checker) {
+        if (!ignoreSystem) {
+            return false;
+        }
+        if (isWellKnownSystemPackage(pkg)) {
+            return true;
+        }
+        return checker != null && checker.isSystemPackage(pkg);
+    }
+
+    public static String filterOutSystemComponents(String componentsStr,
+            boolean ignoreSystem, PackageSystemChecker checker) {
+        if (!ignoreSystem || componentsStr == null || componentsStr.isEmpty()) {
+            return componentsStr == null ? "" : componentsStr;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String item : componentsStr.split(",")) {
+            String trimmed = item.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            int slash = trimmed.indexOf('/');
+            String pkg = slash > 0 ? trimmed.substring(0, slash) : trimmed;
+            if (isWellKnownSystemPackage(pkg) || (checker != null && checker.isSystemPackage(pkg))) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append(',');
+            }
+            sb.append(trimmed);
+        }
+        return sb.toString();
+    }
+
     static boolean isSelfOrSystemPackage(String pkg, String contextPkg) {
         if (pkg == null || pkg.isEmpty()) {
             return true;
         }
-        if ("android".equals(pkg) || pkg.equals(contextPkg)) {
+        if ("android".equals(pkg) || pkg.equals(contextPkg) || isWellKnownSystemPackage(pkg)) {
             return true;
         }
         return pkg.equals("com.accessibilitymanager")

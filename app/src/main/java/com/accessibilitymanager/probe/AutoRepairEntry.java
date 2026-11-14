@@ -76,6 +76,7 @@ public class AutoRepairEntry extends XposedModule {
     private static final String KEY_DEBUG_KILL = "a11y_module_debug_kill";
     private static final String KEY_FIX_MODE = "a11y_module_fix_mode";
     private static final String KEY_FIX_DISABLED = "a11y_module_fix_disabled";
+    private static final String KEY_IGNORE_SYSTEM = "a11y_module_ignore_system";
     private static final String KEY_CMD_ACK = "a11y_module_cmd_ack";
     private static final String KEY_TOAST = "a11y_module_toast";
     private static final String KEY_LOADED = "a11y_module_loaded";
@@ -215,6 +216,7 @@ public class AutoRepairEntry extends XposedModule {
     private static volatile String sManagedServicesCache;
     private static volatile String sFixModeCache;
     private static volatile String sFixDisabledCache;
+    private static volatile String sIgnoreSystemCache;
     private static volatile String sDryRunCache;
     private static volatile String sDebugCache;
     private static volatile String sToastCache;
@@ -613,7 +615,7 @@ public class AutoRepairEntry extends XposedModule {
                         .intercept(chain -> {
                             Object conn = chain.getThisObject();
                             ComponentName cn = getComponentName(conn);
-                            if (cn != null && (isManaged(cn) || "com.arlosoft.macrodroid".equals(cn.getPackageName()))) {
+                            if (isDebugEnabled() && cn != null && isManaged(cn)) {
                                 event("监听", "AMS发起绑定: " + cn.flattenToShortString() + " conn=" + connId(conn));
                             }
                             return chain.proceed();
@@ -628,7 +630,7 @@ public class AutoRepairEntry extends XposedModule {
                         .intercept(chain -> {
                             Object conn = chain.getThisObject();
                             ComponentName cn = getComponentName(conn);
-                            if (cn != null && (isManaged(cn) || "com.arlosoft.macrodroid".equals(cn.getPackageName()))) {
+                            if (isDebugEnabled() && cn != null && isManaged(cn)) {
                                 event("监听", "AMS发起解绑: " + cn.flattenToShortString() + " conn=" + connId(conn));
                             }
                             return chain.proceed();
@@ -942,9 +944,11 @@ public class AutoRepairEntry extends XposedModule {
                         }
                     }
                     String connKey = component.flattenToString();
+                    String pkg = component.getPackageName();
+                    boolean ignoreSystem = shouldIgnoreSystemApp(pkg);
                     if (!died) {
                         Object existing = sConnections.get(connKey);
-                        if (existing != null && existing != connection) {
+                        if (!ignoreSystem && existing != null && existing != connection) {
                             event("警告", "检测到同名服务存在重复连接，自动解除旧连接: " + component.flattenToShortString()
                                     + " old=" + connId(existing) + " new=" + connId(connection));
                             unbindConnection(existing, "duplicate_detected");
@@ -1275,6 +1279,10 @@ public class AutoRepairEntry extends XposedModule {
             if (prev != null && !current.equals(prev)) {
                 String removed = diffComponents(current, prev);
                 String added = diffComponents(prev, current);
+                if (isIgnoreSystemEnabled()) {
+                    removed = RepairPolicy.filterOutSystemComponents(removed, true, AutoRepairEntry::isSystemPackage);
+                    added = RepairPolicy.filterOutSystemComponents(added, true, AutoRepairEntry::isSystemPackage);
+                }
                 if (!removed.isEmpty() || !added.isEmpty()) {
                     event("监听", "启用列表变更: 移除=" + (removed.isEmpty() ? "无" : removed)
                                     + " 新增=" + (added.isEmpty() ? "无" : added),
@@ -1910,6 +1918,19 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
 
+        if ("sync_ignore_system".equals(action)) {
+            sIgnoreSystemCache = component;
+            if (sContext != null) {
+                try {
+                    Settings.Secure.putString(sContext.getContentResolver(), KEY_IGNORE_SYSTEM, component);
+                } catch (Throwable ignored) {
+                }
+            }
+            event("配置", "模块已生效忽略系统应用配置: ignoreSystem=" + component);
+            notifyCommandAck();
+            return;
+        }
+
         if ("debug_kill".equals(action)) {
             int slash = component.indexOf('/');
             String pkg = slash > 0 ? component.substring(0, slash) : component;
@@ -2134,6 +2155,7 @@ public class AutoRepairEntry extends XposedModule {
             sb.append("模块启用: ").append(isModuleEnabled())
                     .append("  演练模式: ").append(isDryRun())
                     .append("  强杀模式: ").append("1".equals(readConfig(KEY_FIX_MODE)))
+                    .append("  忽略系统应用: ").append(isIgnoreSystemEnabled())
                     .append("  Toast提示: ").append(isToastEnabled()).append('\n');
             sb.append("省电与屏幕状态: ").append(getPowerStateSummary()).append('\n');
             sb.append("锁定列表: ").append(managed == null || managed.isEmpty() ? "空" : managed)
@@ -2349,6 +2371,11 @@ public class AutoRepairEntry extends XposedModule {
         String key = component.flattenToString();
         long now = SystemClock.elapsedRealtime();
 
+        if (shouldIgnoreSystemApp(component.getPackageName())) {
+            log("ignore binderDied for system app: " + key);
+            return;
+        }
+
         if (!isManaged(component)) {
             Long lastNonManaged = sLastDied.get(key);
             if (lastNonManaged != null && now - lastNonManaged < DEDUPE_MS) {
@@ -2556,6 +2583,32 @@ public class AutoRepairEntry extends XposedModule {
         repair(component, key);
     }
 
+    static boolean isIgnoreSystemEnabled() {
+        return sIgnoreSystemCache != null
+                ? !"0".equals(sIgnoreSystemCache)
+                : !"0".equals(readConfig(KEY_IGNORE_SYSTEM));
+    }
+
+    static boolean isSystemPackage(String pkg) {
+        if (RepairPolicy.isWellKnownSystemPackage(pkg)) {
+            return true;
+        }
+        if (sContext != null) {
+            try {
+                ApplicationInfo ai = sContext.getPackageManager().getApplicationInfo(pkg, 0);
+                if ((ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0) {
+                    return true;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return false;
+    }
+
+    static boolean shouldIgnoreSystemApp(String pkg) {
+        return isIgnoreSystemEnabled() && isSystemPackage(pkg);
+    }
+
     static boolean isSelfOrSystemPackage(String pkg, String contextPkg) {
         return RepairPolicy.isSelfOrSystemPackage(pkg, contextPkg);
     }
@@ -2751,6 +2804,10 @@ public class AutoRepairEntry extends XposedModule {
     private static boolean isToastEnabled() {
         String value = readConfig(KEY_TOAST);
         return value == null || "1".equals(value);
+    }
+
+    static boolean isDebugEnabled() {
+        return "1".equals(readConfig(KEY_DEBUG));
     }
 
     private static String getAppLabel(ComponentName component) {
@@ -3196,6 +3253,15 @@ public class AutoRepairEntry extends XposedModule {
                 return secureVal;
             }
             return null;
+        }
+        if (KEY_IGNORE_SYSTEM.equals(key)) {
+            if (sIgnoreSystemCache != null) return sIgnoreSystemCache;
+            String secureVal = readSecure(KEY_IGNORE_SYSTEM);
+            if (secureVal != null) {
+                sIgnoreSystemCache = secureVal;
+                return secureVal;
+            }
+            return "1";
         }
         if (KEY_DRY_RUN.equals(key)) {
             if (sDryRunCache != null) return sDryRunCache;

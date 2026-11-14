@@ -124,6 +124,22 @@
                             android:background="@color/divider" />
                     </LinearLayout>
 
+                    <!-- LSPosed 模式下：忽略系统应用挂载槽（放在调试上方） -->
+                    <LinearLayout
+                        android:id="@+id/work_mode_ignore_system_slot"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:layout_marginLeft="20dp"
+                            android:layout_marginRight="16dp"
+                            android:background="@color/divider" />
+                    </LinearLayout>
+
                     <!-- 调试工具：模拟服务崩溃（仅 LSPosed 模块模式 Debug 包） -->
                     <LinearLayout
                         android:id="@+id/debug_tools_row"
@@ -1252,56 +1268,68 @@
                             </LinearLayout>
                         </LinearLayout>
 
-                        <View
-                            android:layout_width="match_parent"
-                            android:layout_height="1dp"
-                            android:layout_marginLeft="20dp"
-                            android:layout_marginRight="16dp"
-                            android:background="@color/divider" />
-
-                        <!-- 系统应用变化不触发检测 -->
+                        <!-- 普通模式：忽略系统应用挂载槽 -->
                         <LinearLayout
+                            android:id="@+id/normal_mode_ignore_system_slot"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:gravity="center_vertical"
-                            android:minHeight="72dp"
-                            android:paddingLeft="20dp"
-                            android:paddingRight="16dp"
-                            android:paddingTop="12dp"
-                            android:paddingBottom="12dp"
-                            android:background="?android:attr/selectableItemBackground"
-                            android:clickable="true"
-                            android:focusable="true">
+                            android:orientation="vertical">
 
+                            <View
+                                android:id="@+id/normal_mode_ignore_system_divider"
+                                android:layout_width="match_parent"
+                                android:layout_height="1dp"
+                                android:layout_marginLeft="20dp"
+                                android:layout_marginRight="16dp"
+                                android:background="@color/divider" />
+
+                            <!-- 系统应用变化不触发检测 / 忽略系统应用 wrapper -->
                             <LinearLayout
-                                android:layout_width="0dp"
+                                android:id="@+id/ignore_system_wrapper"
+                                android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:orientation="vertical"
-                                android:paddingRight="16dp">
-
-                                <TextView
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:text="系统应用变化不触发检测"
-                                    android:textColor="@color/text_primary"
-                                    android:textSize="16sp" />
-
-                                <TextView
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:text="系统应用的无障碍服务可能会频繁改变，引起多次崩溃检测，从而增加耗电"
-                                    android:textColor="@color/text_secondary"
-                                    android:textSize="13sp"
-                                    android:layout_marginTop="2dp" />
-                            </LinearLayout>
-
-                            <com.google.android.material.materialswitch.MaterialSwitch
-                                android:id="@+id/ignore_system_crash"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:minHeight="72dp"
+                                android:paddingLeft="20dp"
+                                android:paddingRight="16dp"
+                                android:paddingTop="12dp"
+                                android:paddingBottom="12dp"
+                                android:background="?android:attr/selectableItemBackground"
                                 android:clickable="true"
-                                android:focusable="false" />
+                                android:focusable="true">
+
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:orientation="vertical"
+                                    android:paddingRight="16dp">
+
+                                    <TextView
+                                        android:id="@+id/ignore_system_title"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="系统应用变化不触发检测"
+                                        android:textColor="@color/text_primary"
+                                        android:textSize="16sp" />
+
+                                    <TextView
+                                        android:id="@+id/ignore_system_desc"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="系统应用的无障碍服务可能会频繁改变，引起多次崩溃检测，从而增加耗电"
+                                        android:textColor="@color/text_secondary"
+                                        android:textSize="13sp"
+                                        android:layout_marginTop="2dp" />
+                                </LinearLayout>
+
+                                <com.google.android.material.materialswitch.MaterialSwitch
+                                    android:id="@+id/ignore_system_crash"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:clickable="true"
+                                    android:focusable="false" />
+                            </LinearLayout>
                         </LinearLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>

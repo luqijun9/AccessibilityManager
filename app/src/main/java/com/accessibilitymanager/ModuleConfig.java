@@ -250,6 +250,7 @@ public final class ModuleConfig {
 
     public static final String KEY_FIX_MODE = "a11y_module_fix_mode";
     public static final String KEY_FIX_DISABLED = "a11y_module_fix_disabled";
+    public static final String KEY_IGNORE_SYSTEM = "a11y_module_ignore_system";
 
     private static volatile String sLastSyncedServices = null;
 
@@ -258,6 +259,16 @@ public final class ModuleConfig {
         put(context, KEY_FIX_DISABLED, disabledServices != null ? disabledServices : "");
         return sendServiceCommandPayload(context, "sync_fixmode:" + (fixMode ? "1" : "0") + "#"
                 + (disabledServices != null ? disabledServices : ""));
+    }
+
+    public static boolean setIgnoreSystem(Context context, boolean ignoreSystem) {
+        put(context, KEY_IGNORE_SYSTEM, ignoreSystem ? "1" : "0");
+        return sendServiceCommandPayload(context, "sync_ignore_system:" + (ignoreSystem ? "1" : "0"));
+    }
+
+    public static boolean isIgnoreSystem(Context context) {
+        String val = get(context, KEY_IGNORE_SYSTEM);
+        return val == null || !"0".equals(val);
     }
 
     public static void syncManagedServices(Context context, String daemon,
