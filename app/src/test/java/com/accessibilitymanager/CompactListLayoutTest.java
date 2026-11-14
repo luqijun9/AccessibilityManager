@@ -33,11 +33,11 @@ public class CompactListLayoutTest {
     }
 
     @Test
-    public void resolveLockVisibility_usesGoneWhenDisabledInCompactMode() {
+    public void resolveLockVisibility_reservesSpaceWithInvisibleWhenDisabled() {
         assertEquals(View.VISIBLE, MainActivity.resolveLockVisibility(true, false));
         assertEquals(View.VISIBLE, MainActivity.resolveLockVisibility(true, true));
         assertEquals(View.INVISIBLE, MainActivity.resolveLockVisibility(false, false));
-        assertEquals(View.GONE, MainActivity.resolveLockVisibility(false, true));
+        assertEquals(View.INVISIBLE, MainActivity.resolveLockVisibility(false, true));
     }
 }
 

@@ -1118,10 +1118,7 @@ public class MainActivity extends Activity {
     }
 
     static int resolveLockVisibility(boolean isServiceEnabled, boolean compactMode) {
-        if (isServiceEnabled) {
-            return View.VISIBLE;
-        }
-        return compactMode ? View.GONE : View.INVISIBLE;
+        return isServiceEnabled ? View.VISIBLE : View.INVISIBLE;
     }
 
     private boolean isCompactListMode() {

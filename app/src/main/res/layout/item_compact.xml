@@ -92,7 +92,7 @@
                     android:src="@drawable/lock"
                     android:tint="?attr/colorPrimary"
                     app:tint="?attr/colorPrimary"
-                    android:visibility="gone" />
+                    android:visibility="invisible" />
 
                 <com.google.android.material.materialswitch.MaterialSwitch
                     android:id="@+id/s"
