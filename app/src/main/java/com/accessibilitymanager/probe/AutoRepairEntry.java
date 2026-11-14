@@ -2950,7 +2950,6 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static void clearCrashedMarker(Object connection, ComponentName component) {
-        boolean removed = false;
         try {
             Object info = getFieldValue(connection, "mAccessibilityServiceInfo");
             if (info != null) {
@@ -2958,20 +2957,6 @@ public class AutoRepairEntry extends XposedModule {
             }
         } catch (Throwable t) {
             log("clear crashed flag failed: " + t);
-        }
-        try {
-            Object userState = getUserState(connection);
-            if (userState != null) {
-                Object crashed = getFieldValue(userState, "mCrashedServices");
-                if (crashed instanceof Set) {
-                    removed = ((Set<?>) crashed).remove(component);
-                }
-            }
-        } catch (Throwable t) {
-            log("clear crashed set failed: " + t);
-        }
-        if (removed) {
-            event("检测", "已清除残留崩溃标记: " + component.flattenToString());
         }
     }
 
