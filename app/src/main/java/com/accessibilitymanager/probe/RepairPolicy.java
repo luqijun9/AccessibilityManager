@@ -10,7 +10,7 @@ final class RepairPolicy {
     static final long BOOT_GRACE_MS = 90_000L;
     static final long BOOT_FIRST_CONNECT_WINDOW_MS = 180_000L;
     static final long BOOT_WAVE_GRACE_MS = 30_000L;
-    static final long PACKAGE_KILL_COOLDOWN_MS = 15_000L;
+    static final long PACKAGE_KILL_COOLDOWN_MS = 10_000L;
 
     private RepairPolicy() {
     }
