@@ -99,35 +99,5 @@ final class RepairPolicy {
         sb.append("up=").append(formatUptimeSeconds(elapsedRealtimeMs));
         return sb.toString();
     }
-
-    /** 判断暂停修复（熔断）期是否已届满，届满后应自动清除暂停并恢复检查 */
-    static boolean isBlockExpired(Long blockedUntil, long now) {
-        return blockedUntil != null && now >= blockedUntil;
-    }
-
-    /** 计算距离暂停修复到期还需等待的复查延迟毫秒数（额外留 500ms 余量确保触发时已过期） */
-    static long getRemainingBlockDelayMs(Long blockedUntil, long now) {
-        if (blockedUntil == null || now >= blockedUntil) {
-            return 0L;
-        }
-        return (blockedUntil - now) + 500L;
-    }
-
-    /** 判断距离上次修复尝试是否已超过重置窗口（RESET_AFTER_MS），超过后应清零重试计数开启新一轮修复 */
-    static boolean shouldResetAttempts(Long lastAttemptAt, long now, long resetAfterMs) {
-        return lastAttemptAt != null && (now - lastAttemptAt) >= resetAfterMs;
-    }
-
-    /** 计算单轮重试达上限后，距离下一轮自动复查重置还需等待的延迟毫秒数 */
-    static long getRemainingResetDelayMs(Long lastAttemptAt, long now, long resetAfterMs) {
-        if (lastAttemptAt == null) {
-            return resetAfterMs + 500L;
-        }
-        long elapsed = now - lastAttemptAt;
-        if (elapsed >= resetAfterMs) {
-            return 500L;
-        }
-        return (resetAfterMs - elapsed) + 500L;
-    }
 }
 

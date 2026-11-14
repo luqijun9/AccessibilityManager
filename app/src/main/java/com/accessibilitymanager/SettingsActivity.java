@@ -57,8 +57,8 @@ public class SettingsActivity extends AppCompatActivity {
     private View lsposedModeRow, crashFixRow, crashFixFixmodeDivider, fixmodeRow, crashFixSectionContainer;
     private LinearLayout workModeFixmodeSlot, normalModeFixmodeSlot;
     private TextView lsposedModuleStatus, fixmodeDesc;
-    private View debugToolsRow, lsposedCircuitRow, lsposedCircuitBtn;
-    private TextView debugToolsStatus, lsposedCircuitDesc;
+    private View debugToolsRow;
+    private TextView debugToolsStatus;
     private android.widget.CompoundButton.OnCheckedChangeListener mCrashFixListener;
     private android.widget.CompoundButton.OnCheckedChangeListener mModuleModeListener;
     private android.widget.CompoundButton.OnCheckedChangeListener mNotifyCrashCheckListener;
@@ -277,9 +277,6 @@ public class SettingsActivity extends AppCompatActivity {
         switchLsposedMode = findViewById(R.id.lsposed_mode);
         lsposedModeRow = findViewById(R.id.lsposed_mode_row);
         lsposedModuleStatus = findViewById(R.id.lsposed_module_status);
-        lsposedCircuitRow = findViewById(R.id.lsposed_circuit_row);
-        lsposedCircuitDesc = findViewById(R.id.lsposed_circuit_desc);
-        lsposedCircuitBtn = findViewById(R.id.lsposed_circuit_btn);
         debugToolsRow = findViewById(R.id.debug_tools_row);
         debugToolsStatus = findViewById(R.id.debug_tools_status);
         switchUnlockCrashCheck = findViewById(R.id.unlock_crash_check);
@@ -420,12 +417,6 @@ public class SettingsActivity extends AppCompatActivity {
         mModuleModeListener = (btn, checked) -> handleLsposedModeChanged(checked);
         switchLsposedMode.setOnCheckedChangeListener(mModuleModeListener);
         lsposedModeRow.setOnClickListener(v -> switchLsposedMode.toggle());
-        if (lsposedCircuitRow != null) {
-            lsposedCircuitRow.setOnClickListener(v -> showLsposedCircuitDialog());
-        }
-        if (lsposedCircuitBtn != null) {
-            lsposedCircuitBtn.setOnClickListener(v -> showLsposedCircuitDialog());
-        }
         debugToolsRow.setOnClickListener(v -> showDebugToolsDialog());
 
         // 解锁检测
@@ -1048,7 +1039,6 @@ public class SettingsActivity extends AppCompatActivity {
             ModuleConfig.setFixMode(this, sp.getBoolean("fixmode", false),
                     sp.getString("fixmode_disabled_services", ""));
             ModuleConfig.setToastEnabled(this, sp.getBoolean("toast", true));
-            ModuleConfig.syncCircuitConfig(this);
             ModuleConfig.triggerScan(this);
             ModuleConfig.startLogSync(this);
             ModuleConfig.drainLogs(this);
@@ -1125,11 +1115,6 @@ public class SettingsActivity extends AppCompatActivity {
             lsposedModuleStatus.setText("已激活：开启后由模块服务接管崩溃检测和服务开关，崩溃检测无需主动检测，定时检测等设置项将自动关闭");
         }
 
-        if (lsposedCircuitRow != null) {
-            lsposedCircuitRow.setVisibility(mode ? View.VISIBLE : View.GONE);
-        }
-        updateLsposedCircuitDesc();
-
         if (debugToolsRow != null) {
             debugToolsRow.setVisibility((BuildConfig.DEBUG && mode) ? View.VISIBLE : View.GONE);
             if (debugToolsStatus != null) {
@@ -1140,92 +1125,6 @@ public class SettingsActivity extends AppCompatActivity {
                 }
             }
         }
-    }
-
-    private void updateLsposedCircuitDesc() {
-        if (lsposedCircuitDesc == null) {
-            return;
-        }
-        ModuleConfig.ensureUnlimitedDefaultMigrated(sp);
-        int threshold = sp.getInt(ModuleConfig.SP_UNSTABLE_THRESHOLD, ModuleConfig.DEFAULT_UNSTABLE_THRESHOLD);
-        int cooldown = sp.getInt(ModuleConfig.SP_UNSTABLE_COOLDOWN, ModuleConfig.DEFAULT_UNSTABLE_COOLDOWN);
-        if (cooldown <= 0) {
-            lsposedCircuitDesc.setText("无限制：持续自动重试，不暂停修复");
-        } else {
-            lsposedCircuitDesc.setText("2分钟内连续崩溃 " + threshold + " 次则暂停修复 " + cooldown + " 分钟");
-        }
-    }
-
-    private void showLsposedCircuitDialog() {
-        ModuleConfig.ensureUnlimitedDefaultMigrated(sp);
-        View layout = getLayoutInflater().inflate(R.layout.dialog_lsposed_circuit, null);
-        final com.google.android.material.textfield.TextInputEditText inputThreshold =
-                layout.findViewById(R.id.input_threshold);
-        final com.google.android.material.textfield.TextInputEditText inputCooldown =
-                layout.findViewById(R.id.input_cooldown);
-        final com.google.android.material.textfield.TextInputEditText inputMaxAttempts =
-                layout.findViewById(R.id.input_max_attempts);
-        final View btnResetCircuit = layout.findViewById(R.id.btn_reset_circuit_state);
-
-        int currentThreshold = sp.getInt(ModuleConfig.SP_UNSTABLE_THRESHOLD, ModuleConfig.DEFAULT_UNSTABLE_THRESHOLD);
-        int currentCooldown = sp.getInt(ModuleConfig.SP_UNSTABLE_COOLDOWN, ModuleConfig.DEFAULT_UNSTABLE_COOLDOWN);
-        int currentMaxAttempts = sp.getInt(ModuleConfig.SP_MAX_ATTEMPTS, ModuleConfig.DEFAULT_MAX_ATTEMPTS);
-
-        inputThreshold.setText(String.valueOf(currentThreshold));
-        inputCooldown.setText(String.valueOf(currentCooldown));
-        inputMaxAttempts.setText(String.valueOf(currentMaxAttempts));
-
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
-                .setTitle("崩溃重试与保护设置")
-                .setView(layout)
-                .setPositiveButton("确定", null)
-                .setNegativeButton("取消", null)
-                .setNeutralButton("恢复默认", null)
-                .create();
-        dialog.show();
-
-        if (btnResetCircuit != null) {
-            btnResetCircuit.setOnClickListener(v -> {
-                ModuleConfig.resetCircuitBreaker(SettingsActivity.this);
-                Toast.makeText(SettingsActivity.this, "已通知模块立即恢复所有暂停修复的服务", Toast.LENGTH_SHORT).show();
-            });
-        }
-
-        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
-            inputThreshold.setText(String.valueOf(ModuleConfig.DEFAULT_UNSTABLE_THRESHOLD));
-            inputCooldown.setText(String.valueOf(ModuleConfig.DEFAULT_UNSTABLE_COOLDOWN));
-            inputMaxAttempts.setText(String.valueOf(ModuleConfig.DEFAULT_MAX_ATTEMPTS));
-        });
-
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            int threshold;
-            int cooldown;
-            int maxAttempts;
-            try {
-                threshold = Integer.parseInt(inputThreshold.getText().toString().trim());
-                cooldown = Integer.parseInt(inputCooldown.getText().toString().trim());
-                maxAttempts = Integer.parseInt(inputMaxAttempts.getText().toString().trim());
-            } catch (NumberFormatException e) {
-                Toast.makeText(SettingsActivity.this, "请输入有效数字", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            if (threshold < 1 || threshold > 20) {
-                Toast.makeText(SettingsActivity.this, "连续崩溃次数请输入 1-20 之间的数字", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            if (cooldown < 0 || cooldown > 1440) {
-                Toast.makeText(SettingsActivity.this, "暂停自动修复时长请输入 0-1440 之间的数字", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            if (maxAttempts < 1 || maxAttempts > 10) {
-                Toast.makeText(SettingsActivity.this, "单次最大重试次数请输入 1-10 之间的数字", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            ModuleConfig.syncCircuitConfig(SettingsActivity.this, threshold, cooldown, maxAttempts);
-            updateLsposedCircuitDesc();
-            Toast.makeText(SettingsActivity.this, "设置已保存并实时生效", Toast.LENGTH_SHORT).show();
-            dialog.dismiss();
-        });
     }
 
     private void showDebugToolsDialog() {

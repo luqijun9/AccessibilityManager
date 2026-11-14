@@ -137,7 +137,7 @@ public class AutoRepairEntryTest {
         AutoRepairEntry.putConnectionForTesting(svcA, fakeConnA);
         AutoRepairEntry.putConnectionForTesting(svcB, fakeConnB);
         AutoRepairEntry.setFirstServiceConnectAtForTesting(68_500L);
-        AutoRepairEntry.putRetryStateForTesting(svcA, 1, 300_000L, 120_000L, "com.foo");
+        AutoRepairEntry.putLastPackageKillAtForTesting("com.foo", 120_000L);
 
         final Object[] savedStateBox = new Object[1];
         XposedModuleInterface.HotReloadingParam reloadingParam =
@@ -158,7 +158,6 @@ public class AutoRepairEntryTest {
         // 验证旧代内存已被清理，且保存状态为跨 ClassLoader 安全的标准 Map
         assertTrue("onHotReloading 后旧代连接映射应已清空",
                 AutoRepairEntry.getConnectionsForTesting().isEmpty());
-        assertEquals(0, AutoRepairEntry.getAttemptsForTesting(svcA));
         assertNotNull("savedInstanceState 不应为空", savedStateBox[0]);
         assertTrue("savedInstanceState 应为标准 Map", savedStateBox[0] instanceof Map);
 
@@ -199,8 +198,6 @@ public class AutoRepairEntryTest {
         assertSame(fakeConnA, restoredConns.get(svcA));
         assertSame(fakeConnB, restoredConns.get(svcB));
         assertEquals(68_500L, AutoRepairEntry.getFirstServiceConnectAtForTesting());
-        assertEquals(1, AutoRepairEntry.getAttemptsForTesting(svcA));
-        assertEquals(Long.valueOf(300_000L), AutoRepairEntry.getBlockedUntilForTesting(svcA));
         assertEquals(Long.valueOf(120_000L), AutoRepairEntry.getLastPackageKillAtForTesting("com.foo"));
         assertEquals(1, AutoRepairEntry.getHotReloadCountForTesting());
     }
@@ -247,24 +244,6 @@ public class AutoRepairEntryTest {
                 RepairPolicy.getRemainingBootGraceMs(6_665_000L, moduleStartAt, firstConnectAt));
         assertEquals(0L,
                 RepairPolicy.getRemainingBootGraceMs(6_685_000L, moduleStartAt, firstConnectAt));
-    }
-
-    @Test
-    public void circuitBreakerAndRetryReset_calculatesExpirationAndWakeupDelays() {
-        long blockedUntil = 600_000L;
-        assertFalse(RepairPolicy.isBlockExpired(blockedUntil, 500_000L));
-        assertEquals(100_500L, RepairPolicy.getRemainingBlockDelayMs(blockedUntil, 500_000L));
-        assertTrue(RepairPolicy.isBlockExpired(blockedUntil, 600_000L));
-        assertEquals(0L, RepairPolicy.getRemainingBlockDelayMs(blockedUntil, 600_000L));
-
-        long resetAfterMs = 5 * 60 * 1000L; // 300_000ms
-        long lastAttemptAt = 100_000L;
-        assertFalse(RepairPolicy.shouldResetAttempts(lastAttemptAt, 350_000L, resetAfterMs));
-        assertEquals(50_500L,
-                RepairPolicy.getRemainingResetDelayMs(lastAttemptAt, 350_000L, resetAfterMs));
-        assertTrue(RepairPolicy.shouldResetAttempts(lastAttemptAt, 400_000L, resetAfterMs));
-        assertEquals(500L,
-                RepairPolicy.getRemainingResetDelayMs(lastAttemptAt, 400_000L, resetAfterMs));
     }
 
     @Test

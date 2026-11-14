@@ -2871,7 +2871,6 @@ public class MainActivity extends Activity {
         }
         ModuleConfig.setDryRun(this, false);
         ModuleConfig.setToastEnabled(this, sp.getBoolean("toast", true));
-        ModuleConfig.syncCircuitConfig(this);
         ModuleConfig.syncManagedServices(this,
                 sp.getString("daemon", ""),
                 sp.getString("whitelist_services", ""),

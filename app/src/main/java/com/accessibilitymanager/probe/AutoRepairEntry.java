@@ -56,9 +56,6 @@ public class AutoRepairEntry extends XposedModule {
     private static final String STATE_CONNECTIONS = "connections";
     private static final String STATE_MODULE_START_AT = "module_start_at";
     private static final String STATE_FIRST_CONNECT_AT = "first_connect_at";
-    private static final String STATE_BLOCKED_UNTIL = "blocked_until";
-    private static final String STATE_ATTEMPTS = "attempts";
-    private static final String STATE_LAST_ATTEMPT_AT = "last_attempt_at";
     private static final String STATE_LAST_PKG_KILL_AT = "last_pkg_kill_at";
     private static final String STATE_EVENT_LINES = "event_lines";
     private static final String STATE_RAW_TRACE_LINES = "raw_trace_lines";
@@ -77,7 +74,6 @@ public class AutoRepairEntry extends XposedModule {
     private static final String KEY_DEBUG_KILL = "a11y_module_debug_kill";
     private static final String KEY_FIX_MODE = "a11y_module_fix_mode";
     private static final String KEY_FIX_DISABLED = "a11y_module_fix_disabled";
-    private static final String KEY_CIRCUIT_CONFIG = "a11y_module_circuit_config";
     private static final String KEY_CMD_ACK = "a11y_module_cmd_ack";
     private static final String KEY_TOAST = "a11y_module_toast";
     private static final String KEY_LOADED = "a11y_module_loaded";
@@ -135,12 +131,6 @@ public class AutoRepairEntry extends XposedModule {
     private static final long TOGGLE_OFF_MS = 500L;
     private static final long VERIFY_MS = 3500L;
     private static final long SUPPRESS_MS = 10000L;
-    private static final long RETRY_COOLDOWN_MS = 20000L;
-    private static final int DEFAULT_MAX_ATTEMPTS = 2;
-    private static final long RESET_AFTER_MS = 5 * 60 * 1000L;
-    private static final long UNSTABLE_WINDOW_MS = 2 * 60 * 1000L;
-    private static final int DEFAULT_UNSTABLE_THRESHOLD = 3;
-    private static final int DEFAULT_UNSTABLE_COOLDOWN_MIN = 0;
     private static final long REPAIR_STUCK_MS = 15000L;
     private static final long SCAN_INIT_DELAY_MS = 10000L;
     private static final long SCAN_CONFIG_DELAY_MS = 1500L;
@@ -203,10 +193,6 @@ public class AutoRepairEntry extends XposedModule {
     private static final Map<String, Runnable> sPendingCheck = new HashMap<>();
     private static final Map<String, Runnable> sVerifyRun = new HashMap<>();
     private static final Map<String, Long> sSuppressUntil = new HashMap<>();
-    private static final Map<String, Long> sBlockedUntil = new HashMap<>();
-    private static final Map<String, Integer> sAttempts = new HashMap<>();
-    private static final Map<String, Long> sLastAttemptAt = new HashMap<>();
-    private static final Map<String, Deque<Long>> sCrashHistory = new HashMap<>();
     private static final Map<String, Object> sConnections = new HashMap<>();
     private static boolean sBoundCheckAvailable;
     private static boolean sBoundCheckErrorLogged;
@@ -226,7 +212,6 @@ public class AutoRepairEntry extends XposedModule {
     private static volatile String sManagedServicesCache;
     private static volatile String sFixModeCache;
     private static volatile String sFixDisabledCache;
-    private static volatile String sCircuitConfigCache;
     private static volatile String sDryRunCache;
     private static volatile String sDebugCache;
     private static volatile String sToastCache;
@@ -302,9 +287,6 @@ public class AutoRepairEntry extends XposedModule {
             state.put(STATE_CONNECTIONS, new HashMap<>(sConnections));
             state.put(STATE_MODULE_START_AT, sModuleStartAt);
             state.put(STATE_FIRST_CONNECT_AT, sFirstServiceConnectAt);
-            state.put(STATE_BLOCKED_UNTIL, new HashMap<>(sBlockedUntil));
-            state.put(STATE_ATTEMPTS, new HashMap<>(sAttempts));
-            state.put(STATE_LAST_ATTEMPT_AT, new HashMap<>(sLastAttemptAt));
             state.put(STATE_LAST_PKG_KILL_AT, new HashMap<>(sLastPackageKillAt));
             state.put(STATE_HOT_RELOAD_COUNT, sHotReloadCount);
             if (sContext != null) {
@@ -422,11 +404,7 @@ public class AutoRepairEntry extends XposedModule {
         sLastDied.clear();
         sLastInit.clear();
         sSuppressUntil.clear();
-        sBlockedUntil.clear();
-        sAttempts.clear();
-        sLastAttemptAt.clear();
         sLastPackageKillAt.clear();
-        sCrashHistory.clear();
         sPendingVerifyKeys.clear();
         sSelfRemovedUntil.clear();
         sManualHiddenUntil.clear();
@@ -469,33 +447,6 @@ public class AutoRepairEntry extends XposedModule {
                 for (Map.Entry<?, ?> entry : ((Map<?, ?>) conns).entrySet()) {
                     if (entry.getKey() instanceof String && entry.getValue() != null) {
                         sConnections.put((String) entry.getKey(), entry.getValue());
-                    }
-                }
-            }
-            Object blocked = state.get(STATE_BLOCKED_UNTIL);
-            if (blocked instanceof Map) {
-                sBlockedUntil.clear();
-                for (Map.Entry<?, ?> entry : ((Map<?, ?>) blocked).entrySet()) {
-                    if (entry.getKey() instanceof String && entry.getValue() instanceof Long) {
-                        sBlockedUntil.put((String) entry.getKey(), (Long) entry.getValue());
-                    }
-                }
-            }
-            Object attempts = state.get(STATE_ATTEMPTS);
-            if (attempts instanceof Map) {
-                sAttempts.clear();
-                for (Map.Entry<?, ?> entry : ((Map<?, ?>) attempts).entrySet()) {
-                    if (entry.getKey() instanceof String && entry.getValue() instanceof Integer) {
-                        sAttempts.put((String) entry.getKey(), (Integer) entry.getValue());
-                    }
-                }
-            }
-            Object lastAttempt = state.get(STATE_LAST_ATTEMPT_AT);
-            if (lastAttempt instanceof Map) {
-                sLastAttemptAt.clear();
-                for (Map.Entry<?, ?> entry : ((Map<?, ?>) lastAttempt).entrySet()) {
-                    if (entry.getKey() instanceof String && entry.getValue() instanceof Long) {
-                        sLastAttemptAt.put((String) entry.getKey(), (Long) entry.getValue());
                     }
                 }
             }
@@ -1088,10 +1039,6 @@ public class AutoRepairEntry extends XposedModule {
                         sToastCache = readSecure(KEY_TOAST);
                         return;
                     }
-                    if (KEY_CIRCUIT_CONFIG.equals(key)) {
-                        sCircuitConfigCache = readSecure(KEY_CIRCUIT_CONFIG);
-                        return;
-                    }
                     if (KEY_ENABLE.equals(key)) {
                         sModuleEnabledCache = readSecure(KEY_ENABLE);
                         if (isModuleEnabled()) {
@@ -1119,8 +1066,6 @@ public class AutoRepairEntry extends XposedModule {
             resolver.registerContentObserver(Settings.Secure.getUriFor(KEY_TOAST),
                     false, sObserver);
             resolver.registerContentObserver(Settings.Secure.getUriFor(KEY_DEBUG_KILL),
-                    false, sObserver);
-            resolver.registerContentObserver(Settings.Secure.getUriFor(KEY_CIRCUIT_CONFIG),
                     false, sObserver);
             resolver.registerContentObserver(Settings.Secure.getUriFor(SETTING_ENABLED),
                     false, sObserver);
@@ -1215,7 +1160,7 @@ public class AutoRepairEntry extends XposedModule {
             eventSkip("scan:disabled", "扫描", "跳过 (" + reason + ")：模块已停用");
             return;
         }
-        boolean isManual = "manual scan".equals(reason) || "reset_circuit".equals(reason);
+        boolean isManual = "manual scan".equals(reason);
         if (!isManual) {
             long now = SystemClock.elapsedRealtime();
             long remainingBoot = getRemainingBootGraceMs(now, sFirstServiceConnectAt);
@@ -1811,19 +1756,6 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
 
-        if ("reset_circuit".equals(body)) {
-            int count = sBlockedUntil.size();
-            sBlockedUntil.clear();
-            sAttempts.clear();
-            sLastAttemptAt.clear();
-            sLastPackageKillAt.clear();
-            sCrashHistory.clear();
-            event("配置", "已手动恢复暂停修复的服务 (清除 " + count + " 个暂停记录)");
-            scheduleScan(0L, "reset_circuit");
-            notifyCommandAck();
-            return;
-        }
-
         int colon = body.indexOf(':');
         if (colon <= 0) {
             return;
@@ -1914,25 +1846,6 @@ public class AutoRepairEntry extends XposedModule {
                 event("配置", "模块已生效最新锁定列表: " + component);
             } else {
                 log("sync_services unchanged: " + component);
-            }
-            notifyCommandAck();
-            return;
-        }
-
-        if ("sync_circuit".equals(action)) {
-            String prev = sCircuitConfigCache != null ? sCircuitConfigCache : readConfig(KEY_CIRCUIT_CONFIG);
-            boolean changed = !component.equals(prev);
-            sCircuitConfigCache = component;
-            if (sContext != null) {
-                try {
-                    Settings.Secure.putString(sContext.getContentResolver(), KEY_CIRCUIT_CONFIG, component);
-                } catch (Throwable ignored) {
-                }
-            }
-            if (changed) {
-                int[] parsed = parseCircuitConfig(component);
-                event("配置", "模块已生效崩溃保护配置: 连续崩溃阈值=" + parsed[0] + "次, 暂停修复="
-                        + (parsed[1] == 0 ? "无限制(不暂停)" : (parsed[1] + "分钟")));
             }
             notifyCommandAck();
             return;
@@ -2160,7 +2073,6 @@ public class AutoRepairEntry extends XposedModule {
             }
             String heartbeat = readSecure(KEY_LOADED);
             String managed = readConfig(KEY_SERVICES);
-            String circuit = readConfig(KEY_CIRCUIT_CONFIG);
 
             StringBuilder sb = new StringBuilder();
             sb.append("采集时间: ").append(System.currentTimeMillis()).append('\n');
@@ -2181,13 +2093,11 @@ public class AutoRepairEntry extends XposedModule {
             sb.append("模块启用: ").append(isModuleEnabled())
                     .append("  演练模式: ").append(isDryRun())
                     .append("  强杀模式: ").append("1".equals(readConfig(KEY_FIX_MODE)))
-                    .append("  Toast提示: ").append(isToastEnabled())
-                    .append("  崩溃保护: ").append(circuit == null ? "默认(无限制)" : circuit).append('\n');
+                    .append("  Toast提示: ").append(isToastEnabled()).append('\n');
             sb.append("省电与屏幕状态: ").append(getPowerStateSummary()).append('\n');
             sb.append("锁定列表: ").append(managed == null || managed.isEmpty() ? "空" : managed)
                     .append('\n');
             if (managed != null && !managed.isEmpty()) {
-                long now = SystemClock.elapsedRealtime();
                 for (String raw : managed.split(":")) {
                     ComponentName component = ComponentName.unflattenFromString(raw);
                     if (component == null) {
@@ -2198,12 +2108,8 @@ public class AutoRepairEntry extends XposedModule {
                             .append("  在启用列表=").append(containsComponent(enabled, component))
                             .append("  已绑定=").append(findBoundConnection(component) != null)
                             .append("  崩溃标记=").append(getCrashedMarker(component))
-                            .append("  ").append(getPackageProcessSummary(component.getPackageName()));
-                    Integer attempts = sAttempts.get(key);
-                    sb.append("  重试次数=").append(attempts == null ? 0 : attempts);
-                    Long blockedUntil = sBlockedUntil.get(key);
-                    long remain = blockedUntil == null ? 0L : Math.max(0L, blockedUntil - now) / 1000L;
-                    sb.append("  暂停修复剩余=").append(remain).append("s\n");
+                            .append("  ").append(getPackageProcessSummary(component.getPackageName()))
+                            .append('\n');
                 }
             }
             synchronized (sEventLock) {
@@ -2444,24 +2350,6 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
 
-        if (getUnstableCooldownMs() <= 0L) {
-            sBlockedUntil.remove(key);
-        } else {
-            Long blocked = sBlockedUntil.get(key);
-            if (blocked != null) {
-                if (!RepairPolicy.isBlockExpired(blocked, now)) {
-                    long delay = RepairPolicy.getRemainingBlockDelayMs(blocked, now);
-                    scheduleCheck(component, key, delay);
-                    eventSkip("died:blocked:" + key, "检测", "忽略（暂停修复中）: " + key);
-                    return;
-                }
-                sBlockedUntil.remove(key);
-                sAttempts.remove(key);
-                sLastAttemptAt.remove(key);
-                sCrashHistory.remove(key);
-            }
-        }
-
         boolean enabled = isModuleEnabled();
         event("检测", "崩溃: " + key,
                 "hook=binderDied conn=" + connId(connection) + " crashed=" + crashed
@@ -2470,17 +2358,6 @@ public class AutoRepairEntry extends XposedModule {
                         + " " + getPackageProcessSummary(component.getPackageName())
                         + " " + getPowerStateSummary());
         if (!enabled) {
-            return;
-        }
-
-        recordCrash(component, key, now);
-        Long afterRecord = sBlockedUntil.get(key);
-        if (getUnstableCooldownMs() > 0L && afterRecord != null && now < afterRecord) {
-            long delay = RepairPolicy.getRemainingBlockDelayMs(afterRecord, now);
-            scheduleCheck(component, key, delay);
-            event("失败", "连续崩溃，暂停修复跳过（到期将自动复查）: " + key,
-                    "action=circuit_pause_skip recheckInMs=" + delay
-                            + " " + getPowerStateSummary());
             return;
         }
 
@@ -2508,14 +2385,12 @@ public class AutoRepairEntry extends XposedModule {
             if (verify != null && sHandler != null) {
                 sHandler.removeCallbacks(verify);
             }
-            Integer attempts = sAttempts.remove(key);
-            boolean wasRepairing = (attempts != null && attempts > 0) || key.equals(sRepairKey);
+            boolean wasRepairing = key.equals(sRepairKey);
             if (wasRepairing) {
                 // 保留短暂抑制期，防止强杀修复后旧连接的延迟 binderDied 穿透造成假崩溃报警
                 sSuppressUntil.put(key, now + SETTLE_MS);
             } else {
                 sSuppressUntil.remove(key);
-                sLastAttemptAt.remove(key);
             }
             finishRepair(key);
             clearCrashedMarker(connection, component);
@@ -2600,8 +2475,6 @@ public class AutoRepairEntry extends XposedModule {
         Object boundConnection = findBoundConnection(component);
         if (boundConnection != null) {
             clearCrashedMarker(boundConnection, component);
-            sAttempts.remove(key);
-            sLastAttemptAt.remove(key);
             sSuppressUntil.remove(key);
             event("保活", "服务已恢复绑定（无需额外重启）: " + key);
             return;
@@ -2611,35 +2484,7 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
 
-        if (getUnstableCooldownMs() <= 0L) {
-            sBlockedUntil.remove(key);
-        } else {
-            Long blocked = sBlockedUntil.get(key);
-            if (blocked != null) {
-                if (!RepairPolicy.isBlockExpired(blocked, now)) {
-                    long delay = RepairPolicy.getRemainingBlockDelayMs(blocked, now);
-                    scheduleCheck(component, key, delay);
-                    eventSkip("check:blocked:" + key, "失败", "跳过（暂停修复中，到期自动复查）: " + key);
-                    return;
-                }
-                sBlockedUntil.remove(key);
-                sAttempts.remove(key);
-                sLastAttemptAt.remove(key);
-                sCrashHistory.remove(key);
-                log("circuit breaker expired in runCheck, resuming repair: " + key);
-            }
-        }
-
-        Long last = sLastAttemptAt.get(key);
-        int attempts = sAttempts.getOrDefault(key, 0);
-        if (last != null && now - last < RETRY_COOLDOWN_MS) {
-            long remainCooldown = (RETRY_COOLDOWN_MS - (now - last)) + 200L;
-            scheduleCheck(component, key, remainCooldown);
-            log("skip check within retry cooldown, rescheduled in " + remainCooldown + "ms: " + key);
-            return;
-        }
-
-        repair(component, key, attempts);
+        repair(component, key);
     }
 
     static boolean isSelfOrSystemPackage(String pkg, String contextPkg) {
@@ -2668,7 +2513,7 @@ public class AutoRepairEntry extends XposedModule {
         }
     }
 
-    private static void repair(ComponentName component, String key, int attempts) {
+    private static void repair(ComponentName component, String key) {
         long now = SystemClock.elapsedRealtime();
         if (isRepairInProgress(now)) {
             scheduleCheck(component, key, 1500L);
@@ -2686,25 +2531,17 @@ public class AutoRepairEntry extends XposedModule {
         }
         String removed = removeComponent(original, component);
 
-        int nextAttempt = attempts + 1;
-        sAttempts.put(key, nextAttempt);
-        sLastAttemptAt.put(key, now);
         sSuppressUntil.put(key, now + SUPPRESS_MS);
         sSelfRemovedUntil.put(key, now + REPAIR_REMOVE_WINDOW_MS);
         sRepairStartedAt = now;
         sRepairInProgress = true;
         sRepairKey = key;
 
-        event("修复", "第 " + nextAttempt + " 次关开，先关闭: " + key,
-                "action=repair_disable attempt=" + nextAttempt + " " + getPowerStateSummary());
+        event("修复", "关开修复，先关闭: " + key,
+                "action=repair_disable " + getPowerStateSummary());
         if (!writeEnabled(removed)) {
             event("失败", "关闭写入失败: " + key, "action=repair_disable_fail " + getPowerStateSummary());
             finishRepair(key);
-            if (getUnstableCooldownMs() > 0L) {
-                block(component, key, "disable write failed");
-            } else {
-                scheduleCheck(component, key, RETRY_COOLDOWN_MS);
-            }
             return;
         }
 
@@ -2741,11 +2578,6 @@ public class AutoRepairEntry extends XposedModule {
                         event("失败", "重新开启写入失败: " + key,
                                 "action=repair_enable_fail " + getPowerStateSummary());
                         finishRepair(key);
-                        if (getUnstableCooldownMs() > 0L) {
-                            block(component, key, "enable write failed");
-                        } else {
-                            scheduleCheck(component, key, RETRY_COOLDOWN_MS);
-                        }
                         return;
                     }
                     ensureAccessibilitySwitchOn();
@@ -2775,7 +2607,6 @@ public class AutoRepairEntry extends XposedModule {
                 Object boundConnection = findBoundConnection(component);
                 if (boundConnection != null) {
                     clearCrashedMarker(boundConnection, component);
-                    sAttempts.remove(key);
                     sSuppressUntil.put(key, verifyNow + SETTLE_MS);
                     event("修复", "恢复成功: " + key,
                             "action=verify_ok conn=" + connId(boundConnection) + " cost=" + costMs + "ms"
@@ -2785,13 +2616,11 @@ public class AutoRepairEntry extends XposedModule {
                     event("失败", "无法确认绑定状态，结束修复: " + key,
                             "action=verify_unknown cost=" + costMs + "ms");
                 } else {
-                    int attempts = sAttempts.getOrDefault(key, 0);
-                    event("失败", "恢复失败 (第 " + attempts + " 次重试，20秒后继续重试): " + key,
-                            "action=verify_fail attempt=" + attempts + " cost=" + costMs + "ms"
+                    event("失败", "恢复失败: " + key,
+                            "action=verify_fail cost=" + costMs + "ms"
                                     + " lastConn=" + connId(sConnections.get(key))
                                     + " " + getPackageProcessSummary(component.getPackageName())
                                     + " " + getPowerStateSummary());
-                    scheduleCheck(component, key, RETRY_COOLDOWN_MS);
                 }
             } catch (Throwable t) {
                 event("失败", "恢复校验异常: " + t);
@@ -2817,91 +2646,6 @@ public class AutoRepairEntry extends XposedModule {
             sRepairInProgress = false;
             sRepairKey = null;
         }
-    }
-
-    private static void block(ComponentName component, String key, String reason) {
-        long cooldownMs = getUnstableCooldownMs();
-        if (cooldownMs <= 0L) {
-            return;
-        }
-        long now = SystemClock.elapsedRealtime();
-        long blockedUntil = now + cooldownMs;
-        sBlockedUntil.put(key, blockedUntil);
-        long delay = RepairPolicy.getRemainingBlockDelayMs(blockedUntil, now);
-        if (component != null) {
-            scheduleCheck(component, key, delay);
-            showModuleToast(getAppLabel(component) + " 频繁崩溃，已暂停自动修复");
-        }
-        event("失败", "暂停修复 " + (cooldownMs / 60000L) + " 分钟（到期将自动复查, "
-                + reason + "）: " + key,
-                "action=block reason=" + reason + " recheckInMs=" + delay);
-    }
-
-    private static void recordCrash(ComponentName component, String key, long now) {
-        Deque<Long> history = sCrashHistory.get(key);
-        if (history == null) {
-            history = new ArrayDeque<>();
-            sCrashHistory.put(key, history);
-        }
-        while (!history.isEmpty() && now - history.peekFirst() > UNSTABLE_WINDOW_MS) {
-            history.pollFirst();
-        }
-        history.addLast(now);
-        long cooldownMs = getUnstableCooldownMs();
-        if (cooldownMs > 0L && history.size() >= getUnstableThreshold()) {
-            long blockedUntil = now + cooldownMs;
-            sBlockedUntil.put(key, blockedUntil);
-            long delay = RepairPolicy.getRemainingBlockDelayMs(blockedUntil, now);
-            if (component != null) {
-                scheduleCheck(component, key, delay);
-                showModuleToast(getAppLabel(component) + " 频繁崩溃，已暂停自动修复");
-            }
-            event("失败", "连续 " + history.size() + " 次崩溃（"
-                    + (UNSTABLE_WINDOW_MS / 1000) + " 秒内），暂停自动修复 "
-                    + (cooldownMs / 60000L) + " 分钟（到期自动复查）: " + key,
-                    "action=circuit_open crashes=" + history.size() + " recheckInMs=" + delay);
-        }
-    }
-
-    /** 解析熔断与重试配置字符串 "threshold|cooldownMin|maxAttempts" */
-    public static int[] parseCircuitConfig(String raw) {
-        int threshold = DEFAULT_UNSTABLE_THRESHOLD;
-        int cooldownMin = DEFAULT_UNSTABLE_COOLDOWN_MIN;
-        int maxAttempts = DEFAULT_MAX_ATTEMPTS;
-        if (raw != null && !raw.isEmpty()) {
-            String[] parts = raw.split("\\|");
-            if (parts.length >= 1) {
-                try {
-                    threshold = Math.max(1, Math.min(20, Integer.parseInt(parts[0].trim())));
-                } catch (NumberFormatException ignored) {
-                }
-            }
-            if (parts.length >= 2) {
-                try {
-                    cooldownMin = Math.max(0, Math.min(1440, Integer.parseInt(parts[1].trim())));
-                } catch (NumberFormatException ignored) {
-                }
-            }
-            if (parts.length >= 3) {
-                try {
-                    maxAttempts = Math.max(1, Math.min(10, Integer.parseInt(parts[2].trim())));
-                } catch (NumberFormatException ignored) {
-                }
-            }
-        }
-        return new int[] { threshold, cooldownMin, maxAttempts };
-    }
-
-    private static int getUnstableThreshold() {
-        return parseCircuitConfig(readConfig(KEY_CIRCUIT_CONFIG))[0];
-    }
-
-    private static long getUnstableCooldownMs() {
-        return parseCircuitConfig(readConfig(KEY_CIRCUIT_CONFIG))[1] * 60_000L;
-    }
-
-    private static int getMaxAttempts() {
-        return parseCircuitConfig(readConfig(KEY_CIRCUIT_CONFIG))[2];
     }
 
     private static boolean isManaged(ComponentName target) {
@@ -3329,15 +3073,6 @@ public class AutoRepairEntry extends XposedModule {
             }
             return null;
         }
-        if (KEY_CIRCUIT_CONFIG.equals(key)) {
-            if (sCircuitConfigCache != null) return sCircuitConfigCache;
-            String secureVal = readSecure(KEY_CIRCUIT_CONFIG);
-            if (secureVal != null) {
-                sCircuitConfigCache = secureVal;
-                return secureVal;
-            }
-            return null;
-        }
         if (KEY_DRY_RUN.equals(key)) {
             if (sDryRunCache != null) return sDryRunCache;
             String secureVal = readSecure(KEY_DRY_RUN);
@@ -3590,22 +3325,10 @@ public class AutoRepairEntry extends XposedModule {
         return sFirstServiceConnectAt;
     }
 
-    static void putRetryStateForTesting(
-            String key, int attempts, long blockedUntil, long lastPkgKillAt, String pkg) {
-        sAttempts.put(key, attempts);
-        sBlockedUntil.put(key, blockedUntil);
+    static void putLastPackageKillAtForTesting(String pkg, long lastPkgKillAt) {
         if (pkg != null) {
             sLastPackageKillAt.put(pkg, lastPkgKillAt);
         }
-    }
-
-    static int getAttemptsForTesting(String key) {
-        Integer val = sAttempts.get(key);
-        return val != null ? val : 0;
-    }
-
-    static Long getBlockedUntilForTesting(String key) {
-        return sBlockedUntil.get(key);
     }
 
     static Long getLastPackageKillAtForTesting(String pkg) {

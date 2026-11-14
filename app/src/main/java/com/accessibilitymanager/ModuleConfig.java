@@ -250,98 +250,14 @@ public final class ModuleConfig {
 
     public static final String KEY_FIX_MODE = "a11y_module_fix_mode";
     public static final String KEY_FIX_DISABLED = "a11y_module_fix_disabled";
-    public static final String KEY_CIRCUIT_CONFIG = "a11y_module_circuit_config";
-
-    public static final String SP_UNSTABLE_THRESHOLD = "lsposed_unstable_threshold";
-    public static final String SP_UNSTABLE_COOLDOWN = "lsposed_unstable_cooldown";
-    public static final String SP_MAX_ATTEMPTS = "lsposed_max_attempts";
-    public static final String SP_UNLIMITED_MIGRATED = "lsposed_unlimited_v1_migrated";
-    public static final int DEFAULT_UNSTABLE_THRESHOLD = 3;
-    public static final int DEFAULT_UNSTABLE_COOLDOWN = 0;
-    public static final int DEFAULT_MAX_ATTEMPTS = 2;
 
     private static volatile String sLastSyncedServices = null;
-
-    public static void ensureUnlimitedDefaultMigrated(SharedPreferences prefs) {
-        if (prefs == null || prefs.getBoolean(SP_UNLIMITED_MIGRATED, false)) {
-            return;
-        }
-        prefs.edit()
-                .putInt(SP_UNSTABLE_COOLDOWN, DEFAULT_UNSTABLE_COOLDOWN)
-                .putBoolean(SP_UNLIMITED_MIGRATED, true)
-                .apply();
-    }
 
     public static boolean setFixMode(Context context, boolean fixMode, String disabledServices) {
         put(context, KEY_FIX_MODE, fixMode ? "1" : "0");
         put(context, KEY_FIX_DISABLED, disabledServices != null ? disabledServices : "");
         return sendServiceCommandPayload(context, "sync_fixmode:" + (fixMode ? "1" : "0") + "#"
                 + (disabledServices != null ? disabledServices : ""));
-    }
-
-    public static boolean syncCircuitConfig(Context context) {
-        if (context == null) {
-            return false;
-        }
-        SharedPreferences prefs = context.getSharedPreferences("data", 0);
-        ensureUnlimitedDefaultMigrated(prefs);
-        int threshold = prefs.getInt(SP_UNSTABLE_THRESHOLD, DEFAULT_UNSTABLE_THRESHOLD);
-        int cooldownMin = prefs.getInt(SP_UNSTABLE_COOLDOWN, DEFAULT_UNSTABLE_COOLDOWN);
-        int maxAttempts = prefs.getInt(SP_MAX_ATTEMPTS, DEFAULT_MAX_ATTEMPTS);
-        return syncCircuitConfig(context, threshold, cooldownMin, maxAttempts);
-    }
-
-    public static boolean syncCircuitConfig(Context context, int threshold, int cooldownMin, int maxAttempts) {
-        if (context == null) {
-            return false;
-        }
-        SharedPreferences prefs = context.getSharedPreferences("data", 0);
-        prefs.edit()
-                .putInt(SP_UNSTABLE_THRESHOLD, threshold)
-                .putInt(SP_UNSTABLE_COOLDOWN, cooldownMin)
-                .putInt(SP_MAX_ATTEMPTS, maxAttempts)
-                .putBoolean(SP_UNLIMITED_MIGRATED, true)
-                .apply();
-        String value = threshold + "|" + cooldownMin + "|" + maxAttempts;
-        put(context, KEY_CIRCUIT_CONFIG, value);
-        return sendServiceCommandPayload(context, "sync_circuit:" + value);
-    }
-
-    public static boolean resetCircuitBreaker(Context context) {
-        if (context == null) {
-            return false;
-        }
-        LogUtil.log(context, "[模块] 下发恢复暂停修复服务指令");
-        return sendServiceCommandPayload(context, "reset_circuit");
-    }
-
-    /** 解析熔断与重试配置字符串 "threshold|cooldownMin|maxAttempts" */
-    public static int[] parseCircuitConfig(String raw) {
-        int threshold = DEFAULT_UNSTABLE_THRESHOLD;
-        int cooldownMin = DEFAULT_UNSTABLE_COOLDOWN;
-        int maxAttempts = DEFAULT_MAX_ATTEMPTS;
-        if (raw != null && !raw.isEmpty()) {
-            String[] parts = raw.split("\\|");
-            if (parts.length >= 1) {
-                try {
-                    threshold = Math.max(1, Math.min(20, Integer.parseInt(parts[0].trim())));
-                } catch (NumberFormatException ignored) {
-                }
-            }
-            if (parts.length >= 2) {
-                try {
-                    cooldownMin = Math.max(0, Math.min(1440, Integer.parseInt(parts[1].trim())));
-                } catch (NumberFormatException ignored) {
-                }
-            }
-            if (parts.length >= 3) {
-                try {
-                    maxAttempts = Math.max(1, Math.min(10, Integer.parseInt(parts[2].trim())));
-                } catch (NumberFormatException ignored) {
-                }
-            }
-        }
-        return new int[] { threshold, cooldownMin, maxAttempts };
     }
 
     public static void syncManagedServices(Context context, String daemon,
