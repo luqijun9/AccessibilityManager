@@ -5,15 +5,23 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.database.ContentObserver;
+import android.os.Bundle;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.Looper;
+import android.os.ResultReceiver;
 import android.os.SystemClock;
 import android.provider.Settings;
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /** LSPosed 自动恢复模块的配置通道（基于系统广播直达 system_server + Settings.Secure 单一真实数据源） */
 public final class ModuleConfig {
@@ -36,10 +44,18 @@ public final class ModuleConfig {
     public static final String PERMISSION_SEND_CMD = "com.accessibilitymanager.permission.SEND_MODULE_CMD";
     public static final String EXTRA_PAYLOAD = "payload";
     public static final String EXTRA_TIME = "time";
+    public static final String EXTRA_RECEIVER = "receiver";
+    public static final String BUNDLE_LINES = "lines";
+    public static final String BUNDLE_SESSION = "session";
+    public static final String BUNDLE_MAX_SEQ = "max_seq";
+    public static final String BUNDLE_HAS_MORE = "has_more";
+    public static final String BUNDLE_DUMP = "dump";
 
     private static final Object sLogLock = new Object();
     private static ContentObserver sLogObserver;
     private static Context sLogContext;
+    private static volatile Handler sLogSyncHandler;
+    private static volatile long sLastPullRequestAt = 0L;
     private static volatile int sPingAckBootCount = Integer.MIN_VALUE;
 
     private ModuleConfig() {
@@ -150,6 +166,11 @@ public final class ModuleConfig {
     }
 
     public static boolean sendServiceCommandPayload(Context context, String payload) {
+        return sendServiceCommandPayload(context, payload, null);
+    }
+
+    public static boolean sendServiceCommandPayload(Context context, String payload,
+            ResultReceiver receiver) {
         if (context == null || payload == null || payload.isEmpty()) {
             return false;
         }
@@ -157,6 +178,9 @@ public final class ModuleConfig {
             Intent intent = new Intent(ACTION_SERVICE_CMD);
             intent.putExtra(EXTRA_PAYLOAD, payload);
             intent.putExtra(EXTRA_TIME, System.currentTimeMillis());
+            if (receiver != null) {
+                intent.putExtra(EXTRA_RECEIVER, receiver);
+            }
             context.sendBroadcast(intent);
             return true;
         } catch (Throwable t) {
@@ -182,10 +206,29 @@ public final class ModuleConfig {
         }
         final Context app = context.getApplicationContext();
         String before = get(app, KEY_DUMP);
-        if (!sendServiceCommandPayload(app, "dump_info")) {
+        final CountDownLatch latch = new CountDownLatch(1);
+        final String[] dumpHolder = new String[1];
+        ResultReceiver receiver = new ResultReceiver(null) {
+            @Override
+            protected void onReceiveResult(int resultCode, Bundle resultData) {
+                if (resultData != null) {
+                    dumpHolder[0] = resultData.getString(BUNDLE_DUMP);
+                }
+                latch.countDown();
+            }
+        };
+        if (!sendServiceCommandPayload(app, "dump_info", receiver)) {
             return null;
         }
         long deadline = SystemClock.elapsedRealtime() + timeoutMs;
+        try {
+            if (latch.await(timeoutMs, TimeUnit.MILLISECONDS)
+                    && dumpHolder[0] != null && !dumpHolder[0].isEmpty()) {
+                return dumpHolder[0];
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
         while (SystemClock.elapsedRealtime() < deadline) {
             String value = get(app, KEY_DUMP);
             if (value != null && !value.isEmpty() && !value.equals(before)) {
@@ -197,6 +240,9 @@ public final class ModuleConfig {
                 Thread.currentThread().interrupt();
                 break;
             }
+        }
+        if (dumpHolder[0] != null && !dumpHolder[0].isEmpty()) {
+            return dumpHolder[0];
         }
         String value = get(app, KEY_DUMP);
         return value == null || value.isEmpty() ? null : value;
@@ -378,61 +424,204 @@ public final class ModuleConfig {
         }
     }
 
-    /** 把模块缓冲中尚未写入管理器日志的事件补上 */
+    private static Handler getLogSyncHandler() {
+        Handler handler = sLogSyncHandler;
+        if (handler != null) {
+            return handler;
+        }
+        synchronized (sLogLock) {
+            if (sLogSyncHandler == null) {
+                HandlerThread thread = new HandlerThread("AccMgrLogSync");
+                thread.start();
+                sLogSyncHandler = new Handler(thread.getLooper());
+            }
+            return sLogSyncHandler;
+        }
+    }
+
+    static boolean hasUnconsumedGapInSecure(String rawSecure, String lastSession, long lastSeq) {
+        if (rawSecure == null || rawSecure.isEmpty()) {
+            return false;
+        }
+        for (String line : rawSecure.split("\n")) {
+            String[] parts = line.split("\\|", 4);
+            if (parts.length < 4) {
+                continue;
+            }
+            long firstSeq;
+            try {
+                firstSeq = Long.parseLong(parts[1]);
+            } catch (Throwable ignored) {
+                continue;
+            }
+            if (lastSession == null || lastSession.isEmpty()) {
+                return false;
+            }
+            if (!parts[0].equals(lastSession)) {
+                return true;
+            }
+            return firstSeq > lastSeq + 1L;
+        }
+        return false;
+    }
+
+    /** 把模块缓冲中尚未写入管理器日志的事件补上（无缺口直读 + Binder 分批拉取并清理模块内存） */
     public static void drainLogs(Context context) {
         if (context == null) {
             return;
         }
         final Context app = context.getApplicationContext();
+        String raw = null;
+        boolean hasGap = false;
+        String clientSession = "";
+        long clientLastSeq = 0L;
         synchronized (sLogLock) {
             try {
-                String raw = Settings.Secure.getString(
-                        app.getContentResolver(), KEY_EVENTS);
-                if (raw == null || raw.isEmpty()) {
-                    return;
-                }
                 SharedPreferences prefs = app.getSharedPreferences("data", 0);
-                String lastSession = prefs.getString("module_log_session", "");
-                long lastSeq = prefs.getLong("module_log_seq", 0L);
-                String session = lastSession;
-                long maxSeq = lastSeq;
-
-                for (String line : raw.split("\n")) {
-                    String[] parts = line.split("\\|", 4);
-                    if (parts.length < 4) {
-                        continue;
+                clientSession = prefs.getString("module_log_session", "");
+                clientLastSeq = prefs.getLong("module_log_seq", 0L);
+                raw = Settings.Secure.getString(app.getContentResolver(), KEY_EVENTS);
+                hasGap = hasUnconsumedGapInSecure(raw, clientSession, clientLastSeq);
+                if (!hasGap && raw != null && !raw.isEmpty()) {
+                    long[] synced = consumeEventLinesLocked(app, Arrays.asList(raw.split("\n")));
+                    if (synced[0] > 0L) {
+                        clientSession = prefs.getString("module_log_session", clientSession);
+                        clientLastSeq = synced[1];
+                        sendAckLogs(app, clientSession, clientLastSeq);
                     }
-                    long seq;
-                    long time;
-                    try {
-                        seq = Long.parseLong(parts[1]);
-                        time = Long.parseLong(parts[2]);
-                    } catch (Throwable t) {
-                        continue;
-                    }
-                    if (!parts[0].equals(session)) {
-                        session = parts[0];
-                        maxSeq = 0L;
-                    }
-                    if (seq <= maxSeq) {
-                        continue;
-                    }
-                    maxSeq = seq;
-                    String message = parts[3];
-                    // 使用事件原始时间，避免“日志时间 + 模块时间”重复
-                    LogUtil.logAt(app, time, "[模块] " + message);
-                }
-
-                if (!session.equals(lastSession) || maxSeq != lastSeq) {
-                    prefs.edit()
-                            .putString("module_log_session", session)
-                            .putLong("module_log_seq", maxSeq)
-                            .apply();
                 }
             } catch (Throwable t) {
                 LogUtil.log(app, "[模块] 日志解析失败: " + t);
             }
         }
+        pullLogsViaBinder(app, clientSession, clientLastSeq, hasGap ? raw : null);
+    }
+
+    private static long[] consumeEventLinesLocked(Context app, List<String> lines) {
+        if (app == null || lines == null || lines.isEmpty()) {
+            return new long[] { 0L, 0L };
+        }
+        SharedPreferences prefs = app.getSharedPreferences("data", 0);
+        String lastSession = prefs.getString("module_log_session", "");
+        long lastSeq = prefs.getLong("module_log_seq", 0L);
+        String session = lastSession;
+        long maxSeq = lastSeq;
+        long consumed = 0L;
+
+        for (String line : lines) {
+            if (line == null || line.isEmpty()) {
+                continue;
+            }
+            String[] parts = line.split("\\|", 4);
+            if (parts.length < 4) {
+                continue;
+            }
+            long seq;
+            long time;
+            try {
+                seq = Long.parseLong(parts[1]);
+                time = Long.parseLong(parts[2]);
+            } catch (Throwable t) {
+                continue;
+            }
+            if (!parts[0].equals(session)) {
+                session = parts[0];
+                maxSeq = 0L;
+            }
+            if (seq <= maxSeq) {
+                continue;
+            }
+            maxSeq = seq;
+            consumed++;
+            String message = parts[3];
+            // 使用事件原始时间，避免“日志时间 + 模块时间”重复
+            LogUtil.logAt(app, time, "[模块] " + message);
+        }
+
+        if (!session.equals(lastSession) || maxSeq != lastSeq) {
+            prefs.edit()
+                    .putString("module_log_session", session)
+                    .putLong("module_log_seq", maxSeq)
+                    .apply();
+        }
+        return new long[] { consumed, maxSeq };
+    }
+
+    private static void pullLogsViaBinder(final Context app, String clientSession,
+            long clientLastSeq, final String fallbackRaw) {
+        long now = SystemClock.elapsedRealtime();
+        boolean forcePull = fallbackRaw != null && !fallbackRaw.isEmpty();
+        if (!forcePull && now - sLastPullRequestAt < 150L) {
+            return;
+        }
+        sLastPullRequestAt = now;
+
+        final Handler syncHandler = getLogSyncHandler();
+        final boolean[] receivedBinder = { false };
+        final Runnable fallbackRunnable = !forcePull ? null : () -> {
+            if (receivedBinder[0]) {
+                return;
+            }
+            synchronized (sLogLock) {
+                if (receivedBinder[0]) {
+                    return;
+                }
+                long[] synced = consumeEventLinesLocked(app, Arrays.asList(fallbackRaw.split("\n")));
+                if (synced[0] > 0L) {
+                    SharedPreferences prefs = app.getSharedPreferences("data", 0);
+                    sendAckLogs(app, prefs.getString("module_log_session", ""), synced[1]);
+                }
+            }
+        };
+        if (fallbackRunnable != null) {
+            syncHandler.postDelayed(fallbackRunnable, 500L);
+        }
+
+        ResultReceiver receiver = new ResultReceiver(syncHandler) {
+            @Override
+            protected void onReceiveResult(int resultCode, Bundle resultData) {
+                receivedBinder[0] = true;
+                if (fallbackRunnable != null) {
+                    syncHandler.removeCallbacks(fallbackRunnable);
+                }
+                if (resultData == null) {
+                    return;
+                }
+                ArrayList<String> lines = resultData.getStringArrayList(BUNDLE_LINES);
+                boolean hasMore = resultData.getBoolean(BUNDLE_HAS_MORE, false);
+                String bundleSession = resultData.getString(BUNDLE_SESSION, "");
+                long bundleMaxSeq = resultData.getLong(BUNDLE_MAX_SEQ, 0L);
+                long consumedCount = 0L;
+                long maxSeqAfter = 0L;
+                String sessionAfter = bundleSession;
+                synchronized (sLogLock) {
+                    if (lines != null && !lines.isEmpty()) {
+                        long[] synced = consumeEventLinesLocked(app, lines);
+                        consumedCount = synced[0];
+                        maxSeqAfter = synced[1];
+                        SharedPreferences prefs = app.getSharedPreferences("data", 0);
+                        sessionAfter = prefs.getString("module_log_session", bundleSession);
+                    }
+                }
+                if (!hasMore) {
+                    long ackSeq = Math.max(maxSeqAfter, bundleMaxSeq);
+                    if ((consumedCount > 0L || (lines != null && !lines.isEmpty()))
+                            && sessionAfter != null && !sessionAfter.isEmpty() && ackSeq > 0L) {
+                        sendAckLogs(app, sessionAfter, ackSeq);
+                    }
+                }
+            }
+        };
+        sendServiceCommandPayload(app,
+                "pull_logs:" + (clientSession == null ? "" : clientSession) + "|" + clientLastSeq,
+                receiver);
+    }
+
+    private static void sendAckLogs(Context app, String session, long maxSeq) {
+        if (app == null || session == null || session.isEmpty() || maxSeq <= 0L) {
+            return;
+        }
+        sendServiceCommandPayload(app, "ack_logs:" + session + "|" + maxSeq);
     }
 
     private static String buildManaged(String daemon, String whitelist,

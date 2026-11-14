@@ -12,11 +12,13 @@ import android.content.pm.PackageManager;
 import android.database.ContentObserver;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.os.Process;
+import android.os.ResultReceiver;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.Log;
@@ -61,6 +63,7 @@ public class AutoRepairEntry extends XposedModule {
     private static final String STATE_EVENT_LINES = "event_lines";
     private static final String STATE_RAW_TRACE_LINES = "raw_trace_lines";
     private static final String STATE_EVENT_SEQ = "event_seq";
+    private static final String STATE_EVENT_SESSION = "event_session";
     private static final String STATE_HOT_RELOAD_COUNT = "hot_reload_count";
     private static final String STATE_CONTEXT = "context";
     private static final String STATE_CLASS_LOADER = "class_loader";
@@ -81,8 +84,11 @@ public class AutoRepairEntry extends XposedModule {
     private static final String KEY_EVENTS = "a11y_module_events";
     // system_server 视角的诊断快照，供管理器在无 DUMP/Root/Shizuku 权限时导出日志
     private static final String KEY_DUMP = "a11y_module_dump";
-    // 持久事件通道容量：扩容至 600 条，确保超级省电离线期间事件完整保留
-    private static final int EVENT_LIMIT = 600;
+    // 模块内存事件缓冲区上限与 Settings.Secure 兜底安全上限（避免超过 32768 字符上限）
+    static final int EVENT_LIMIT = 1000;
+    static final int SECURE_MAX_CHARS = 20000;
+    static final int PULL_BATCH_LINES = 120;
+    static final int PULL_BATCH_MAX_CHARS = 64000;
     // 非保活服务（便签输入法等）连接日志聚合窗口：本身不重要，1 小时一条；明细仍全部写 logcat
     private static final long NON_MANAGED_EVENT_WINDOW_MS = 60 * 60 * 1000L;
     // 跳过路径聚合窗口：原因有诊断价值，保留 10 分钟粒度
@@ -117,6 +123,12 @@ public class AutoRepairEntry extends XposedModule {
     public static final String PERMISSION_SEND_CMD =
             "com.accessibilitymanager.permission.SEND_MODULE_CMD";
     public static final String EXTRA_PAYLOAD = "payload";
+    public static final String EXTRA_RECEIVER = "receiver";
+    public static final String BUNDLE_LINES = "lines";
+    public static final String BUNDLE_SESSION = "session";
+    public static final String BUNDLE_MAX_SEQ = "max_seq";
+    public static final String BUNDLE_HAS_MORE = "has_more";
+    public static final String BUNDLE_DUMP = "dump";
 
     private static final long DEDUPE_MS = 1500L;
     private static final long SETTLE_MS = 3000L;
@@ -174,7 +186,7 @@ public class AutoRepairEntry extends XposedModule {
     private static final Object sEventLock = new Object();
     private static final Deque<String> sEventLines = new ArrayDeque<>();
     private static final Deque<String> sRawTraceLines = new ArrayDeque<>();
-    private static final String sEventSession =
+    private static String sEventSession =
             Long.toHexString(System.currentTimeMillis());
     private static long sEventSeq;
     private static final EventThrottle sNonManagedThrottle =
@@ -305,6 +317,7 @@ public class AutoRepairEntry extends XposedModule {
                 state.put(STATE_EVENT_LINES, new ArrayList<>(sEventLines));
                 state.put(STATE_RAW_TRACE_LINES, new ArrayList<>(sRawTraceLines));
                 state.put(STATE_EVENT_SEQ, sEventSeq);
+                state.put(STATE_EVENT_SESSION, sEventSession);
             }
             param.setSavedInstanceState(state);
         } catch (Throwable t) {
@@ -496,6 +509,7 @@ public class AutoRepairEntry extends XposedModule {
                 }
             }
             synchronized (sEventLock) {
+                Object sessionObj = state.get(STATE_EVENT_SESSION);
                 Object seq = state.get(STATE_EVENT_SEQ);
                 if (seq instanceof Long) {
                     sEventSeq = (Long) seq;
@@ -509,6 +523,21 @@ public class AutoRepairEntry extends XposedModule {
                         }
                     }
                 }
+                if (sessionObj instanceof String && !((String) sessionObj).isEmpty()) {
+                    sEventSession = (String) sessionObj;
+                } else if (!sEventLines.isEmpty()) {
+                    String candidate = extractSession(sEventLines.peekLast());
+                    if (candidate.isEmpty()) {
+                        candidate = extractSession(sEventLines.peekFirst());
+                    }
+                    if (!candidate.isEmpty()) {
+                        sEventSession = candidate;
+                    }
+                }
+                normalizeEventLinesSessionLocked(sEventLines, sEventSession);
+                while (sEventLines.size() > EVENT_LIMIT) {
+                    sEventLines.removeFirst();
+                }
                 Object traces = state.get(STATE_RAW_TRACE_LINES);
                 if (traces instanceof List) {
                     sRawTraceLines.clear();
@@ -516,6 +545,9 @@ public class AutoRepairEntry extends XposedModule {
                         if (item instanceof String) {
                             sRawTraceLines.addLast((String) item);
                         }
+                    }
+                    while (sRawTraceLines.size() > RAW_TRACE_LIMIT) {
+                        sRawTraceLines.removeFirst();
                     }
                 }
             }
@@ -706,19 +738,171 @@ public class AutoRepairEntry extends XposedModule {
         if (context == null || sEventLines.isEmpty()) {
             return;
         }
-        StringBuilder raw = new StringBuilder();
-        for (String line : sEventLines) {
-            if (raw.length() > 0) {
-                raw.append('\n');
-            }
-            raw.append(line);
-        }
+        String payload = buildTailWithinCharLimit(sEventLines, SECURE_MAX_CHARS);
         try {
-            Settings.Secure.putString(context.getContentResolver(), KEY_EVENTS,
-                    raw.toString());
+            Settings.Secure.putString(context.getContentResolver(), KEY_EVENTS, payload);
         } catch (Throwable t) {
             log("event write failed: " + t);
         }
+    }
+
+    private static String extractSession(String line) {
+        if (line == null) {
+            return "";
+        }
+        int firstPipe = line.indexOf('|');
+        return firstPipe > 0 ? line.substring(0, firstPipe) : "";
+    }
+
+    private static long extractSeq(String line) {
+        if (line == null) {
+            return -1L;
+        }
+        int firstPipe = line.indexOf('|');
+        if (firstPipe < 0) {
+            return -1L;
+        }
+        int secondPipe = line.indexOf('|', firstPipe + 1);
+        if (secondPipe <= firstPipe + 1) {
+            return -1L;
+        }
+        try {
+            return Long.parseLong(line.substring(firstPipe + 1, secondPipe));
+        } catch (Throwable ignored) {
+            return -1L;
+        }
+    }
+
+    static void normalizeEventLinesSessionLocked(Deque<String> lines, String targetSession) {
+        if (lines == null || lines.isEmpty() || targetSession == null || targetSession.isEmpty()) {
+            return;
+        }
+        List<String> normalized = new ArrayList<>(lines.size());
+        for (String line : lines) {
+            if (line == null) {
+                continue;
+            }
+            int firstPipe = line.indexOf('|');
+            if (firstPipe >= 0) {
+                String oldSession = line.substring(0, firstPipe);
+                if (!targetSession.equals(oldSession)) {
+                    normalized.add(targetSession + line.substring(firstPipe));
+                    continue;
+                }
+            }
+            normalized.add(line);
+        }
+        lines.clear();
+        for (String line : normalized) {
+            lines.addLast(line);
+        }
+    }
+
+    static String buildTailWithinCharLimit(Iterable<String> lines, int maxChars) {
+        if (lines == null || maxChars <= 0) {
+            return "";
+        }
+        List<String> list = new ArrayList<>();
+        for (String line : lines) {
+            if (line != null && !line.isEmpty()) {
+                list.add(line);
+            }
+        }
+        if (list.isEmpty()) {
+            return "";
+        }
+        int totalChars = 0;
+        int startIdx = list.size();
+        for (int i = list.size() - 1; i >= 0; i--) {
+            String line = list.get(i);
+            int added = line.length() + (startIdx < list.size() ? 1 : 0);
+            if (totalChars + added > maxChars) {
+                if (startIdx == list.size()) {
+                    return line.substring(0, maxChars);
+                }
+                break;
+            }
+            totalChars += added;
+            startIdx = i;
+        }
+        StringBuilder sb = new StringBuilder(totalChars);
+        for (int i = startIdx; i < list.size(); i++) {
+            if (i > startIdx) {
+                sb.append('\n');
+            }
+            sb.append(list.get(i));
+        }
+        return sb.toString();
+    }
+
+    static String truncateToCharLimit(String text, int maxChars) {
+        if (text == null || maxChars <= 0) {
+            return "";
+        }
+        return text.length() <= maxChars ? text : text.substring(0, maxChars);
+    }
+
+    static int ackEventsUpToLocked(Deque<String> lines, String currentSession,
+            String ackSession, long ackSeq) {
+        if (lines == null || lines.size() <= 1 || ackSeq <= 0L
+                || ackSession == null || !ackSession.equals(currentSession)) {
+            return 0;
+        }
+        int removed = 0;
+        while (lines.size() > 1) {
+            String head = lines.peekFirst();
+            if (head == null) {
+                lines.removeFirst();
+                continue;
+            }
+            String lineSession = extractSession(head);
+            long lineSeq = extractSeq(head);
+            if (!currentSession.equals(lineSession) || lineSeq < 0L || lineSeq > ackSeq) {
+                break;
+            }
+            lines.removeFirst();
+            removed++;
+        }
+        return removed;
+    }
+
+    static List<ArrayList<String>> buildPullBatchesLocked(Iterable<String> lines,
+            String currentSession, String clientSession, long clientLastSeq,
+            int maxBatchLines, int maxBatchChars) {
+        List<ArrayList<String>> batches = new ArrayList<>();
+        if (lines == null || currentSession == null || currentSession.isEmpty()) {
+            return batches;
+        }
+        boolean sameSession = currentSession.equals(clientSession);
+        int lineLimit = Math.max(1, maxBatchLines);
+        int charLimit = Math.max(256, maxBatchChars);
+
+        ArrayList<String> currentBatch = new ArrayList<>();
+        int currentChars = 0;
+        for (String line : lines) {
+            if (line == null || line.isEmpty()) {
+                continue;
+            }
+            if (sameSession) {
+                long seq = extractSeq(line);
+                if (seq >= 0L && seq <= clientLastSeq) {
+                    continue;
+                }
+            }
+            int len = line.length() + 1;
+            if (!currentBatch.isEmpty()
+                    && (currentBatch.size() >= lineLimit || currentChars + len > charLimit)) {
+                batches.add(currentBatch);
+                currentBatch = new ArrayList<>();
+                currentChars = 0;
+            }
+            currentBatch.add(line);
+            currentChars += len;
+        }
+        if (!currentBatch.isEmpty()) {
+            batches.add(currentBatch);
+        }
+        return batches;
     }
 
     private static void postEvent(boolean died, Object connection) {
@@ -951,8 +1135,10 @@ public class AutoRepairEntry extends XposedModule {
             if (remainingBoot > 0L) {
                 schedulePostBootCheck(remainingBoot + 1000L);
             } else {
-                scheduleScan(SCAN_INIT_DELAY_MS, "init");
-                scheduleReconcile("init", SCAN_INIT_DELAY_MS);
+                long delayMs = sHotReloadCount > 0 ? SCAN_CONFIG_DELAY_MS : SCAN_INIT_DELAY_MS;
+                String reason = sHotReloadCount > 0 ? "hot_reload_init" : "init";
+                scheduleScan(delayMs, reason);
+                scheduleReconcile(reason, delayMs);
             }
         } catch (Throwable t) {
             sObserver = null;
@@ -1421,18 +1607,19 @@ public class AutoRepairEntry extends XposedModule {
                     if (!ACTION_SERVICE_CMD.equals(action)) return;
                     String payload = intent.getStringExtra(EXTRA_PAYLOAD);
                     if (payload == null || payload.isEmpty()) return;
+                    final ResultReceiver receiver = extractResultReceiver(intent);
                     log("received broadcast cmd: " + payload);
                     Handler handler = sHandler;
                     if (handler != null) {
                         handler.post(() -> {
                             try {
-                                applyServiceCommand(payload);
+                                applyServiceCommand(payload, receiver);
                             } catch (Throwable t) {
                                 event("失败", "广播指令执行异常: " + t);
                             }
                         });
                     } else {
-                        applyServiceCommand(payload);
+                        applyServiceCommand(payload, receiver);
                     }
                 }
             };
@@ -1550,6 +1737,10 @@ public class AutoRepairEntry extends XposedModule {
             String enabled = readEnabled();
             event("省电", "系统省电状态变更: " + shortActionName(action),
                     getPowerStateSummary() + " enabled=" + (enabled == null ? "null" : enabled));
+            if (PowerManager.ACTION_POWER_SAVE_MODE_CHANGED.equals(action) && isModuleEnabled()) {
+                scheduleReconcile("power_save_changed", 500L);
+                scheduleScan(1500L, "power_save_changed");
+            }
             return;
         }
         if (Intent.ACTION_SCREEN_OFF.equals(action)) {
@@ -1591,6 +1782,10 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static void applyServiceCommand(String value) {
+        applyServiceCommand(value, null);
+    }
+
+    private static void applyServiceCommand(String value, ResultReceiver receiver) {
         if (value == null || value.isEmpty()) {
             return;
         }
@@ -1604,7 +1799,7 @@ public class AutoRepairEntry extends XposedModule {
         }
 
         if ("dump_info".equals(body)) {
-            writeModuleDump();
+            writeModuleDump(receiver);
             notifyCommandAck();
             return;
         }
@@ -1635,6 +1830,16 @@ public class AutoRepairEntry extends XposedModule {
         }
         String action = body.substring(0, colon);
         String component = body.substring(colon + 1);
+
+        if ("pull_logs".equals(action)) {
+            handlePullLogsCommand(component, receiver);
+            return;
+        }
+
+        if ("ack_logs".equals(action)) {
+            handleAckLogsCommand(component);
+            return;
+        }
 
         if ("enable_module".equals(action)) {
             boolean enable = "1".equals(component);
@@ -1833,8 +2038,109 @@ public class AutoRepairEntry extends XposedModule {
         }
     }
 
-    /** 采集 system_server 视角的诊断快照，供管理器在无 DUMP/Root/Shizuku 权限时导出日志 */
+    @SuppressWarnings("deprecation")
+    private static ResultReceiver extractResultReceiver(Intent intent) {
+        if (intent == null) {
+            return null;
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                return intent.getParcelableExtra(EXTRA_RECEIVER, ResultReceiver.class);
+            }
+            return (ResultReceiver) intent.getParcelableExtra(EXTRA_RECEIVER);
+        } catch (Throwable t) {
+            log("extractResultReceiver failed: " + t);
+            return null;
+        }
+    }
+
+    private static void handlePullLogsCommand(String arg, ResultReceiver receiver) {
+        String clientSession = "";
+        long clientLastSeq = 0L;
+        if (arg != null && !arg.isEmpty()) {
+            int sep = arg.indexOf('|');
+            if (sep >= 0) {
+                clientSession = arg.substring(0, sep);
+                try {
+                    clientLastSeq = Long.parseLong(arg.substring(sep + 1));
+                } catch (Throwable ignored) {
+                }
+            } else {
+                clientSession = arg;
+            }
+        }
+
+        final String sessionSnapshot;
+        final long maxSeqSnapshot;
+        final List<ArrayList<String>> batches;
+        synchronized (sEventLock) {
+            ackEventsUpToLocked(sEventLines, sEventSession, clientSession, clientLastSeq);
+            sessionSnapshot = sEventSession;
+            maxSeqSnapshot = sEventSeq;
+            batches = buildPullBatchesLocked(sEventLines, sEventSession,
+                    clientSession, clientLastSeq, PULL_BATCH_LINES, PULL_BATCH_MAX_CHARS);
+        }
+
+        if (receiver == null) {
+            return;
+        }
+        try {
+            if (batches.isEmpty()) {
+                Bundle b = new Bundle();
+                b.putString(BUNDLE_SESSION, sessionSnapshot);
+                b.putLong(BUNDLE_MAX_SEQ, maxSeqSnapshot);
+                b.putBoolean(BUNDLE_HAS_MORE, false);
+                b.putStringArrayList(BUNDLE_LINES, new ArrayList<>());
+                receiver.send(0, b);
+                return;
+            }
+            for (int i = 0; i < batches.size(); i++) {
+                ArrayList<String> batch = batches.get(i);
+                long batchMaxSeq = maxSeqSnapshot;
+                if (!batch.isEmpty()) {
+                    long lastSeqInBatch = extractSeq(batch.get(batch.size() - 1));
+                    if (lastSeqInBatch > 0L) {
+                        batchMaxSeq = lastSeqInBatch;
+                    }
+                }
+                Bundle b = new Bundle();
+                b.putString(BUNDLE_SESSION, sessionSnapshot);
+                b.putLong(BUNDLE_MAX_SEQ, batchMaxSeq);
+                b.putBoolean(BUNDLE_HAS_MORE, i < batches.size() - 1);
+                b.putStringArrayList(BUNDLE_LINES, batch);
+                receiver.send(0, b);
+            }
+        } catch (Throwable t) {
+            log("pull_logs ResultReceiver.send failed: " + t);
+        }
+    }
+
+    private static void handleAckLogsCommand(String arg) {
+        if (arg == null || arg.isEmpty()) {
+            return;
+        }
+        int sep = arg.indexOf('|');
+        if (sep < 0) {
+            return;
+        }
+        String ackSession = arg.substring(0, sep);
+        long ackSeq;
+        try {
+            ackSeq = Long.parseLong(arg.substring(sep + 1));
+        } catch (Throwable ignored) {
+            return;
+        }
+        synchronized (sEventLock) {
+            ackEventsUpToLocked(sEventLines, sEventSession, ackSession, ackSeq);
+        }
+    }
+
     private static void writeModuleDump() {
+        writeModuleDump(null);
+    }
+
+    /** 采集 system_server 视角的诊断快照，供管理器在无 DUMP/Root/Shizuku 权限时导出日志 */
+    private static void writeModuleDump(ResultReceiver receiver) {
         Context context = sContext;
         if (context == null) {
             context = getSystemContext();
@@ -1909,11 +2215,31 @@ public class AutoRepairEntry extends XposedModule {
                     }
                 }
             }
-            Settings.Secure.putString(resolver, KEY_DUMP, sb.toString());
+            String fullDump = sb.toString();
+            if (receiver != null) {
+                try {
+                    Bundle b = new Bundle();
+                    b.putString(BUNDLE_DUMP, fullDump);
+                    receiver.send(0, b);
+                } catch (Throwable t) {
+                    log("dump_info ResultReceiver.send failed: " + t);
+                }
+            }
+            Settings.Secure.putString(resolver, KEY_DUMP,
+                    truncateToCharLimit(fullDump, SECURE_MAX_CHARS));
         } catch (Throwable t) {
             log("dump info failed: " + t);
+            String err = "采集失败: " + t;
+            if (receiver != null) {
+                try {
+                    Bundle b = new Bundle();
+                    b.putString(BUNDLE_DUMP, err);
+                    receiver.send(1, b);
+                } catch (Throwable ignored) {
+                }
+            }
             try {
-                Settings.Secure.putString(resolver, KEY_DUMP, "采集失败: " + t);
+                Settings.Secure.putString(resolver, KEY_DUMP, err);
             } catch (Throwable ignored) {
             }
         }
@@ -2062,13 +2388,12 @@ public class AutoRepairEntry extends XposedModule {
         String key = component.flattenToString();
         long now = SystemClock.elapsedRealtime();
 
-        Long last = sLastDied.get(key);
-        if (last != null && now - last < DEDUPE_MS) {
-            return;
-        }
-        sLastDied.put(key, now);
-
         if (!isManaged(component)) {
+            Long lastNonManaged = sLastDied.get(key);
+            if (lastNonManaged != null && now - lastNonManaged < DEDUPE_MS) {
+                return;
+            }
+            sLastDied.put(key, now);
             eventNonManaged(key, "非保活服务挂掉(忽略) crashed=" + crashed);
             return;
         }
@@ -2076,6 +2401,22 @@ public class AutoRepairEntry extends XposedModule {
             event("失败", "缺少系统 Context，忽略: " + key);
             return;
         }
+
+        // 若新连接已就绪（当前已存在有效绑定），说明收到的是旧连接退役时的延迟 binderDied，
+        // 必须最先清理系统刚写入的 mCrashedServices 标记并忽略（不能被去重或抑制窗口提前拦截）
+        Object currentBound = findBoundConnection(component);
+        if (currentBound != null) {
+            clearCrashedMarker(currentBound, component);
+            log("[监听] 忽略旧连接断开事件(当前新连接已正常绑定): " + key
+                    + " diedConn=" + connId(connection) + " activeConn=" + connId(currentBound));
+            return;
+        }
+
+        Long last = sLastDied.get(key);
+        if (last != null && now - last < DEDUPE_MS) {
+            return;
+        }
+        sLastDied.put(key, now);
 
         long remainingBoot = getRemainingBootGraceMs(now, sFirstServiceConnectAt);
         if (remainingBoot > 0L) {
@@ -2087,15 +2428,6 @@ public class AutoRepairEntry extends XposedModule {
         Long suppress = sSuppressUntil.get(key);
         if (suppress != null && now < suppress) {
             eventSkip("died:suppress:" + key, "检测", "忽略（修复抑制窗口）: " + key);
-            return;
-        }
-
-        // 若新连接已就绪（当前已存在有效绑定），说明收到的是旧连接退役时的延迟 binderDied，直接清理标记并忽略
-        Object currentBound = findBoundConnection(component);
-        if (currentBound != null) {
-            clearCrashedMarker(currentBound, component);
-            log("[监听] 忽略旧连接断开事件(当前新连接已正常绑定): " + key
-                    + " diedConn=" + connId(connection) + " activeConn=" + connId(currentBound));
             return;
         }
 
@@ -3211,6 +3543,34 @@ public class AutoRepairEntry extends XposedModule {
             sEventLines.clear();
             sRawTraceLines.clear();
             sEventSeq = 0L;
+            sEventSession = Long.toHexString(System.currentTimeMillis());
+        }
+    }
+
+    static void setEventSessionForTesting(String session) {
+        synchronized (sEventLock) {
+            sEventSession = session;
+        }
+    }
+
+    static String getEventSessionForTesting() {
+        synchronized (sEventLock) {
+            return sEventSession;
+        }
+    }
+
+    static void putEventLineForTesting(String line, long seq) {
+        synchronized (sEventLock) {
+            sEventLines.addLast(line);
+            if (seq > sEventSeq) {
+                sEventSeq = seq;
+            }
+        }
+    }
+
+    static List<String> getEventLinesForTesting() {
+        synchronized (sEventLock) {
+            return new ArrayList<>(sEventLines);
         }
     }
 

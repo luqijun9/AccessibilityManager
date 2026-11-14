@@ -8,7 +8,10 @@ import static org.junit.Assert.assertTrue;
 
 import android.os.Bundle;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 
@@ -262,5 +265,106 @@ public class AutoRepairEntryTest {
         assertTrue(RepairPolicy.shouldResetAttempts(lastAttemptAt, 400_000L, resetAfterMs));
         assertEquals(500L,
                 RepairPolicy.getRemainingResetDelayMs(lastAttemptAt, 400_000L, resetAfterMs));
+    }
+
+    @Test
+    public void buildTailWithinCharLimit_trimsOldestLinesAndRespectsLimit() {
+        List<String> lines = new ArrayList<>();
+        StringBuilder padding = new StringBuilder();
+        for (int p = 0; p < 180; p++) {
+            padding.append('x');
+        }
+        for (int i = 1; i <= 300; i++) {
+            lines.add("sess|" + i + "|" + (1000L + i) + "|msg_" + i + "_" + padding);
+        }
+
+        String tail = AutoRepairEntry.buildTailWithinCharLimit(lines, AutoRepairEntry.SECURE_MAX_CHARS);
+        assertTrue(tail.length() <= AutoRepairEntry.SECURE_MAX_CHARS);
+        assertFalse(tail.contains("sess|1|1001|"));
+        assertTrue(tail.contains("sess|300|1300|"));
+        assertEquals("abcd", AutoRepairEntry.truncateToCharLimit("abcdef", 4));
+    }
+
+    @Test
+    public void ackAndPullBatches_filtersConsumedAndSplitsBatches() {
+        Deque<String> queue = new ArrayDeque<>();
+        for (int i = 1; i <= 25; i++) {
+            queue.addLast("s1|" + i + "|" + (1000L + i) + "|msg_" + i);
+        }
+
+        List<ArrayList<String>> batches = AutoRepairEntry.buildPullBatchesLocked(
+                queue, "s1", "s1", 10L, 6, 1000);
+        assertEquals(3, batches.size());
+        assertEquals(6, batches.get(0).size());
+        assertEquals(6, batches.get(1).size());
+        assertEquals(3, batches.get(2).size());
+        assertTrue(batches.get(0).get(0).startsWith("s1|11|"));
+        assertTrue(batches.get(2).get(2).startsWith("s1|25|"));
+
+        assertEquals(0, AutoRepairEntry.ackEventsUpToLocked(queue, "s1", "other", 25L));
+        int removed = AutoRepairEntry.ackEventsUpToLocked(queue, "s1", "s1", 25L);
+        assertEquals(24, removed);
+        assertEquals(1, queue.size());
+        assertTrue(queue.peekFirst().startsWith("s1|25|"));
+    }
+
+    @Test
+    public void hotReload_preservesSessionAndNormalizesMixedSessionLines() {
+        AutoRepairEntry oldGen = new AutoRepairEntry();
+        AutoRepairEntry.setEventSessionForTesting("sessNew");
+        AutoRepairEntry.putEventLineForTesting("oldA|1|1000|a", 1L);
+        AutoRepairEntry.putEventLineForTesting("oldB|2|2000|b", 2L);
+
+        final Object[] savedStateBox = new Object[1];
+        XposedModuleInterface.HotReloadingParam reloadingParam =
+                new XposedModuleInterface.HotReloadingParam() {
+                    @Override
+                    public Bundle getExtras() {
+                        return null;
+                    }
+
+                    @Override
+                    public void setSavedInstanceState(Object outState) {
+                        savedStateBox[0] = outState;
+                    }
+                };
+        assertTrue(oldGen.onHotReloading(reloadingParam));
+
+        AutoRepairEntry newGen = new AutoRepairEntry();
+        newGen.onHotReloaded(new XposedModuleInterface.HotReloadedParam() {
+            @Override
+            public boolean isSystemServer() {
+                return true;
+            }
+
+            @Override
+            public String getProcessName() {
+                return "system_server";
+            }
+
+            @Override
+            public Bundle getExtras() {
+                return null;
+            }
+
+            @Override
+            public Object getSavedInstanceState() {
+                return savedStateBox[0];
+            }
+
+            @Override
+            public List<XposedInterface.HookHandle> getOldHookHandles() {
+                return Collections.emptyList();
+            }
+        });
+
+        assertEquals("sessNew", AutoRepairEntry.getEventSessionForTesting());
+        List<String> restored = AutoRepairEntry.getEventLinesForTesting();
+        assertTrue(restored.size() >= 2);
+        assertEquals("sessNew|1|1000|a", restored.get(0));
+        assertEquals("sessNew|2|2000|b", restored.get(1));
+        for (String line : restored) {
+            assertTrue("所有日志行应统一为同一个 session 前缀: " + line, line.startsWith("sessNew|"));
+        }
     }
 }

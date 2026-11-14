@@ -35,5 +35,16 @@ public class ModuleConfigTest {
         assertArrayEquals(new int[] { 20, 1440, 10 }, ModuleConfig.parseCircuitConfig("99|9999|50"));
         assertArrayEquals(new int[] { 1, 0, 1 }, ModuleConfig.parseCircuitConfig("0|-5|0"));
     }
+
+    @Test
+    public void hasUnconsumedGapInSecure_detectsTrimmedHeadOrSessionChange() {
+        assertFalse(ModuleConfig.hasUnconsumedGapInSecure(null, "s1", 10L));
+        assertFalse(ModuleConfig.hasUnconsumedGapInSecure("", "s1", 10L));
+        assertFalse(ModuleConfig.hasUnconsumedGapInSecure("s1|15|1000|msg", "", 0L));
+        assertFalse(ModuleConfig.hasUnconsumedGapInSecure("s1|10|1000|msg\ns1|11|1001|msg2", "s1", 10L));
+        assertFalse(ModuleConfig.hasUnconsumedGapInSecure("s1|11|1001|msg2", "s1", 10L));
+        assertTrue(ModuleConfig.hasUnconsumedGapInSecure("s1|15|1000|msg", "s1", 10L));
+        assertTrue(ModuleConfig.hasUnconsumedGapInSecure("s2|1|1000|msg", "s1", 10L));
+    }
 }
 
