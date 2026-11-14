@@ -346,4 +346,21 @@ public class AutoRepairEntryTest {
             assertTrue("所有日志行应统一为同一个 session 前缀: " + line, line.startsWith("sessNew|"));
         }
     }
+
+    @Test
+    public void checkRetries_trackedAndClearedOnReset() {
+        String key = "com.arlosoft.macrodroid/.action.services.UIInteractionAccessibilityService";
+        AutoRepairEntry.putCheckRetryForTesting(key, 2);
+        assertEquals(2, AutoRepairEntry.getCheckRetryForTesting(key));
+
+        AutoRepairEntry.resetForTesting();
+        assertEquals(0, AutoRepairEntry.getCheckRetryForTesting(key));
+    }
+
+    @Test
+    public void isPackageProcessRunning_withNullContext_returnsFalse() {
+        assertFalse(AutoRepairEntry.isPackageProcessRunning("com.arlosoft.macrodroid"));
+        assertFalse(AutoRepairEntry.isPackageProcessRunning(null));
+        assertFalse(AutoRepairEntry.isPackageProcessRunning(""));
+    }
 }

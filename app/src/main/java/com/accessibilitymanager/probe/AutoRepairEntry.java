@@ -193,6 +193,7 @@ public class AutoRepairEntry extends XposedModule {
     private static final Map<String, Long> sLastDied = new HashMap<>();
     private static final Map<String, Long> sLastInit = new HashMap<>();
     private static final Map<String, Runnable> sPendingCheck = new HashMap<>();
+    private static final Map<String, Integer> sCheckRetries = new HashMap<>();
     private static final Map<String, Runnable> sVerifyRun = new HashMap<>();
     private static final Map<String, Long> sSuppressUntil = new HashMap<>();
     private static final Map<String, Object> sConnections = new HashMap<>();
@@ -402,6 +403,7 @@ public class AutoRepairEntry extends XposedModule {
         sToastCache = null;
         sConnections.clear();
         sPendingCheck.clear();
+        sCheckRetries.clear();
         sVerifyRun.clear();
         sLastDied.clear();
         sLastInit.clear();
@@ -941,7 +943,14 @@ public class AutoRepairEntry extends XposedModule {
                     }
                     String connKey = component.flattenToString();
                     if (!died) {
+                        Object existing = sConnections.get(connKey);
+                        if (existing != null && existing != connection) {
+                            event("警告", "检测到同名服务存在重复连接，自动解除旧连接: " + component.flattenToShortString()
+                                    + " old=" + connId(existing) + " new=" + connId(connection));
+                            unbindConnection(existing, "duplicate_detected");
+                        }
                         sConnections.put(connKey, connection);
+                        sCheckRetries.remove(connKey);
                         onInitializeService(component, finalCrashed, hasInterface, connection);
                     } else {
                         Object existing = sConnections.get(connKey);
@@ -2280,6 +2289,20 @@ public class AutoRepairEntry extends XposedModule {
             return "uid=not_found killedPids=[]";
         }
 
+        boolean forceStopCalled = false;
+        try {
+            ActivityManager am =
+                    (ActivityManager) sContext.getSystemService(Context.ACTIVITY_SERVICE);
+            if (am != null) {
+                Method forceStopMethod = am.getClass().getMethod("forceStopPackage", String.class);
+                forceStopMethod.invoke(am, pkg);
+                forceStopCalled = true;
+                log("killAppProcesses: forceStopPackage called for " + pkg);
+            }
+        } catch (Throwable t) {
+            log("killAppProcesses: forceStopPackage reflection failed: " + t);
+        }
+
         Set<Integer> pids = new LinkedHashSet<>();
         try {
             ActivityManager am =
@@ -2318,7 +2341,7 @@ public class AutoRepairEntry extends XposedModule {
                 log("killAppProcesses: kill pid " + pid + " failed: " + t);
             }
         }
-        return "uid=" + uid + " killedPids=" + killed;
+        return "uid=" + uid + " forceStop=" + forceStopCalled + " killedPids=" + killed;
     }
 
     private static void onBinderDied(ComponentName component, boolean crashed,
@@ -2508,6 +2531,7 @@ public class AutoRepairEntry extends XposedModule {
         if (boundConnection != null) {
             clearCrashedMarker(boundConnection, component);
             sSuppressUntil.remove(key);
+            sCheckRetries.remove(key);
             event("保活", "服务已恢复绑定（无需额外重启）: " + key);
             return;
         }
@@ -2515,6 +2539,19 @@ public class AutoRepairEntry extends XposedModule {
             event("失败", "无法确认绑定状态，跳过修复: " + key);
             return;
         }
+
+        String pkg = component.getPackageName();
+        if (isPackageProcessRunning(pkg)) {
+            int retries = sCheckRetries.containsKey(key) ? sCheckRetries.get(key) : 0;
+            if (retries < 2) {
+                sCheckRetries.put(key, retries + 1);
+                scheduleCheck(component, key, 2000L);
+                event("保活", "应用进程正在启动中，宽限等待服务连接 (" + (retries + 1) + "/2): " + key,
+                        getPackageProcessSummary(pkg));
+                return;
+            }
+        }
+        sCheckRetries.remove(key);
 
         repair(component, key);
     }
@@ -2563,11 +2600,17 @@ public class AutoRepairEntry extends XposedModule {
         }
         String removed = removeComponent(original, component);
 
+        Object staleConn = sConnections.get(key);
+        if (staleConn != null) {
+            unbindConnection(staleConn, "repair_clean_stale");
+        }
+
         sSuppressUntil.put(key, now + SUPPRESS_MS);
         sSelfRemovedUntil.put(key, now + REPAIR_REMOVE_WINDOW_MS);
         sRepairStartedAt = now;
         sRepairInProgress = true;
         sRepairKey = key;
+        sCheckRetries.remove(key);
 
         event("修复", "关开修复，先关闭: " + key,
                 "action=repair_disable " + getPowerStateSummary());
@@ -2674,6 +2717,9 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static void finishRepair(String key) {
+        if (key != null) {
+            sCheckRetries.remove(key);
+        }
         if (key == null || key.equals(sRepairKey)) {
             sRepairInProgress = false;
             sRepairKey = null;
@@ -2894,6 +2940,67 @@ public class AutoRepairEntry extends XposedModule {
         }
         sb.append(']');
         return sb.toString();
+    }
+
+    static boolean isPackageProcessRunning(String pkg) {
+        Context ctx = sContext;
+        if (ctx == null || pkg == null || pkg.isEmpty()) {
+            return false;
+        }
+        final int uid;
+        try {
+            uid = ctx.getPackageManager().getApplicationInfo(pkg, 0).uid;
+        } catch (Throwable t) {
+            return false;
+        }
+        try {
+            ActivityManager am =
+                    (ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE);
+            if (am != null) {
+                List<ActivityManager.RunningAppProcessInfo> procs = am.getRunningAppProcesses();
+                if (procs != null) {
+                    for (ActivityManager.RunningAppProcessInfo info : procs) {
+                        if (info != null && info.uid == uid) {
+                            return true;
+                        }
+                    }
+                }
+                List<ActivityManager.RunningServiceInfo> svcs = am.getRunningServices(Integer.MAX_VALUE);
+                if (svcs != null) {
+                    for (ActivityManager.RunningServiceInfo info : svcs) {
+                        if (info != null && info.uid == uid && info.pid > 0) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
+    private static void unbindConnection(Object connection, String reason) {
+        if (connection == null) {
+            return;
+        }
+        try {
+            Method unbindMethod = findMethod(connection.getClass(), "unbindLocked");
+            if (unbindMethod != null) {
+                Object lock = getFieldValue(connection, "mLock");
+                if (lock != null) {
+                    synchronized (lock) {
+                        unbindMethod.invoke(connection);
+                    }
+                } else {
+                    unbindMethod.invoke(connection);
+                }
+                log("unbindConnection (" + reason + "): successfully unbound " + connId(connection));
+            } else {
+                log("unbindConnection (" + reason + "): unbindLocked not found on " + connection.getClass());
+            }
+        } catch (Throwable t) {
+            log("unbindConnection (" + reason + ") failed for " + connId(connection) + ": " + t);
+        }
     }
 
     private static Object findBoundConnection(ComponentName target) {
@@ -3354,5 +3461,14 @@ public class AutoRepairEntry extends XposedModule {
 
     static int getHotReloadCountForTesting() {
         return sHotReloadCount;
+    }
+
+    static void putCheckRetryForTesting(String key, int count) {
+        sCheckRetries.put(key, count);
+    }
+
+    static int getCheckRetryForTesting(String key) {
+        Integer val = sCheckRetries.get(key);
+        return val != null ? val : 0;
     }
 }
