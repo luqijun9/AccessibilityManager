@@ -99,7 +99,12 @@ public class MainActivity extends Activity {
     private boolean mPendingFixModeRequest = false;//是否有待处理的强杀模式权限请求
     private boolean mPendingNotifyListenerRequest = false;//是否有待处理的通知使用权请求
     private static final int REQUEST_SETTINGS = 1001;
+    public static final String KEY_COMPACT_LIST = "compact_list";
+    static final int TYPE_ITEM = 0;
+    static final int TYPE_FOOTER = 1;
+    static final int TYPE_ITEM_COMPACT = 2;
     private long mLastAutoUpdateCheckTime = 0;
+    private boolean mIsCompactList = false;
 
     // 收藏相关
     private ImageButton fabAdd;
@@ -189,7 +194,7 @@ public class MainActivity extends Activity {
             }
             android.widget.ImageButton ib = view.findViewById(R.id.ib);
             if (ib != null) {
-                ib.setVisibility(isChecked ? View.VISIBLE : View.INVISIBLE);
+                ib.setVisibility(resolveLockVisibility(isChecked, isCompactListMode()));
                 ib.setImageResource(containsService(daemon, serviceId)
                         ? R.drawable.lock1 : R.drawable.lock);
             }
@@ -261,6 +266,7 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
         
         sp = getSharedPreferences("data", 0);
+        mIsCompactList = sp.getBoolean(KEY_COMPACT_LIST, false);
 
         toolbar = findViewById(R.id.toolbar);
         setupToolbarTitle();
@@ -1104,6 +1110,39 @@ public class MainActivity extends Activity {
         sp.edit().putBoolean("favorites_tab_active", mIsFavoritesTab).apply();
     }
 
+    static int resolveItemViewType(int position, int listSize, boolean hasFooter, boolean compactMode) {
+        if (position == listSize && hasFooter) {
+            return TYPE_FOOTER;
+        }
+        return compactMode ? TYPE_ITEM_COMPACT : TYPE_ITEM;
+    }
+
+    static int resolveLockVisibility(boolean isServiceEnabled, boolean compactMode) {
+        if (isServiceEnabled) {
+            return View.VISIBLE;
+        }
+        return compactMode ? View.GONE : View.INVISIBLE;
+    }
+
+    private boolean isCompactListMode() {
+        return mIsCompactList;
+    }
+
+    private boolean refreshCompactListModeIfNeeded() {
+        if (sp == null) {
+            return false;
+        }
+        boolean currentCompact = sp.getBoolean(KEY_COMPACT_LIST, false);
+        if (currentCompact != mIsCompactList) {
+            mIsCompactList = currentCompact;
+            if (listView != null && mAdapter != null) {
+                listView.setAdapter(mAdapter);
+            }
+            return true;
+        }
+        return false;
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
@@ -1112,7 +1151,7 @@ public class MainActivity extends Activity {
         settingValue = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         if (settingValue == null) settingValue = "";
         daemon = sp.getString("daemon", "");
-        if (mAdapter != null) {
+        if (!refreshCompactListModeIfNeeded() && mAdapter != null) {
             mAdapter.notifyDataSetChanged();
         }
         
@@ -2089,8 +2128,6 @@ public class MainActivity extends Activity {
 
     //这个是用于适配列表中的每一项设置项的显示
     public class ServiceListAdapter extends androidx.recyclerview.widget.RecyclerView.Adapter<androidx.recyclerview.widget.RecyclerView.ViewHolder> {
-        private static final int TYPE_ITEM = 0;
-        private static final int TYPE_FOOTER = 1;
 
         private List<AccessibilityServiceInfo> mList = new java.util.ArrayList<>();
 
@@ -2129,8 +2166,7 @@ public class MainActivity extends Activity {
 
         @Override
         public int getItemViewType(int position) {
-            if (position == mList.size() && mPinHint != null) return TYPE_FOOTER;
-            return TYPE_ITEM;
+            return resolveItemViewType(position, mList.size(), mPinHint != null, isCompactListMode());
         }
 
         @Override
@@ -2140,7 +2176,8 @@ public class MainActivity extends Activity {
                 mPinHint.setLayoutParams(new androidx.recyclerview.widget.RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
                 return new androidx.recyclerview.widget.RecyclerView.ViewHolder(mPinHint) {};
             }
-            View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item, parent, false);
+            int layoutId = viewType == TYPE_ITEM_COMPACT ? R.layout.item_compact : R.layout.item;
+            View view = LayoutInflater.from(parent.getContext()).inflate(layoutId, parent, false);
             return new ItemViewHolder(view);
         }
 
@@ -2198,7 +2235,7 @@ public class MainActivity extends Activity {
             });
 
             holder.sw.setChecked(isServiceEnabled(serviceName, settingValue));
-            holder.ib.setVisibility(holder.sw.isChecked() ? View.VISIBLE : View.INVISIBLE);
+            holder.ib.setVisibility(resolveLockVisibility(holder.sw.isChecked(), isCompactListMode()));
             
             holder.sw.setOnClickListener(view -> {
                 if (!isModeEstablished()) {
@@ -2220,7 +2257,7 @@ public class MainActivity extends Activity {
                         sp.edit().putString("daemon", daemon).apply();
                         syncModuleServicesIfNeeded();
                         holder.ib.setImageResource(R.drawable.lock);
-                        holder.ib.setVisibility(View.INVISIBLE);
+                        holder.ib.setVisibility(resolveLockVisibility(false, isCompactListMode()));
                     }
                     boolean lockedAfter = containsService(daemon, serviceName);
                     if (!enable && lockedAfter) {
@@ -2242,7 +2279,7 @@ public class MainActivity extends Activity {
                                 Toast.LENGTH_LONG).show();
                         return;
                     }
-                    holder.ib.setVisibility(enable ? View.VISIBLE : View.INVISIBLE);
+                    holder.ib.setVisibility(resolveLockVisibility(enable, isCompactListMode()));
                     if (enable) {
                         holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
                     }
@@ -2296,7 +2333,7 @@ public class MainActivity extends Activity {
                         if (!isServiceEnabled(serviceName, s)) tmpSettingValue = serviceName + ":" + s;
                         else tmpSettingValue = s;
                         Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
-                        holder.ib.setVisibility(View.VISIBLE);
+                        holder.ib.setVisibility(resolveLockVisibility(true, isCompactListMode()));
                         holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
                     } else {
                         // === 用户在管理器中关闭服务 ===
@@ -2319,7 +2356,7 @@ public class MainActivity extends Activity {
                         }
                         tmpSettingValue = sb.toString();
                         Settings.Secure.putString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, tmpSettingValue);
-                        holder.ib.setVisibility(View.INVISIBLE);
+                        holder.ib.setVisibility(resolveLockVisibility(false, isCompactListMode()));
                     }
                 }
             });
@@ -2829,6 +2866,7 @@ public class MainActivity extends Activity {
             top = sp.getString("top", "");
             Sort();
             runOnUiThread(() -> {
+                refreshCompactListModeIfNeeded();
                 // 刷新当前 Tab
                 if (mIsFavoritesTab) {
                     switchToTab(true);

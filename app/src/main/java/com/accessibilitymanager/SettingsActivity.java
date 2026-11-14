@@ -48,8 +48,8 @@ public class SettingsActivity extends AppCompatActivity {
     private final android.util.LruCache<String, android.graphics.drawable.Drawable> mIconCache = new android.util.LruCache<>(30);
 
     // 子项视图引用
-    private MaterialSwitch switchBoot, switchToast, switchUserOnly, switchHide, switchDelayDaemon, switchManualCloseDaemon;
-    private View manualCloseDaemonLayout;
+    private MaterialSwitch switchBoot, switchToast, switchUserOnly, switchCompactList, switchHide, switchDelayDaemon, switchManualCloseDaemon;
+    private View compactListRow, manualCloseDaemonLayout;
     private MaterialSwitch switchCrashFix, switchUnlockCrashCheck, switchNotifyCrashCheck, switchFixMode;
     private MaterialSwitch switchPeriodicCheck, switchWakeIdle, switchIgnoreSystemCrash;
     private MaterialSwitch switchAutoUpdate;
@@ -264,6 +264,8 @@ public class SettingsActivity extends AppCompatActivity {
         switchBoot = findViewById(R.id.boot);
         switchToast = findViewById(R.id.toast);
         switchUserOnly = findViewById(R.id.useronly);
+        switchCompactList = findViewById(R.id.compact_list);
+        compactListRow = findViewById(R.id.compact_list_row);
         switchHide = findViewById(R.id.hide);
         switchDelayDaemon = findViewById(R.id.delay_daemon);
         switchManualCloseDaemon = findViewById(R.id.manual_close_daemon);
@@ -313,6 +315,7 @@ public class SettingsActivity extends AppCompatActivity {
         switchAutoUpdate.setChecked(sp.getBoolean("auto_update", true));
         switchToast.setChecked(sp.getBoolean("toast", true));
         switchUserOnly.setChecked(sp.getBoolean("useronly", false));
+        switchCompactList.setChecked(sp.getBoolean(MainActivity.KEY_COMPACT_LIST, false));
         switchHide.setChecked(sp.getBoolean("hide", false));
         switchDelayDaemon.setChecked(sp.getBoolean("delay_daemon", false));
         switchManualCloseDaemon.setChecked(sp.getBoolean("manual_close_daemon", false));
@@ -364,6 +367,15 @@ public class SettingsActivity extends AppCompatActivity {
         });
 
         switchUserOnly.setOnCheckedChangeListener((btn, checked) -> sp.edit().putBoolean("useronly", checked).apply());
+        if (switchUserOnly.getParent() instanceof View) {
+            ((View) switchUserOnly.getParent()).setOnClickListener(v -> switchUserOnly.toggle());
+        }
+
+        switchCompactList.setOnCheckedChangeListener((btn, checked) ->
+                sp.edit().putBoolean(MainActivity.KEY_COMPACT_LIST, checked).apply());
+        if (compactListRow != null) {
+            compactListRow.setOnClickListener(v -> switchCompactList.toggle());
+        }
 
         switchHide.setOnCheckedChangeListener((btn, checked) -> {
             sp.edit().putBoolean("hide", checked).apply();

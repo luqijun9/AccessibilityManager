@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingTop="2dp"
+    android:paddingBottom="2dp">
+
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/card_layout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        app:cardCornerRadius="10dp"
+        app:cardElevation="0dp"
+        app:strokeWidth="0dp"
+        app:cardBackgroundColor="?attr/colorSurfaceContainer"
+        android:clickable="true"
+        android:focusable="true"
+        android:foreground="?attr/selectableItemBackground">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp">
+
+            <ImageView
+                android:id="@+id/c"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:layout_gravity="center_vertical" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_gravity="center_vertical"
+                android:layout_marginStart="10dp"
+                android:layout_marginEnd="6dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/b"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:includeFontPadding="false"
+                    android:lineSpacingMultiplier="1.05"
+                    android:maxLines="2"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14.5sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/a"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:ellipsize="end"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageButton
+                    android:id="@+id/ib"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_marginEnd="2dp"
+                    android:background="@android:color/transparent"
+                    android:padding="2dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/lock"
+                    android:tint="?attr/colorPrimary"
+                    app:tint="?attr/colorPrimary"
+                    android:visibility="gone" />
+
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/s"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="-8dp"
+                    android:layout_marginBottom="-8dp"
+                    android:layout_marginStart="-4dp"
+                    android:layout_marginEnd="-4dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:scaleX="0.72"
+                    android:scaleY="0.72"
+                    android:switchMinWidth="0dp" />
+            </LinearLayout>
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <View
+        android:id="@+id/pin_indicator"
+        android:layout_width="3dp"
+        android:layout_height="wrap_content"
+        android:layout_alignTop="@id/card_layout"
+        android:layout_alignBottom="@id/card_layout"
+        android:layout_marginStart="4dp"
+        android:background="?attr/colorPrimary"
+        android:visibility="gone" />
+</RelativeLayout>
+
