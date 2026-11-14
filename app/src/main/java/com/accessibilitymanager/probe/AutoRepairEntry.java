@@ -51,6 +51,8 @@ public class AutoRepairEntry extends XposedModule {
             "com.android.server.accessibility.AccessibilityServiceConnection";
     static final String HOOK_ID_BINDER_DIED = "a11y_repair_binder_died";
     static final String HOOK_ID_INIT_SERVICE = "a11y_repair_init_service";
+    static final String HOOK_ID_BIND_LOCKED = "a11y_repair_bind_locked";
+    static final String HOOK_ID_UNBIND_LOCKED = "a11y_repair_unbind_locked";
 
     // 热重载跨代状态键（仅使用 JDK/Android 标准类型，跨 ClassLoader 安全传递）
     private static final String STATE_CONNECTIONS = "connections";
@@ -599,6 +601,36 @@ public class AutoRepairEntry extends XposedModule {
                         });
             } else {
                 event("失败", "未找到 initializeService 方法");
+            }
+
+            Method bindLockedMethod = findMethod(connClass, "bindLocked");
+            if (bindLockedMethod != null) {
+                hook(bindLockedMethod)
+                        .setId(HOOK_ID_BIND_LOCKED)
+                        .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                        .intercept(chain -> {
+                            Object conn = chain.getThisObject();
+                            ComponentName cn = getComponentName(conn);
+                            if (cn != null && (isManaged(cn) || "com.arlosoft.macrodroid".equals(cn.getPackageName()))) {
+                                event("监听", "AMS发起绑定: " + cn.flattenToShortString() + " conn=" + connId(conn));
+                            }
+                            return chain.proceed();
+                        });
+            }
+
+            Method unbindLockedMethod = findMethod(connClass, "unbindLocked");
+            if (unbindLockedMethod != null) {
+                hook(unbindLockedMethod)
+                        .setId(HOOK_ID_UNBIND_LOCKED)
+                        .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                        .intercept(chain -> {
+                            Object conn = chain.getThisObject();
+                            ComponentName cn = getComponentName(conn);
+                            if (cn != null && (isManaged(cn) || "com.arlosoft.macrodroid".equals(cn.getPackageName()))) {
+                                event("监听", "AMS发起解绑: " + cn.flattenToShortString() + " conn=" + connId(conn));
+                            }
+                            return chain.proceed();
+                        });
             }
 
             if (!isHotReload) {
