@@ -99,7 +99,7 @@ public class AutoRepairEntry extends XposedModule {
     private static final String SETTING_ACCESSIBILITY_ENABLED =
             Settings.Secure.ACCESSIBILITY_ENABLED;
     private static final String SETTING_BOOT_COUNT = "boot_count";
-    // 常见国产 ROM 超级省电/低电量 Settings 键名（用于诊断日志与变更监听）
+    // 常见国产 ROM 超级省电/低电量 Settings 键名（仅用于修复日志诊断，不再注册监听）
     private static final String[] OEM_POWER_SAVE_KEYS = {
             "super_powersave_mode_state",
             "super_powersave_launcher_enter",
@@ -109,12 +109,6 @@ public class AutoRepairEntry extends XposedModule {
             "bbk_super_save_power_mode",
             "pem_in_sleepmode",
             "SmartModeStatus",
-            "low_power"
-    };
-    private static final String[] OBSERVED_POWER_SAVE_KEYS = {
-            "super_powersave_mode_state",
-            "super_powersave_launcher_enter",
-            "power_supersave_mode_open",
             "low_power"
     };
 
@@ -1093,10 +1087,6 @@ public class AutoRepairEntry extends XposedModule {
                         onAccessibilitySwitchChanged();
                         return;
                     }
-                    if (isObservedPowerSaveKey(key)) {
-                        event("省电", "省电设置项变更: " + key, getPowerStateSummary());
-                        return;
-                    }
                     if (KEY_DEBUG_KILL.equals(key)) {
                         scheduleDebugKill();
                         return;
@@ -1151,9 +1141,8 @@ public class AutoRepairEntry extends XposedModule {
                     false, sObserver);
             resolver.registerContentObserver(Settings.Secure.getUriFor(SETTING_ACCESSIBILITY_ENABLED),
                     false, sObserver);
-            registerPowerSaveSettingObservers(resolver, sObserver);
             sObserverAttempts = 0;
-            log("[配置] 配置监听已注册 (含 boot_count 实时同步与省电状态监听)");
+            log("[配置] 配置监听已注册 (含 boot_count 实时同步)");
             writeHeartbeatOnce("observer_ready");
             // 热重载/进程重启后状态机内存为空，必须按真实锁定列表与绑定状态重建一次
             syncMachines("observer_ready");
@@ -3033,36 +3022,6 @@ public class AutoRepairEntry extends XposedModule {
             });
         } catch (Throwable t) {
             log("post showModuleToast failed: " + t);
-        }
-    }
-
-    private static boolean isObservedPowerSaveKey(String key) {
-        if (key == null) {
-            return false;
-        }
-        for (String item : OBSERVED_POWER_SAVE_KEYS) {
-            if (item.equals(key)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static void registerPowerSaveSettingObservers(
-            ContentResolver resolver, ContentObserver observer) {
-        for (String key : OBSERVED_POWER_SAVE_KEYS) {
-            try {
-                resolver.registerContentObserver(Settings.System.getUriFor(key), false, observer);
-            } catch (Throwable ignored) {
-            }
-            try {
-                resolver.registerContentObserver(Settings.Secure.getUriFor(key), false, observer);
-            } catch (Throwable ignored) {
-            }
-            try {
-                resolver.registerContentObserver(Settings.Global.getUriFor(key), false, observer);
-            } catch (Throwable ignored) {
-            }
         }
     }
 
