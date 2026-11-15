@@ -29,6 +29,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -132,12 +133,6 @@ public class AutoRepairEntry extends XposedModule {
     private static final long DEDUPE_MS = 1500L;
     private static final long SETTLE_MS = 3000L;
     private static final long TOGGLE_OFF_MS = 500L;
-    private static final long VERIFY_MS = 3500L;
-    // 修复成功后的稳定性复查延迟：覆盖 OEM 在服务刚拉起后数秒内二次查杀，
-    // 以及 binderDied 回调丢失/被去重/被抑制窗口拦截时无人兜底的盲区
-    private static final long STABILITY_VERIFY_MS = 5000L;
-    private static final long SUPPRESS_MS = 10000L;
-    private static final long REPAIR_STUCK_MS = 15000L;
     private static final long SCAN_INIT_DELAY_MS = 10000L;
     private static final long SCAN_CONFIG_DELAY_MS = 1500L;
 
@@ -146,7 +141,6 @@ public class AutoRepairEntry extends XposedModule {
     private static final long RECONCILE_CONFIG_DELAY_MS = 500L;
     // 补回写入后延迟检查是否真正绑定（force-stop 后可能“列表已恢复但未绑定”）
     private static final long BIND_VERIFY_DELAY_MS = 2000L;
-    private static final long REPAIR_REMOVE_WINDOW_MS = TOGGLE_OFF_MS + 1500L;
     static final long BOOT_GRACE_MS = RepairPolicy.BOOT_GRACE_MS;
     static final long BOOT_FIRST_CONNECT_WINDOW_MS = RepairPolicy.BOOT_FIRST_CONNECT_WINDOW_MS;
     static final long BOOT_WAVE_GRACE_MS = RepairPolicy.BOOT_WAVE_GRACE_MS;
@@ -191,19 +185,43 @@ public class AutoRepairEntry extends XposedModule {
             new EventThrottle(SKIP_EVENT_WINDOW_MS);
 
     // 状态缓存（仅在 sHandler 线程读写）
-    private static boolean sRepairInProgress;
-    private static long sRepairStartedAt;
-    private static String sRepairKey;
     private static final Map<String, Long> sLastDied = new HashMap<>();
     private static final Map<String, Long> sLastInit = new HashMap<>();
-    private static final Map<String, Runnable> sPendingCheck = new HashMap<>();
-    private static final Map<String, Integer> sCheckRetries = new HashMap<>();
-    private static final Map<String, Runnable> sVerifyRun = new HashMap<>();
-    private static final Map<String, Runnable> sStabilityRun = new HashMap<>();
-    private static final Map<String, Long> sSuppressUntil = new HashMap<>();
     private static final Map<String, Object> sConnections = new HashMap<>();
     private static boolean sBoundCheckAvailable;
     private static boolean sBoundCheckErrorLogged;
+
+    // 重构后的单服务状态机与包级修复协调器（全部只在 sHandler 线程读写，不需要全局保护锁）
+    private static final Map<String, ServiceRepairStateMachine> sMachines = new HashMap<>();
+    private static final Map<String, Runnable> sMachineTimers = new HashMap<>();
+    private static final Map<String, Runnable> sPendingMachineSync = new HashMap<>();
+    private static final Set<String> sUserDisabledKeys = new LinkedHashSet<>();
+    private static final Map<String, PackageRepairRequest> sPackageRepairRequests = new HashMap<>();
+    private static final List<String> sPackageRepairQueue = new ArrayList<>();
+    private static final List<String> sActiveRepairBatch = new ArrayList<>();
+    private static final Set<String> sRestoreRetryScheduled = new LinkedHashSet<>();
+    private static boolean sRepairTransactionActive;
+    private static String sRepairTransactionPackage;
+    private static long sRepairTransactionGeneration;
+    private static SettingsWriter sSettingsWriter;
+
+    /** 包级修复请求：同一包只保留一条，allowKill 取所有请求的“与”，任一成员拒绝强杀就不强杀。 */
+    private static final class PackageRepairRequest {
+        final String pkg;
+        final ComponentName trigger;
+        final String reason;
+        final long requestedAt;
+        boolean allowKill;
+
+        PackageRepairRequest(String pkg, ComponentName trigger, boolean allowKill,
+                String reason, long requestedAt) {
+            this.pkg = pkg;
+            this.trigger = trigger;
+            this.allowKill = allowKill;
+            this.reason = reason;
+            this.requestedAt = requestedAt;
+        }
+    }
 
     private static boolean sReconcilePending;
     private static boolean sReconcileRetryPending;
@@ -214,8 +232,6 @@ public class AutoRepairEntry extends XposedModule {
     private static Runnable sPostBootCheckRunnable;
     private static final Map<String, Long> sLastPackageKillAt = new HashMap<>();
     private static final Set<String> sPendingVerifyKeys = new LinkedHashSet<>();
-    private static final Map<String, Long> sSelfRemovedUntil = new HashMap<>();
-    private static final Map<String, Long> sManualHiddenUntil = new HashMap<>();
     private static volatile String sModuleEnabledCache;
     private static volatile String sManagedServicesCache;
     private static volatile String sFixModeCache;
@@ -402,23 +418,38 @@ public class AutoRepairEntry extends XposedModule {
         sReconcileRetryPending = false;
         sBindVerifyPending = false;
         sHeartbeatRetryPending = false;
-        sRepairInProgress = false;
-        sRepairKey = null;
         sPostBootCheckRunnable = null;
         sLastObservedEnabled = null;
         sToastCache = null;
+        if (sHandler != null) {
+            for (Runnable runnable : sMachineTimers.values()) {
+                if (runnable != null) {
+                    sHandler.removeCallbacks(runnable);
+                }
+            }
+            for (Runnable runnable : sPendingMachineSync.values()) {
+                if (runnable != null) {
+                    sHandler.removeCallbacks(runnable);
+                }
+            }
+        }
         sConnections.clear();
-        sPendingCheck.clear();
-        sCheckRetries.clear();
-        sVerifyRun.clear();
-        sStabilityRun.clear();
         sLastDied.clear();
         sLastInit.clear();
-        sSuppressUntil.clear();
         sLastPackageKillAt.clear();
         sPendingVerifyKeys.clear();
-        sSelfRemovedUntil.clear();
-        sManualHiddenUntil.clear();
+        sMachines.clear();
+        sMachineTimers.clear();
+        sPendingMachineSync.clear();
+        sUserDisabledKeys.clear();
+        sPackageRepairRequests.clear();
+        sPackageRepairQueue.clear();
+        sActiveRepairBatch.clear();
+        sRestoreRetryScheduled.clear();
+        sRepairTransactionActive = false;
+        sRepairTransactionPackage = null;
+        sRepairTransactionGeneration = 0L;
+        sSettingsWriter = null;
         sFieldCache.clear();
         sMethodCache.clear();
     }
@@ -954,12 +985,20 @@ public class AutoRepairEntry extends XposedModule {
                     if (!died) {
                         Object existing = sConnections.get(connKey);
                         if (!ignoreSystem && existing != null && existing != connection) {
-                            event("警告", "检测到同名服务存在重复连接，自动解除旧连接: " + component.flattenToShortString()
-                                    + " old=" + connId(existing) + " new=" + connId(connection));
-                            unbindConnection(existing, "duplicate_detected");
+                            // 旧连接已经死亡时 unbindLocked 可能再次扰动 AMS 状态；
+                            // 只有旧连接仍然持有服务接口时才需要主动解绑。
+                            if (isConnectionBound(existing)) {
+                                event("警告", "检测到同名服务存在重复连接，自动解除旧连接: "
+                                        + component.flattenToShortString()
+                                        + " old=" + connId(existing) + " new=" + connId(connection));
+                                unbindConnection(existing, "duplicate_detected");
+                            } else {
+                                log("stale duplicate connection already dead: "
+                                        + component.flattenToShortString()
+                                        + " old=" + connId(existing) + " new=" + connId(connection));
+                            }
                         }
                         sConnections.put(connKey, connection);
-                        sCheckRetries.remove(connKey);
                         onInitializeService(component, finalCrashed, hasInterface, connection);
                     } else {
                         Object existing = sConnections.get(connKey);
@@ -1094,10 +1133,12 @@ public class AutoRepairEntry extends XposedModule {
                         if (isModuleEnabled()) {
                             scheduleReconcile("enable", RECONCILE_CONFIG_DELAY_MS);
                         }
+                        syncMachines("module_enabled_setting");
                     } else if (KEY_SERVICES.equals(key)) {
                         sManagedServicesCache = readSecure(KEY_SERVICES);
                         scheduleReconcile("services", RECONCILE_CONFIG_DELAY_MS);
                         scheduleScan(SCAN_CONFIG_DELAY_MS, "services changed");
+                        syncMachines("managed_setting");
                     }
                 }
             };
@@ -1125,6 +1166,8 @@ public class AutoRepairEntry extends XposedModule {
             sObserverAttempts = 0;
             log("[配置] 配置监听已注册 (含 boot_count 实时同步与省电状态监听)");
             writeHeartbeatOnce("observer_ready");
+            // 热重载/进程重启后状态机内存为空，必须按真实锁定列表与绑定状态重建一次
+            syncMachines("observer_ready");
             long sinceBoot = SystemClock.elapsedRealtime();
             long remainingBoot = getRemainingBootGraceMs(sinceBoot, sFirstServiceConnectAt);
             if (remainingBoot > 0L) {
@@ -1269,7 +1312,7 @@ public class AutoRepairEntry extends XposedModule {
             event("检测", "扫描发现未绑定服务: " + key,
                     "action=scan_hit reason=" + reason + " lastConn=" + connId(sConnections.get(key))
                             + " crashedMarker=" + getCrashedMarker(component));
-            scheduleCheck(component, key, SETTLE_MS);
+            scheduleMachineSync(component, SETTLE_MS, "scan");
         }
         if (candidates > 0 || "manual scan".equals(reason)) {
             event("扫描", "扫描完成 (" + reason + ")，发现 " + candidates + " 个异常服务",
@@ -1296,6 +1339,9 @@ public class AutoRepairEntry extends XposedModule {
             }
             sLastObservedEnabled = current;
         }
+        // 先把“启用列表变化”投递给每个服务的状态机，让它们决定 RESTORING/BOUND；
+        // reconcileMissing 仍作为批量补回兜底，两者都只在 sHandler 线程执行。
+        notifyMachinesEnabledListChanged();
         reconcileMissing("enabled change");
     }
 
@@ -1315,6 +1361,7 @@ public class AutoRepairEntry extends XposedModule {
                     scheduleReconcile("accessibility_switch", RECONCILE_CONFIG_DELAY_MS);
                 }
             }
+            syncMachines("accessibility_switch");
         } catch (Throwable t) {
             log("onAccessibilitySwitchChanged error: " + t);
         }
@@ -1374,6 +1421,7 @@ public class AutoRepairEntry extends XposedModule {
         StringBuilder added = new StringBuilder();
         Set<String> addedLabels = new LinkedHashSet<>();
         Set<String> newlyAddedKeys = new LinkedHashSet<>();
+        List<ComponentKey> addKeys = new ArrayList<>();
         int count = 0;
         for (String raw : managed.split(":")) {
             ComponentName component = ComponentName.unflattenFromString(raw);
@@ -1384,19 +1432,13 @@ public class AutoRepairEntry extends XposedModule {
             if (containsComponent(desired, component)) {
                 continue;
             }
-            Long own = sSelfRemovedUntil.get(key);
-            if (own != null) {
-                if (now < own) {
-                    continue;
-                }
-                sSelfRemovedUntil.remove(key);
+            // 崩溃修复事务正在临时移除该成员时，不要在这里抢着补回，交给包协调器统一重新开启
+            if (isRepairingKey(key)) {
+                continue;
             }
-            Long manual = sManualHiddenUntil.get(key);
-            if (manual != null) {
-                if (now < manual) {
-                    continue;
-                }
-                sManualHiddenUntil.remove(key);
+            // 用户明确关闭的服务不得由补回路径复活
+            if (sUserDisabledKeys.contains(key)) {
+                continue;
             }
             if (!isPackageInstalled(component.getPackageName())) {
                 event("保活", "跳过补回 (" + reason + ")：应用已卸载: " + key);
@@ -1409,6 +1451,7 @@ public class AutoRepairEntry extends XposedModule {
             added.append(key);
             addedLabels.add(getAppLabel(component));
             newlyAddedKeys.add(key);
+            addKeys.add(ComponentKey.of(component.getPackageName(), component.getClassName()));
             count++;
         }
         if (count == 0) {
@@ -1439,9 +1482,12 @@ public class AutoRepairEntry extends XposedModule {
         event("保活", "补回已关闭服务 (" + count + "): " + added,
                 "action=reconcile reason=" + reason + " count=" + count
                         + " " + getPowerStateSummary());
-        if (!writeEnabled(desired)) {
+        SettingsWriter.WriteResult writeResult = settingsWriter().applyDelta(
+                addKeys, Collections.<ComponentKey>emptyList());
+        if (writeResult.isFailure()) {
             event("失败", "补回写入失败: " + added,
                     "action=reconcile_write_fail reason=" + reason
+                            + " status=" + writeResult.getStatus()
                             + " " + getPowerStateSummary());
             return;
         }
@@ -1507,13 +1553,11 @@ public class AutoRepairEntry extends XposedModule {
             if (!containsComponent(enabled, component)) {
                 continue; // 已被关闭，交给对账路径
             }
-            Long own = sSelfRemovedUntil.get(key);
-            if (own != null && now < own) {
-                continue; // 崩溃修复自己的临时移除
+            if (isRepairingKey(key)) {
+                continue; // 包级修复事务自己的临时移除
             }
-            Long manual = sManualHiddenUntil.get(key);
-            if (manual != null && now < manual) {
-                continue; // 用户手动关闭后的短暂豁免
+            if (sUserDisabledKeys.contains(key)) {
+                continue; // 用户手动关闭
             }
             if (findBoundConnection(component) != null) {
                 continue;
@@ -1524,7 +1568,7 @@ public class AutoRepairEntry extends XposedModule {
                 return;
             }
             unbound++;
-            scheduleCheck(component, key, SETTLE_MS);
+            scheduleMachineSync(component, SETTLE_MS, "verify_bindings");
         }
         if (unbound > 0) {
             event("检测", "补回后仍未绑定 " + unbound + " 个，准备修复",
@@ -1843,6 +1887,7 @@ public class AutoRepairEntry extends XposedModule {
             } else {
                 event("配置", "模块已停用 (广播指令)");
             }
+            syncMachines("enable_module cmd");
             notifyCommandAck();
             return;
         }
@@ -1887,7 +1932,17 @@ public class AutoRepairEntry extends XposedModule {
             String prev = sManagedServicesCache != null ? sManagedServicesCache : readConfig(KEY_SERVICES);
             boolean changed = !component.equals(prev);
             sManagedServicesCache = component;
-            sManualHiddenUntil.clear();
+            // 锁定列表变化后，已移出列表的用户关闭标记不再有意义；仍在列表中的关闭意图保留
+            Set<String> managedKeys = new LinkedHashSet<>();
+            if (component != null && !component.isEmpty()) {
+                for (String raw : component.split(":")) {
+                    ComponentKey key = ComponentKey.parse(raw);
+                    if (key != null) {
+                        managedKeys.add(key.flatten());
+                    }
+                }
+            }
+            sUserDisabledKeys.retainAll(managedKeys);
             if (sContext != null) {
                 try {
                     Settings.Secure.putString(sContext.getContentResolver(), KEY_SERVICES, component);
@@ -1896,6 +1951,7 @@ public class AutoRepairEntry extends XposedModule {
             }
             scheduleReconcile("sync_services cmd", RECONCILE_CONFIG_DELAY_MS);
             scheduleScan(SCAN_CONFIG_DELAY_MS, "sync_services cmd");
+            syncMachines("sync_services cmd");
             if (changed) {
                 event("配置", "模块已生效最新锁定列表: " + component);
             } else {
@@ -1956,10 +2012,12 @@ public class AutoRepairEntry extends XposedModule {
         }
         String targetKey = target.flattenToString();
         if (!enable) {
-            // 用户手动关闭：给 KEY_SERVICES 的跨进程同步留出短暂窗口
-            sManualHiddenUntil.put(targetKey, SystemClock.elapsedRealtime() + 5000L);
+            // 用户明确关闭：记录为 DISABLED 意图，后续任何补回/修复都不得复活
+            sUserDisabledKeys.add(targetKey);
+            handleServiceEvent(target, ServiceRepairStateMachine.Event.userDisable());
+            removeFromPackageRepair(target);
         } else {
-            sManualHiddenUntil.remove(targetKey);
+            sUserDisabledKeys.remove(targetKey);
         }
         String current = readEnabled();
         if (current == null) {
@@ -1980,6 +2038,9 @@ public class AutoRepairEntry extends XposedModule {
         boolean present = containsComponent(current, target);
         if (enable == present) {
             log("manual command no-op: " + component);
+            if (enable) {
+                handleServiceEvent(target, ServiceRepairStateMachine.Event.userEnable());
+            }
             notifyCommandAck();
             return;
         }
@@ -1987,6 +2048,7 @@ public class AutoRepairEntry extends XposedModule {
         if (writeEnabled(updated)) {
             if (enable) {
                 ensureAccessibilitySwitchOn();
+                handleServiceEvent(target, ServiceRepairStateMachine.Event.userEnable());
             }
             event("保活", "手动" + (enable ? "开启" : "关闭") + ": " + component);
         } else {
@@ -2380,7 +2442,6 @@ public class AutoRepairEntry extends XposedModule {
             log("ignore binderDied for system app: " + key);
             return;
         }
-
         if (!isManaged(component)) {
             Long lastNonManaged = sLastDied.get(key);
             if (lastNonManaged != null && now - lastNonManaged < DEDUPE_MS) {
@@ -2395,80 +2456,28 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
 
-        // 若新连接已就绪（当前已存在有效绑定），说明收到的是旧连接退役时的延迟 binderDied，
-        // 必须最先清理系统刚写入的 mCrashedServices 标记并忽略（不能被去重或抑制窗口提前拦截）
+        // 旧连接退役时 AMS 可能已经有新连接：先清掉 crashed 标记，再交给状态机。
+        // 只有确认没有新连接时才做去重，避免把“新连接已恢复”的信号误丢掉。
         Object currentBound = findBoundConnection(component);
-        if (currentBound != null) {
+        boolean newerConnectionBound = currentBound != null;
+        if (newerConnectionBound) {
             clearCrashedMarker(currentBound, component);
-            log("[监听] 忽略旧连接断开事件(当前新连接已正常绑定): " + key
-                    + " diedConn=" + connId(connection) + " activeConn=" + connId(currentBound));
-            return;
-        }
-
-        Long last = sLastDied.get(key);
-        if (last != null && now - last < DEDUPE_MS) {
-            return;
-        }
-        sLastDied.put(key, now);
-
-        long remainingBoot = getRemainingBootGraceMs(now, sFirstServiceConnectAt);
-        if (remainingBoot > 0L) {
-            eventSkip("died:boot-grace:" + key, "检测", "忽略（开机冷却期内）: " + key);
-            schedulePostBootCheck(remainingBoot + 1000L);
-            return;
-        }
-
-        Long suppress = sSuppressUntil.get(key);
-        if (suppress != null && now < suppress) {
-            // 注意：在此之前第 2395 行已检查过 findBoundConnection(component)。
-            // 若 findBoundConnection(component) != null，早已在第 2400 行作为“旧连接退役残留”清理标记并安全 return。
-            // 因此到达此处的服务必定满足：【抑制期生效中】且【AMS 中当前无任何存活绑定连接】！
-            // 此时必须细分两种场景：
-            // 场景 1：repair() 主流程当前正在执行中（sRepairInProgress == true 且 key 为 sRepairKey）：
-            //         当前正处于关开修复过程中（先解绑/强杀、等待 500ms 重新开启），旧连接断开属预期行为，记录后安全跳过；
-            // 场景 2：属于“二次查杀”严重异常：服务刚修复成功/刚拉起，但在 3 秒抑制期内再次被 OEM 系统击杀（如 ColorOS o-kill(4008) 强杀）！
-            //         此时绝不能裸 return 直接吞掉事件，否则服务将永久陷入无人托管的死亡悬空状态！
-            //         正确策略：计算排期延后检查延迟（抑制期剩余时间 + 缓冲），在抑制期结束后立即执行补偿检查与二次修复。
-            if (isRepairInProgress(now) && key.equals(sRepairKey)) {
-                eventSkip("died:suppress:repairing:" + key, "检测",
-                        "忽略（修复流程执行中预期的旧连接断开）: " + key);
+        } else {
+            Long last = sLastDied.get(key);
+            if (last != null && now - last < DEDUPE_MS) {
                 return;
             }
-
-            long delay = RepairPolicy.calculateSecondaryCrashDelay(now, suppress);
-            event("检测", "服务在抑制期内再次断开（疑似遭系统二次查杀，已排期延后检查）: " + key,
-                    "delay=" + delay + "ms remaining=" + (suppress - now) + "ms "
-                            + getPackageProcessSummary(component.getPackageName())
-                            + " " + getPowerStateSummary());
-            scheduleCheck(component, key, delay);
-            return;
+            sLastDied.put(key, now);
         }
 
-        if (!crashed) {
-            String currentEnabled = readEnabled();
-            boolean inEnabled = containsComponent(currentEnabled, component);
-            event("监听", "受管服务连接断开 (crashed=false, 仍在启用列表=" + inEnabled + "): " + key,
-                    "hook=binderDied conn=" + connId(connection) + " iface=" + hasInterface
-                            + " " + getPackageProcessSummary(component.getPackageName())
-                            + " " + getPowerStateSummary());
-            if (inEnabled && isModuleEnabled()) {
-                scheduleCheck(component, key, SETTLE_MS);
-            }
-            return;
-        }
-
-        boolean enabled = isModuleEnabled();
-        event("检测", "崩溃: " + key,
+        event("检测", "崩溃/断开: " + key,
                 "hook=binderDied conn=" + connId(connection) + " crashed=" + crashed
-                        + " iface=" + hasInterface + " enabled=" + enabled
+                        + " iface=" + hasInterface + " enabled=" + isModuleEnabled()
                         + " dryRun=" + isDryRun()
                         + " " + getPackageProcessSummary(component.getPackageName())
                         + " " + getPowerStateSummary());
-        if (!enabled) {
-            return;
-        }
-
-        scheduleCheck(component, key, SETTLE_MS);
+        handleServiceEvent(component,
+                ServiceRepairStateMachine.Event.binderDied(newerConnectionBound, false));
     }
 
     private static void onInitializeService(ComponentName component, boolean crashed,
@@ -2481,145 +2490,517 @@ public class AutoRepairEntry extends XposedModule {
         }
         sLastInit.put(key, now);
         boolean managed = isManaged(component);
-
-        if (!crashed && hasInterface) {
-            Runnable pendingCheck = sPendingCheck.remove(key);
-            boolean cancelled = pendingCheck != null;
-            if (pendingCheck != null && sHandler != null) {
-                sHandler.removeCallbacks(pendingCheck);
-            }
-            Runnable verify = sVerifyRun.remove(key);
-            if (verify != null && sHandler != null) {
-                sHandler.removeCallbacks(verify);
-            }
-            boolean wasRepairing = key.equals(sRepairKey);
-            if (wasRepairing) {
-                // 保留短暂抑制期（SETTLE_MS = 3000ms）：
-                // 【设计原因】：强杀修复时旧进程被杀，AMS 内部旧连接的 binderDied 回调存在几十至几百毫秒的延迟到达。
-                // 若无抑制期，旧连接到达的 binderDied 会被误认为“刚拉起的服务又崩了”，从而陷入恶性修复死循环。
-                // 【二次崩溃保护】：若新服务在抑制期内真被 OEM 后台策略（如 ColorOS o-kill）二次击杀，
-                // onBinderDied 会检测到 findBoundConnection == null 并自动排期延后检查，在抑制期结束后立即二次拉起。
-                sSuppressUntil.put(key, now + SETTLE_MS);
-            } else {
-                sSuppressUntil.remove(key);
-            }
-            finishRepair(key);
-            clearCrashedMarker(connection, component);
-            if (managed) {
-                String baseMeta = "hook=initializeService conn=" + connId(connection)
-                        + " crashed=" + crashed + " iface=" + hasInterface;
-                if (cancelled) {
-                    event("保活", "服务已恢复就绪（无需额外重启）: " + key,
-                            baseMeta + " state=recovered_before_check");
-                } else if (wasRepairing) {
-                    long costMs = sRepairStartedAt > 0L ? Math.max(0L, now - sRepairStartedAt) : -1L;
-                    event("修复", "恢复成功: " + key,
-                            baseMeta + " state=repair_ok cost=" + costMs + "ms");
-                    showModuleToast("保活崩溃服务 " + getAppLabel(component));
-                } else {
-                    event("服务", "服务已就绪: " + key,
-                            baseMeta + " state=connected");
-                }
-                // 修复成功或崩溃后自愈成功都只代表“此刻已绑定”，不稳定；
-                // 延迟做一次稳定性复查，防止 OEM 二次查杀或 binderDied 丢失后无人兜底
-                if (cancelled || wasRepairing) {
-                    scheduleStabilityCheck(component, key);
-                }
-            } else {
-                eventNonManaged(key, "非保活服务连接(忽略)");
-            }
-            return;
-        }
+        boolean success = !crashed && hasInterface;
 
         if (!managed) {
-            eventNonManaged(key, "非保活服务重绑失败(忽略) crashed=" + crashed
-                    + ", iface=" + hasInterface);
+            eventNonManaged(key, success
+                    ? "非保活服务连接(忽略)"
+                    : "非保活服务重绑失败(忽略) crashed=" + crashed + ", iface=" + hasInterface);
             return;
         }
-        event("检测", "重绑失败: " + key,
-                "hook=initializeService conn=" + connId(connection)
-                        + " crashed=" + crashed + " iface=" + hasInterface);
-        if (sContext != null && isModuleEnabled() && !sPendingCheck.containsKey(key)) {
-            scheduleCheck(component, key, SETTLE_MS);
+
+        if (success) {
+            log("[服务] initializeService 成功: " + key
+                    + " conn=" + connId(connection));
+        } else {
+            event("检测", "重绑失败: " + key,
+                    "hook=initializeService conn=" + connId(connection)
+                            + " crashed=" + crashed + " iface=" + hasInterface);
+        }
+        handleServiceEvent(component,
+                ServiceRepairStateMachine.Event.initialized(success, hasInterface));
+    }
+
+    /** Settings.Secure 启用列表的唯一写入器：短临界区、按 delta 读写，绝不在 verify 阶段持锁。 */
+    private static SettingsWriter settingsWriter() {
+        if (sSettingsWriter == null) {
+            sSettingsWriter = new SettingsWriter(new SettingsWriter.Store() {
+                @Override
+                public String read() {
+                    String value = readEnabled();
+                    if (value == null) {
+                        if (sLastEnabledReadError != null) {
+                            throw new IllegalStateException("enabled read failed",
+                                    sLastEnabledReadError);
+                        }
+                        // 设置项不存在等价于空列表；读取异常才抛给 SettingsWriter 处理
+                        return "";
+                    }
+                    return value;
+                }
+
+                @Override
+                public boolean write(String value) {
+                    return writeEnabled(value);
+                }
+            });
+        }
+        return sSettingsWriter;
+    }
+
+    /** 为单个服务构造状态机快照；所有字段来自真实系统状态，不允许使用猜测值。 */
+    private static ServiceRepairStateMachine.Snapshot buildMachineSnapshot(
+            ComponentName component) {
+        ServiceRepairStateMachine.Snapshot snapshot = new ServiceRepairStateMachine.Snapshot();
+        long now = SystemClock.elapsedRealtime();
+        snapshot.now = now;
+        snapshot.moduleEnabled = isModuleEnabled();
+        snapshot.managed = isManaged(component)
+                && !shouldIgnoreSystemApp(component.getPackageName());
+        snapshot.userDisabled = sUserDisabledKeys.contains(component.flattenToString());
+
+        String enabled = readEnabled();
+        boolean enabledReadFailed = enabled == null;
+        // 启用列表读取失败时不能把服务误判成“被移除/被关闭”，先假定仍在列表，
+        // 同时用 bindCheckAvailable=false 禁止基于不完整状态发起修复。
+        snapshot.inEnabledList = enabledReadFailed || containsComponent(enabled, component);
+
+        Object bound = findBoundConnection(component);
+        snapshot.bound = bound != null;
+        snapshot.bindCheckAvailable = sBoundCheckAvailable && !enabledReadFailed;
+        snapshot.processRunning = isPackageProcessRunning(component.getPackageName());
+
+        long remainingBoot = getRemainingBootGraceMs(now, sFirstServiceConnectAt);
+        snapshot.bootGraceActive = remainingBoot > 0L;
+        snapshot.bootGraceRemainingMs = remainingBoot;
+        return snapshot;
+    }
+
+    /** 所有 hook/observer/命令/定时器都从这里进入状态机，保证状态只在 sHandler 线程变化。 */
+    private static void handleServiceEvent(ComponentName component,
+            ServiceRepairStateMachine.Event event) {
+        if (component == null || event == null) {
+            return;
+        }
+        String key = component.flattenToString();
+        ServiceRepairStateMachine machine = sMachines.get(key);
+        ServiceRepairStateMachine.Snapshot snapshot = buildMachineSnapshot(component);
+        if (machine == null) {
+            if (!snapshot.managed) {
+                return;
+            }
+            machine = new ServiceRepairStateMachine();
+            sMachines.put(key, machine);
+        }
+
+        ServiceRepairStateMachine.Transition transition;
+        try {
+            transition = machine.handle(event, snapshot);
+        } catch (Throwable t) {
+            event("失败", "状态机处理异常: " + key + " " + t);
+            return;
+        }
+        if (transition.isNoOp()) {
+            return;
+        }
+        log("fsm " + key + ": " + transition.getFrom() + " -> " + transition.getTo()
+                + " event=" + event.getType() + " effects=" + transition.getEffects().size());
+        executeMachineEffects(component, transition);
+    }
+
+    private static void executeMachineEffects(ComponentName component,
+            ServiceRepairStateMachine.Transition transition) {
+        String key = component.flattenToString();
+        for (ServiceRepairStateMachine.Effect effect : transition.getEffects()) {
+            switch (effect.getType()) {
+                case CANCEL_TIMERS:
+                    cancelMachineTimer(key);
+                    break;
+                case SCHEDULE_TIMER:
+                    scheduleMachineTimer(component, effect.getTimerType(),
+                            effect.getDelayMs(), effect.getGeneration());
+                    break;
+                case REQUEST_REPAIR:
+                    requestPackageRepair(component, effect.isAllowKill(),
+                            effect.getReason() == null ? "fsm" : effect.getReason());
+                    break;
+                case REQUEST_RESTORE:
+                    requestRestore(component, effect.getReason());
+                    break;
+                case CLEAR_CRASHED_MARKER:
+                    Object bound = findBoundConnection(component);
+                    if (bound != null) {
+                        clearCrashedMarker(bound, component);
+                    }
+                    break;
+                case NOTIFY_RECOVERED:
+                    notifyMachineRecovered(component, transition.getFrom());
+                    break;
+                case REMOVE_FROM_BATCH:
+                    removeFromPackageRepair(component);
+                    break;
+                default:
+                    break;
+            }
         }
     }
 
-    private static void scheduleCheck(ComponentName component, String key, long delayMs) {
-        if (sPendingCheck.containsKey(key)) {
+    private static void scheduleMachineTimer(ComponentName component,
+            ServiceRepairStateMachine.TimerType timerType, long delayMs, long generation) {
+        String key = component.flattenToString();
+        cancelMachineTimer(key);
+        if (sHandler == null) {
+            log("machine timer skipped (handler null): " + key);
             return;
         }
         Runnable runnable = () -> {
-            sPendingCheck.remove(key);
-            try {
-                runCheck(component, key);
-            } catch (Throwable t) {
-                event("失败", "检查异常: " + t);
-            }
+            sMachineTimers.remove(key);
+            handleServiceEvent(component,
+                    ServiceRepairStateMachine.Event.timer(timerType, generation));
         };
-        sPendingCheck.put(key, runnable);
-        sHandler.postDelayed(runnable, delayMs);
-        log("check scheduled in " + delayMs + "ms: " + key);
+        sMachineTimers.put(key, runnable);
+        sHandler.postDelayed(runnable, Math.max(0L, delayMs));
     }
 
-    private static void runCheck(ComponentName component, String key) {
-        long now = SystemClock.elapsedRealtime();
+    private static void cancelMachineTimer(String key) {
+        Runnable old = sMachineTimers.remove(key);
+        if (old != null && sHandler != null) {
+            sHandler.removeCallbacks(old);
+        }
+    }
 
-        long remainingBoot = getRemainingBootGraceMs(now, sFirstServiceConnectAt);
-        if (remainingBoot > 0L) {
-            eventSkip("check:boot-grace:" + key, "检测", "跳过检查（开机冷却期内）: " + key);
-            schedulePostBootCheck(remainingBoot + 1000L);
+    /** 扫描/补回后校验等辅助路径使用：延迟向状态机投递一次 SYNC，而不是旧的 scheduleCheck。 */
+    private static void scheduleMachineSync(ComponentName component, long delayMs,
+            String reason) {
+        if (component == null || sHandler == null) {
             return;
         }
+        String key = component.flattenToString();
+        Runnable old = sPendingMachineSync.remove(key);
+        if (old != null) {
+            sHandler.removeCallbacks(old);
+        }
+        Runnable runnable = () -> {
+            sPendingMachineSync.remove(key);
+            handleServiceEvent(component, ServiceRepairStateMachine.Event.sync());
+        };
+        sPendingMachineSync.put(key, runnable);
+        sHandler.postDelayed(runnable, Math.max(0L, delayMs));
+        log("machine sync scheduled in " + delayMs + "ms (" + reason + "): " + key);
+    }
 
-        Long suppress = sSuppressUntil.get(key);
-        if (suppress != null && now < suppress) {
-            // 若检查任务到达时仍在抑制期内，不能直接 return 丢弃，否则若服务未绑定将永远失去修复机会；
-            // 正确做法：自动延后至抑制期结束（剩余时间 + 500ms 缓冲）后重试检查。
-            long remaining = suppress - now;
-            eventSkip("check:suppress:" + key, "检测",
-                    "跳过当前检查（抑制期生效中，延后重试）: " + key + " remaining=" + remaining + "ms");
-            scheduleCheck(component, key, remaining + 500L);
-            return;
+    private static void notifyMachineRecovered(ComponentName component,
+            ServiceRepairStateMachine.State from) {
+        String key = component.flattenToString();
+        if (from == ServiceRepairStateMachine.State.VERIFYING
+                || from == ServiceRepairStateMachine.State.REPAIRING) {
+            event("修复", "恢复成功: " + key, "action=fsm_verify_ok");
+            showModuleToast("保活崩溃服务 " + getAppLabel(component));
+        } else {
+            event("保活", "服务已恢复就绪（无需额外重启）: " + key,
+                    "action=fsm_recovered from=" + from);
         }
-        if (!isManaged(component)) {
-            event("检测", "无需修复（已不在锁定列表）: " + key);
-            return;
-        }
+    }
+
+    /**
+     * RESTORING 状态只做 delta 补回，不加强杀：
+     * 复用现有 reconcileMissing 一次恢复所有缺失的受管服务，避免和启用列表观察器互相打架。
+     */
+    private static void requestRestore(ComponentName component, String reason) {
         if (!isModuleEnabled()) {
-            event("检测", "无需修复（模块已关闭）: " + key);
             return;
         }
-        if (!containsComponent(readEnabled(), component)) {
-            event("检测", "无需修复（服务已被关闭）: " + key);
+        String key = component.flattenToString();
+        if (!isManaged(component) || sUserDisabledKeys.contains(key)) {
             return;
         }
-        Object boundConnection = findBoundConnection(component);
-        if (boundConnection != null) {
-            clearCrashedMarker(boundConnection, component);
-            sSuppressUntil.remove(key);
-            sCheckRetries.remove(key);
-            event("保活", "服务已恢复绑定（无需额外重启）: " + key);
+        reconcileMissing("fsm_restore:" + (reason == null ? "" : reason));
+        String enabled = readEnabled();
+        if (enabled != null && containsComponent(enabled, component)) {
+            sRestoreRetryScheduled.remove(key);
+            handleServiceEvent(component, ServiceRepairStateMachine.Event.enabledListChanged());
+        } else if (sRestoreRetryScheduled.add(key) && sHandler != null) {
+            sHandler.postDelayed(() -> {
+                sRestoreRetryScheduled.remove(key);
+                handleServiceEvent(component, ServiceRepairStateMachine.Event.sync());
+            }, 3000L);
+        }
+    }
+
+    /** 单服务状态机只提出“需要修复”，包级协调器负责合并同包成员、一次关开/强杀。 */
+    private static void requestPackageRepair(ComponentName component, boolean allowKill,
+            String reason) {
+        if (component == null || !isModuleEnabled()) {
             return;
         }
-        if (!sBoundCheckAvailable) {
-            event("失败", "无法确认绑定状态，跳过修复: " + key);
+        String key = component.flattenToString();
+        if (!isManaged(component) || sUserDisabledKeys.contains(key)) {
+            log("skip repair request (not managed/user disabled): " + key);
+            return;
+        }
+        if (isDryRun()) {
+            event("修复", "演练模式：将修复 " + key + "（不实际执行）",
+                    "action=fsm_dry_run reason=" + reason);
             return;
         }
 
         String pkg = component.getPackageName();
-        if (isPackageProcessRunning(pkg)) {
-            int retries = sCheckRetries.containsKey(key) ? sCheckRetries.get(key) : 0;
-            if (retries < 2) {
-                sCheckRetries.put(key, retries + 1);
-                scheduleCheck(component, key, 2000L);
-                event("保活", "应用进程正在启动中，宽限等待服务连接 (" + (retries + 1) + "/2): " + key,
-                        getPackageProcessSummary(pkg));
-                return;
+        PackageRepairRequest request = sPackageRepairRequests.get(pkg);
+        if (request == null) {
+            request = new PackageRepairRequest(pkg, component, allowKill, reason,
+                    SystemClock.elapsedRealtime());
+            sPackageRepairRequests.put(pkg, request);
+            if (!sPackageRepairQueue.contains(pkg)) {
+                sPackageRepairQueue.add(pkg);
+            }
+        } else {
+            // 同包任一成员要求“不加强杀”时，整包事务都不加强杀
+            request.allowKill = request.allowKill && allowKill;
+        }
+        startNextPackageRepairIfIdle();
+    }
+
+    private static void startNextPackageRepairIfIdle() {
+        if (sRepairTransactionActive || sHandler == null) {
+            return;
+        }
+        while (!sPackageRepairQueue.isEmpty()) {
+            String pkg = sPackageRepairQueue.remove(0);
+            PackageRepairRequest request = sPackageRepairRequests.remove(pkg);
+            if (request == null) {
+                continue;
+            }
+            if (!isModuleEnabled()) {
+                log("package repair skipped (module disabled): " + pkg);
+                continue;
+            }
+            String managed = readConfig(KEY_SERVICES);
+            String enabled = readEnabled();
+            if (managed == null || enabled == null) {
+                event("失败", "包级修复读取配置失败: " + pkg,
+                        "action=fsm_repair_read_fail");
+                scheduleMachineSync(request.trigger, 3000L, "repair_read_failed");
+                continue;
+            }
+            ComponentKey trigger = ComponentKey.parse(request.trigger.flattenToString());
+            List<ComponentKey> batch = RepairPolicy.planPackageBatch(
+                    managed, enabled, pkg, trigger);
+            if (batch.isEmpty()) {
+                log("package repair batch empty, re-evaluate: " + pkg);
+                handleServiceEvent(request.trigger, ServiceRepairStateMachine.Event.sync());
+                continue;
+            }
+            startPackageRepair(request, batch);
+            return;
+        }
+    }
+
+    private static void startPackageRepair(PackageRepairRequest request,
+            List<ComponentKey> batch) {
+        sRepairTransactionActive = true;
+        sRepairTransactionPackage = request.pkg;
+        long generation = ++sRepairTransactionGeneration;
+        sActiveRepairBatch.clear();
+        for (ComponentKey key : batch) {
+            sActiveRepairBatch.add(key.flatten());
+        }
+
+        // 先让所有批成员进入 REPAIRING，这样我们自己写入的“移除”不会被误判成 OEM/用户关闭
+        for (String key : sActiveRepairBatch) {
+            ComponentName component = ComponentName.unflattenFromString(key);
+            if (component != null) {
+                handleServiceEvent(component,
+                        ServiceRepairStateMachine.Event.packageRepairStarted());
             }
         }
-        sCheckRetries.remove(key);
 
-        repair(component, key);
+        SettingsWriter.WriteResult removeResult = settingsWriter().applyDelta(
+                Collections.<ComponentKey>emptyList(), batch);
+        if (removeResult.isFailure()) {
+            event("失败", "包级修复关闭写入失败: " + request.pkg,
+                    "action=fsm_repair_disable_fail status=" + removeResult.getStatus());
+            failActivePackageRepair("disable_write_failed");
+            return;
+        }
+
+        boolean fixMode = sFixModeCache != null
+                ? "1".equals(sFixModeCache) : "1".equals(readConfig(KEY_FIX_MODE));
+        String disabled = sFixDisabledCache != null
+                ? sFixDisabledCache : readConfig(KEY_FIX_DISABLED);
+        String contextPkg = sContext != null ? sContext.getPackageName() : null;
+        Long lastKill = sLastPackageKillAt.get(request.pkg);
+        boolean allowKill = request.allowKill && RepairPolicy.shouldKillPackage(
+                request.pkg, contextPkg, fixMode, disabled,
+                request.trigger.flattenToString(), lastKill,
+                SystemClock.elapsedRealtime(), getFastFailCountForPackage(request.pkg));
+
+        if (allowKill) {
+            sLastPackageKillAt.put(request.pkg, SystemClock.elapsedRealtime());
+            String killMeta = killAppProcesses(request.pkg);
+            event("修复", "强杀应用进程后重启: " + request.pkg,
+                    "action=fsm_kill_package pkg=" + request.pkg + " " + killMeta);
+        }
+
+        event("修复", "包级关开修复: " + request.pkg,
+                "action=fsm_repair_start batch=" + sActiveRepairBatch
+                        + " allowKill=" + allowKill
+                        + " reason=" + request.reason
+                        + " " + getPowerStateSummary());
+        sHandler.postDelayed(() -> finishPackageRepairReAdd(generation, batch),
+                TOGGLE_OFF_MS);
+    }
+
+    private static void finishPackageRepairReAdd(long generation, List<ComponentKey> batch) {
+        if (generation != sRepairTransactionGeneration || !sRepairTransactionActive) {
+            log("stale package repair completion ignored: gen=" + generation);
+            return;
+        }
+        if (!isModuleEnabled()) {
+            event("失败", "包级修复中止：模块已停用: " + sRepairTransactionPackage);
+            failActivePackageRepair("module_disabled");
+            return;
+        }
+
+        List<ComponentKey> add = new ArrayList<>();
+        for (ComponentKey key : batch) {
+            ComponentName component = new ComponentName(key.getPackageName(),
+                    key.getClassName());
+            if (!isManaged(component)) {
+                continue;
+            }
+            if (sUserDisabledKeys.contains(key.flatten())) {
+                continue;
+            }
+            add.add(key);
+        }
+
+        SettingsWriter.WriteResult addResult = settingsWriter().applyDelta(
+                add, Collections.<ComponentKey>emptyList());
+        if (addResult.isFailure()) {
+            event("失败", "包级修复重新开启失败: " + sRepairTransactionPackage,
+                    "action=fsm_repair_enable_fail status=" + addResult.getStatus());
+            failActivePackageRepair("enable_write_failed");
+            return;
+        }
+
+        if (!add.isEmpty()) {
+            ensureAccessibilitySwitchOn();
+        }
+        event("修复", "包级修复已重新开启: " + sRepairTransactionPackage,
+                "action=fsm_repair_applied add=" + add.size()
+                        + " batch=" + batch.size());
+        for (ComponentKey key : batch) {
+            ComponentName component = new ComponentName(key.getPackageName(),
+                    key.getClassName());
+            handleServiceEvent(component,
+                    ServiceRepairStateMachine.Event.packageRepairApplied());
+        }
+        finishActivePackageRepair();
+    }
+
+    private static void failActivePackageRepair(String reason) {
+        List<String> batch = new ArrayList<>(sActiveRepairBatch);
+        String pkg = sRepairTransactionPackage;
+        for (String key : batch) {
+            ComponentName component = ComponentName.unflattenFromString(key);
+            if (component != null) {
+                handleServiceEvent(component,
+                        ServiceRepairStateMachine.Event.packageRepairFailed());
+            }
+        }
+        event("失败", "包级修复失败: " + pkg + " (" + reason + ")",
+                "action=fsm_repair_failed reason=" + reason);
+        finishActivePackageRepair();
+    }
+
+    private static void finishActivePackageRepair() {
+        sRepairTransactionActive = false;
+        sRepairTransactionPackage = null;
+        sActiveRepairBatch.clear();
+        startNextPackageRepairIfIdle();
+    }
+
+    private static void removeFromPackageRepair(ComponentName component) {
+        if (component == null) {
+            return;
+        }
+        String key = component.flattenToString();
+        String pkg = component.getPackageName();
+        PackageRepairRequest request = sPackageRepairRequests.get(pkg);
+        if (request != null && request.trigger.flattenToString().equals(key)) {
+            sPackageRepairRequests.remove(pkg);
+            sPackageRepairQueue.remove(pkg);
+        }
+        // 活动批次不在这里改：重新开启时会按 managed/userDisabled 过滤
+    }
+
+    private static boolean isRepairingKey(String key) {
+        ServiceRepairStateMachine machine = sMachines.get(key);
+        if (machine == null) {
+            return false;
+        }
+        ServiceRepairStateMachine.State state = machine.getState();
+        return state == ServiceRepairStateMachine.State.REPAIRING
+                || state == ServiceRepairStateMachine.State.QUEUED;
+    }
+
+    private static int getFastFailCountForPackage(String pkg) {
+        int max = 0;
+        for (Map.Entry<String, ServiceRepairStateMachine> entry : sMachines.entrySet()) {
+            ComponentName component = ComponentName.unflattenFromString(entry.getKey());
+            if (component != null && pkg.equals(component.getPackageName())) {
+                max = Math.max(max, entry.getValue().getFastFailCount());
+            }
+        }
+        return max;
+    }
+
+    /** 重新从锁定列表同步所有状态机；配置/模块启停/热重载后调用。 */
+    private static void syncMachines(String reason) {
+        if (sContext == null || sHandler == null) {
+            return;
+        }
+        String managed = readConfig(KEY_SERVICES);
+        if (managed == null) {
+            log("syncMachines skipped (managed unreadable): " + reason);
+            return;
+        }
+        Set<String> managedKeys = new LinkedHashSet<>();
+        if (!managed.isEmpty()) {
+            for (String raw : managed.split(":")) {
+                ComponentKey key = ComponentKey.parse(raw);
+                if (key == null) {
+                    continue;
+                }
+                ComponentName component = new ComponentName(key.getPackageName(),
+                        key.getClassName());
+                managedKeys.add(key.flatten());
+                handleServiceEvent(component, ServiceRepairStateMachine.Event.sync());
+            }
+        }
+
+        List<Map.Entry<String, ServiceRepairStateMachine>> entries =
+                new ArrayList<>(sMachines.entrySet());
+        for (Map.Entry<String, ServiceRepairStateMachine> entry : entries) {
+            if (managedKeys.contains(entry.getKey())) {
+                continue;
+            }
+            ComponentName component = ComponentName.unflattenFromString(entry.getKey());
+            if (component != null) {
+                handleServiceEvent(component,
+                        ServiceRepairStateMachine.Event.managedChanged());
+            }
+            cancelMachineTimer(entry.getKey());
+            Runnable pending = sPendingMachineSync.remove(entry.getKey());
+            if (pending != null && sHandler != null) {
+                sHandler.removeCallbacks(pending);
+            }
+            sUserDisabledKeys.remove(entry.getKey());
+            sRestoreRetryScheduled.remove(entry.getKey());
+            sMachines.remove(entry.getKey());
+        }
+        log("syncMachines (" + reason + "): managed=" + managedKeys.size());
+    }
+
+    /** 把启用列表变化投递给所有已存在的状态机；状态机会按 BOUND/REPAIRING/RESTORING 自行判断。 */
+    private static void notifyMachinesEnabledListChanged() {
+        for (String key : new ArrayList<>(sMachines.keySet())) {
+            ComponentName component = ComponentName.unflattenFromString(key);
+            if (component != null) {
+                handleServiceEvent(component,
+                        ServiceRepairStateMachine.Event.enabledListChanged());
+            }
+        }
     }
 
     static boolean isIgnoreSystemEnabled() {
@@ -2656,230 +3037,6 @@ public class AutoRepairEntry extends XposedModule {
             String disabledList, String componentKey, Long lastPkgKillAt, long now) {
         return RepairPolicy.shouldKillPackage(
                 pkg, contextPkg, fixMode, disabledList, componentKey, lastPkgKillAt, now);
-    }
-
-    private static void suppressPackageServices(String pkg, long suppressUntilMs) {
-        if (pkg == null || pkg.isEmpty()) {
-            return;
-        }
-        String managed = readConfig(KEY_SERVICES);
-        if (managed == null || managed.isEmpty()) {
-            return;
-        }
-        for (String raw : managed.split(":")) {
-            ComponentName cn = ComponentName.unflattenFromString(raw);
-            if (cn != null && pkg.equals(cn.getPackageName())) {
-                sSuppressUntil.put(cn.flattenToString(), suppressUntilMs);
-            }
-        }
-    }
-
-    private static void repair(ComponentName component, String key) {
-        long now = SystemClock.elapsedRealtime();
-        if (isRepairInProgress(now)) {
-            scheduleCheck(component, key, 1500L);
-            return;
-        }
-        if (isDryRun()) {
-            event("修复", "演练模式：将关开 " + key + "（不实际执行）");
-            return;
-        }
-
-        String original = readEnabled();
-        if (!containsComponent(original, component)) {
-            event("检测", "无需修复（服务已被关闭）: " + key);
-            return;
-        }
-        String removed = removeComponent(original, component);
-
-        Object staleConn = sConnections.get(key);
-        if (staleConn != null) {
-            unbindConnection(staleConn, "repair_clean_stale");
-        }
-
-        sSuppressUntil.put(key, now + SUPPRESS_MS);
-        sSelfRemovedUntil.put(key, now + REPAIR_REMOVE_WINDOW_MS);
-        sRepairStartedAt = now;
-        sRepairInProgress = true;
-        sRepairKey = key;
-        sCheckRetries.remove(key);
-
-        event("修复", "关开修复，先关闭: " + key,
-                "action=repair_disable " + getPowerStateSummary());
-        if (!writeEnabled(removed)) {
-            event("失败", "关闭写入失败: " + key, "action=repair_disable_fail " + getPowerStateSummary());
-            finishRepair(key);
-            return;
-        }
-
-        boolean fixMode = sFixModeCache != null
-                ? "1".equals(sFixModeCache)
-                : "1".equals(readConfig(KEY_FIX_MODE));
-        String disabled = sFixDisabledCache != null
-                ? sFixDisabledCache
-                : readConfig(KEY_FIX_DISABLED);
-        String pkg = component.getPackageName();
-        String contextPkg = sContext != null ? sContext.getPackageName() : null;
-        Long lastPkgKillAt = sLastPackageKillAt.get(pkg);
-        boolean allowKill = shouldKillPackage(
-                pkg, contextPkg, fixMode, disabled, key, lastPkgKillAt, now);
-
-        if (allowKill) {
-            sLastPackageKillAt.put(pkg, now);
-            suppressPackageServices(pkg, now + SUPPRESS_MS);
-            String killMeta = killAppProcesses(pkg);
-            event("修复", "强杀应用进程后重启: " + pkg,
-                    "action=kill_package pkg=" + pkg + " " + killMeta);
-        } else if (fixMode && lastPkgKillAt != null && now - lastPkgKillAt < PACKAGE_KILL_COOLDOWN_MS) {
-            log("skip duplicate kill for package within cooldown: " + pkg);
-        }
-
-        sHandler.postDelayed(() -> {
-            try {
-                String current = readEnabled();
-                if (containsComponent(current, component)) {
-                    log("re-add skipped (already present): " + key);
-                } else {
-                    String readd = addComponent(current == null ? "" : current, component);
-                    if (!writeEnabled(readd)) {
-                        event("失败", "重新开启写入失败: " + key,
-                                "action=repair_enable_fail " + getPowerStateSummary());
-                        finishRepair(key);
-                        return;
-                    }
-                    ensureAccessibilitySwitchOn();
-                    event("修复", "已重新开启: " + key,
-                            "action=repair_enable toggleOffMs="
-                                    + Math.max(0L, SystemClock.elapsedRealtime() - now)
-                                    + " " + getPowerStateSummary());
-                }
-                scheduleVerify(component, key);
-            } catch (Throwable t) {
-                event("失败", "重新开启异常: " + t);
-                finishRepair(key);
-            }
-        }, TOGGLE_OFF_MS);
-    }
-
-    private static void scheduleVerify(ComponentName component, String key) {
-        Runnable old = sVerifyRun.remove(key);
-        if (old != null) {
-            sHandler.removeCallbacks(old);
-        }
-        Runnable runnable = () -> {
-            sVerifyRun.remove(key);
-            try {
-                long verifyNow = SystemClock.elapsedRealtime();
-                long costMs = sRepairStartedAt > 0L ? Math.max(0L, verifyNow - sRepairStartedAt) : -1L;
-                Object boundConnection = findBoundConnection(component);
-                if (boundConnection != null) {
-                    clearCrashedMarker(boundConnection, component);
-                    sSuppressUntil.put(key, verifyNow + SETTLE_MS);
-                    event("修复", "恢复成功: " + key,
-                            "action=verify_ok conn=" + connId(boundConnection) + " cost=" + costMs + "ms"
-                                    + " " + getPowerStateSummary());
-                    showModuleToast("保活崩溃服务 " + getAppLabel(component));
-                    scheduleStabilityCheck(component, key);
-                } else if (!sBoundCheckAvailable) {
-                    event("失败", "无法确认绑定状态，结束修复: " + key,
-                            "action=verify_unknown cost=" + costMs + "ms");
-                } else {
-                    // 修复校验失败且当前无绑定连接，立即清除抑制期，避免残留无意义的 10 秒抑制期阻塞后续检查
-                    sSuppressUntil.remove(key);
-                    // 校验失败不能就此收尾，否则服务会一直悬空到下一次外部扫描；
-                    // 交给 runCheck 重新检查（其中包含“应用进程正在启动”的宽限重试）
-                    event("失败", "恢复失败，排期复检: " + key,
-                            "action=verify_fail_retry cost=" + costMs + "ms"
-                                    + " lastConn=" + connId(sConnections.get(key))
-                                    + " " + getPackageProcessSummary(component.getPackageName())
-                                    + " " + getPowerStateSummary());
-                    scheduleCheck(component, key, SETTLE_MS);
-                }
-            } catch (Throwable t) {
-                event("失败", "恢复校验异常: " + t);
-            } finally {
-                finishRepair(key);
-            }
-        };
-        sVerifyRun.put(key, runnable);
-        sHandler.postDelayed(runnable, VERIFY_MS);
-    }
-
-    /**
-     * 修复成功后的稳定性复查：
-     * “重新绑定成功”只代表此刻存在连接，OEM（如 ColorOS o-kill(4008)）可能在数百毫秒到数秒内再次查杀；
-     * 同时 binderDied 存在被去重、丢失或被抑制窗口拦截的可能，不能只依赖事件回调。
-     * 因此在修复成功后延迟 STABILITY_VERIFY_MS 再做一次绑定确认，仍未绑定则重新排期修复。
-     */
-    private static void scheduleStabilityCheck(ComponentName component, String key) {
-        if (sHandler == null) {
-            return;
-        }
-        Runnable old = sStabilityRun.remove(key);
-        if (old != null) {
-            sHandler.removeCallbacks(old);
-        }
-        Runnable runnable = () -> {
-            sStabilityRun.remove(key);
-            try {
-                runStabilityCheck(component, key);
-            } catch (Throwable t) {
-                event("失败", "稳定性复查异常: " + t);
-            }
-        };
-        sStabilityRun.put(key, runnable);
-        sHandler.postDelayed(runnable, STABILITY_VERIFY_MS);
-    }
-
-    private static void runStabilityCheck(ComponentName component, String key) {
-        if (sContext == null) {
-            return;
-        }
-        long now = SystemClock.elapsedRealtime();
-        // 用户在修复后的豁免窗口内手动关闭服务时不得复活
-        Long manual = sManualHiddenUntil.get(key);
-        if (manual != null && now < manual) {
-            return;
-        }
-        String enabled = readEnabled();
-        boolean inEnabled = enabled != null && containsComponent(enabled, component);
-        Object boundConnection = findBoundConnection(component);
-        boolean bound = boundConnection != null;
-        if (bound) {
-            clearCrashedMarker(boundConnection, component);
-            log("stability verified: " + key);
-            return;
-        }
-        // 模块停用、服务已移出锁定列表、用户主动关闭或绑定状态不可读时必须克制，
-        // 只对“仍在启用列表、仍在锁定列表且确认未绑定”的服务重新排期修复
-        if (!RepairPolicy.shouldScheduleStabilityRepair(
-                isModuleEnabled(), isManaged(component), inEnabled,
-                sBoundCheckAvailable, bound)) {
-            return;
-        }
-        event("保活", "稳定性复查仍未绑定，重新排期修复: " + key,
-                "action=stability_repair " + getPackageProcessSummary(component.getPackageName())
-                        + " " + getPowerStateSummary());
-        scheduleCheck(component, key, SETTLE_MS);
-    }
-
-    private static boolean isRepairInProgress(long now) {
-        if (sRepairInProgress && now - sRepairStartedAt > REPAIR_STUCK_MS) {
-            sRepairInProgress = false;
-            sRepairKey = null;
-            event("失败", "修复状态超时，已重置");
-        }
-        return sRepairInProgress;
-    }
-
-    private static void finishRepair(String key) {
-        if (key != null) {
-            sCheckRetries.remove(key);
-        }
-        if (key == null || key.equals(sRepairKey)) {
-            sRepairInProgress = false;
-            sRepairKey = null;
-        }
     }
 
     private static boolean isManaged(ComponentName target) {
@@ -3630,14 +3787,5 @@ public class AutoRepairEntry extends XposedModule {
 
     static int getHotReloadCountForTesting() {
         return sHotReloadCount;
-    }
-
-    static void putCheckRetryForTesting(String key, int count) {
-        sCheckRetries.put(key, count);
-    }
-
-    static int getCheckRetryForTesting(String key) {
-        Integer val = sCheckRetries.get(key);
-        return val != null ? val : 0;
     }
 }

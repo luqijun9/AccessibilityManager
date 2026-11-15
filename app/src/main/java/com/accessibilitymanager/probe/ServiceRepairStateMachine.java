@@ -460,7 +460,7 @@ final class ServiceRepairStateMachine {
             case TIMER:
                 return handleTimer(event, snapshot, from);
             case PACKAGE_REPAIR_STARTED:
-                return handlePackageStarted(from);
+                return handlePackageStarted(snapshot, from);
             case PACKAGE_REPAIR_APPLIED:
                 return handlePackageApplied(from);
             case PACKAGE_REPAIR_FAILED:
@@ -623,8 +623,10 @@ final class ServiceRepairStateMachine {
                 Effect.timer(TimerType.SETTLE, RepairPolicy.FSM_SETTLE_MS, "user_enable"));
     }
 
-    private Transition handlePackageStarted(State from) {
-        if (from == State.UNMANAGED || from == State.DISABLED || from == State.SUSPENDED) {
+    private Transition handlePackageStarted(Snapshot snapshot, State from) {
+        // 全局门控已经保证 managed/moduleEnabled/userDisabled 合法；
+        // 这里仍以快照为准，避免批次里混入已被关闭/移出锁定列表的成员。
+        if (!snapshot.managed || snapshot.userDisabled || !snapshot.moduleEnabled) {
             return stay(from, Effect.removeFromBatch());
         }
         repairAttempted = true;

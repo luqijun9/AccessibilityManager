@@ -429,16 +429,6 @@ public class AutoRepairEntryTest {
     }
 
     @Test
-    public void checkRetries_trackedAndClearedOnReset() {
-        String key = "com.arlosoft.macrodroid/.action.services.UIInteractionAccessibilityService";
-        AutoRepairEntry.putCheckRetryForTesting(key, 2);
-        assertEquals(2, AutoRepairEntry.getCheckRetryForTesting(key));
-
-        AutoRepairEntry.resetForTesting();
-        assertEquals(0, AutoRepairEntry.getCheckRetryForTesting(key));
-    }
-
-    @Test
     public void isPackageProcessRunning_withNullContext_returnsFalse() {
         assertFalse(AutoRepairEntry.isPackageProcessRunning("com.arlosoft.macrodroid"));
         assertFalse(AutoRepairEntry.isPackageProcessRunning(null));
