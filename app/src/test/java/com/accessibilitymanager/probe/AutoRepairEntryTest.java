@@ -444,4 +444,78 @@ public class AutoRepairEntryTest {
         assertFalse(AutoRepairEntry.isPackageProcessRunning(null));
         assertFalse(AutoRepairEntry.isPackageProcessRunning(""));
     }
+
+    @Test
+    public void nextFastFailCount_usesConnectionLifetime() {
+        // 寿命未知（热重载/加载前已绑定）按健康处理，避免一上来就退避
+        assertEquals(0, RepairPolicy.nextFastFailCount(3, -1L));
+        // 健康连接的新故障清零快速失败计数
+        assertEquals(0, RepairPolicy.nextFastFailCount(3,
+                RepairPolicy.HEALTHY_CONNECTION_MS));
+        // 5s~30s 之间保持原计数，不额外惩罚
+        assertEquals(3, RepairPolicy.nextFastFailCount(3, 10_000L));
+        // 短命连接累计计数，并封顶
+        assertEquals(4, RepairPolicy.nextFastFailCount(3, 1_000L));
+        assertEquals(RepairPolicy.MAX_FAST_FAIL_COUNT,
+                RepairPolicy.nextFastFailCount(RepairPolicy.MAX_FAST_FAIL_COUNT, 1_000L));
+        assertEquals(0, RepairPolicy.nextFastFailCount(-5, 40_000L));
+    }
+
+    @Test
+    public void repairBackoffMs_escalatesAndCaps() {
+        assertEquals(0L, RepairPolicy.repairBackoffMs(0));
+        assertEquals(0L, RepairPolicy.repairBackoffMs(1));
+        assertEquals(3_000L, RepairPolicy.repairBackoffMs(2));
+        assertEquals(8_000L, RepairPolicy.repairBackoffMs(3));
+        assertEquals(15_000L, RepairPolicy.repairBackoffMs(4));
+        assertEquals(30_000L, RepairPolicy.repairBackoffMs(5));
+        assertEquals(30_000L, RepairPolicy.repairBackoffMs(99));
+        assertEquals(0L, RepairPolicy.repairBackoffMs(-1));
+
+        assertTrue(RepairPolicy.shouldResetFastFail(RepairPolicy.HEALTHY_CONNECTION_MS));
+        assertFalse(RepairPolicy.shouldResetFastFail(1_000L));
+    }
+
+    @Test
+    public void shouldUseKillForFastFail_disablesKillAfterRepeatedShortFailures() {
+        assertTrue(RepairPolicy.shouldUseKillForFastFail(0));
+        assertTrue(RepairPolicy.shouldUseKillForFastFail(1));
+        assertFalse(RepairPolicy.shouldUseKillForFastFail(2));
+
+        String pkg = "com.arlosoft.macrodroid";
+        String svc = pkg
+                + "/com.arlosoft.macrodroid.action.services.UIInteractionAccessibilityService";
+        // 即使 fixMode 开启且不在冷却期，快速失败 >= 2 也必须禁止强杀
+        assertFalse(RepairPolicy.shouldKillPackage(
+                pkg, "android", true, "", svc, null, 100_000L, 2));
+        assertTrue(RepairPolicy.shouldKillPackage(
+                pkg, "android", true, "", svc, null, 100_000L, 1));
+    }
+
+    @Test
+    public void planPackageBatch_onlyIncludesManagedAndEnabledSamePackage() {
+        String managed = "com.macro/.ServiceA:com.macro/.ServiceB:com.other/.ServiceC";
+        String enabled = "com.macro/.ServiceA:com.other/.ServiceC";
+        ComponentKey triggerB = ComponentKey.parse("com.macro/.ServiceB");
+
+        // B 已不在启用列表（用户关闭/OEM 移除），批量修复只能包含 A，不能把 B 复活
+        List<ComponentKey> onlyA = RepairPolicy.planPackageBatch(
+                managed, enabled, "com.macro", triggerB);
+        assertEquals(1, onlyA.size());
+        assertEquals(ComponentKey.parse("com.macro/.ServiceA"), onlyA.get(0));
+
+        // A/B 都在启用列表时，同包两个服务一起进入批次
+        List<ComponentKey> both = RepairPolicy.planPackageBatch(
+                managed,
+                "com.macro/.ServiceA:com.macro/.ServiceB:com.other/.ServiceC",
+                "com.macro", triggerB);
+        assertEquals(2, both.size());
+        assertTrue(both.contains(ComponentKey.parse("com.macro/.ServiceA")));
+        assertTrue(both.contains(triggerB));
+
+        // 脏数据/空包名不能导致异常或误加成员
+        assertTrue(RepairPolicy.planPackageBatch("bad-token", "bad-token", "com.macro", null)
+                .isEmpty());
+        assertTrue(RepairPolicy.planPackageBatch(managed, enabled, null, triggerB).isEmpty());
+    }
 }
