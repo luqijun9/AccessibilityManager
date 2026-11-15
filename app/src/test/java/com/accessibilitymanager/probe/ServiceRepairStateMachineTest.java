@@ -446,4 +446,332 @@ public class ServiceRepairStateMachineTest {
         assertEquals(ServiceRepairStateMachine.State.DISABLED, t.getTo());
         assertTrue(t.hasEffect(ServiceRepairStateMachine.ActionType.REMOVE_FROM_BATCH));
     }
+
+    @Test
+    public void binderDied_duringVerifying_entersSuspectAndCountsFastFail() {
+        // 对应旧实现的“抑制期二次查杀”：修复写入完成后、绑定校验前再次断开，
+        // 不能被当成旧连接回调丢弃，必须进入 SUSPECT 并累计快速失败。
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        driveToNeedsRepair(machine, 1_000L);
+        machine.handle(ServiceRepairStateMachine.Event.packageRepairStarted(),
+                snapshot(5_000L));
+        machine.handle(ServiceRepairStateMachine.Event.packageRepairApplied(),
+                snapshot(5_500L));
+        assertEquals(ServiceRepairStateMachine.State.VERIFYING, machine.getState());
+
+        ServiceRepairStateMachine.Transition t = machine.handle(
+                ServiceRepairStateMachine.Event.binderDied(false, false),
+                snapshot(5_900L));
+
+        assertEquals(ServiceRepairStateMachine.State.SUSPECT, t.getTo());
+        assertEquals(2, machine.getFastFailCount());
+        assertNotNull(t.findTimer(ServiceRepairStateMachine.TimerType.SETTLE));
+    }
+
+    @Test
+    public void binderDied_duringRepairingOrExpected_doesNotScheduleAnotherRepair() {
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        driveToNeedsRepair(machine, 1_000L);
+        machine.handle(ServiceRepairStateMachine.Event.packageRepairStarted(),
+                snapshot(5_000L));
+
+        ServiceRepairStateMachine.Transition duringRepair = machine.handle(
+                ServiceRepairStateMachine.Event.binderDied(false, false),
+                snapshot(5_100L));
+        assertTrue(duringRepair.isNoOp());
+        assertEquals(ServiceRepairStateMachine.State.REPAIRING, machine.getState());
+
+        ServiceRepairStateMachine bound = new ServiceRepairStateMachine();
+        initBound(bound, 1_000L);
+        ServiceRepairStateMachine.Transition expected = bound.handle(
+                ServiceRepairStateMachine.Event.binderDied(false, true),
+                snapshot(2_000L));
+        assertTrue("旧连接/事务内预期断开不能被当作真实崩溃",
+                expected.isNoOp());
+        assertEquals(ServiceRepairStateMachine.State.BOUND, bound.getState());
+    }
+
+    @Test
+    public void stabilityTimer_unbound_requestsAnotherRepair() {
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        initBound(machine, 1_000L);
+        ServiceRepairStateMachine.Transition died = machine.handle(
+                ServiceRepairStateMachine.Event.binderDied(false, false),
+                snapshot(2_000L));
+
+        ServiceRepairStateMachine.Snapshot recovered = snapshot(2_100L);
+        recovered.bound = true;
+        ServiceRepairStateMachine.Transition init = machine.handle(
+                ServiceRepairStateMachine.Event.initialized(true, true), recovered);
+        assertEquals(ServiceRepairStateMachine.State.BOUND, init.getTo());
+        assertNotNull(init.findTimer(ServiceRepairStateMachine.TimerType.STABILITY));
+
+        ServiceRepairStateMachine.Snapshot unbound = snapshot(8_000L);
+        unbound.bound = false;
+        unbound.processRunning = false;
+        ServiceRepairStateMachine.Transition t = machine.handle(
+                ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.STABILITY,
+                        init.getGeneration()),
+                unbound);
+
+        assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR, t.getTo());
+        assertNotNull(t.findEffect(ServiceRepairStateMachine.ActionType.REQUEST_REPAIR));
+    }
+
+    @Test
+    public void stabilityTimer_bound_clearsCrashedMarker() {
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        initBound(machine, 1_000L);
+        ServiceRepairStateMachine.Snapshot bound = snapshot(5_000L);
+        bound.bound = true;
+
+        ServiceRepairStateMachine.Transition t = machine.handle(
+                ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.STABILITY,
+                        machine.getGeneration()),
+                bound);
+
+        assertEquals(ServiceRepairStateMachine.State.BOUND, t.getTo());
+        assertTrue(t.hasEffect(ServiceRepairStateMachine.ActionType.CLEAR_CRASHED_MARKER));
+    }
+
+    @Test
+    public void initSuccessFromRepairing_recoversBeforeBatchVerify() {
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        driveToNeedsRepair(machine, 1_000L);
+        machine.handle(ServiceRepairStateMachine.Event.packageRepairStarted(),
+                snapshot(5_000L));
+
+        ServiceRepairStateMachine.Snapshot bound = snapshot(5_300L);
+        bound.bound = true;
+        ServiceRepairStateMachine.Transition t = machine.handle(
+                ServiceRepairStateMachine.Event.initialized(true, true), bound);
+
+        assertEquals(ServiceRepairStateMachine.State.BOUND, t.getTo());
+        assertTrue(t.hasEffect(ServiceRepairStateMachine.ActionType.NOTIFY_RECOVERED));
+        assertNotNull(t.findTimer(ServiceRepairStateMachine.TimerType.STABILITY));
+    }
+
+    @Test
+    public void packageRepairStartedFromBound_marksBoundMemberRepairing() {
+        // 同包多服务：A 崩溃触发整包修复时，原本健康的 B 也会被关开，必须进入 REPAIRING
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        initBound(machine, 1_000L);
+
+        ServiceRepairStateMachine.Transition t = machine.handle(
+                ServiceRepairStateMachine.Event.packageRepairStarted(),
+                snapshot(2_000L));
+
+        assertEquals(ServiceRepairStateMachine.State.REPAIRING, t.getTo());
+        assertTrue(machine.isRepairAttempted());
+    }
+
+    @Test
+    public void managedChangedToFalse_movesToUnmanagedAndCancelsTimers() {
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        initBound(machine, 1_000L);
+        ServiceRepairStateMachine.Snapshot unmanaged = snapshot(2_000L);
+        unmanaged.managed = false;
+
+        ServiceRepairStateMachine.Transition t = machine.handle(
+                ServiceRepairStateMachine.Event.managedChanged(), unmanaged);
+
+        assertEquals(ServiceRepairStateMachine.State.UNMANAGED, t.getTo());
+        assertTrue(t.hasEffect(ServiceRepairStateMachine.ActionType.CANCEL_TIMERS));
+    }
+
+    @Test
+    public void moduleEnabledFromSuspended_resumesEvaluation() {
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        initBound(machine, 1_000L);
+        ServiceRepairStateMachine.Snapshot disabled = snapshot(2_000L);
+        disabled.moduleEnabled = false;
+        machine.handle(ServiceRepairStateMachine.Event.moduleDisabled(), disabled);
+        assertEquals(ServiceRepairStateMachine.State.SUSPENDED, machine.getState());
+
+        ServiceRepairStateMachine.Snapshot enabled = snapshot(3_000L);
+        enabled.moduleEnabled = true;
+        enabled.bound = false;
+        ServiceRepairStateMachine.Transition t = machine.handle(
+                ServiceRepairStateMachine.Event.moduleEnabled(), enabled);
+
+        assertEquals(ServiceRepairStateMachine.State.SUSPECT, t.getTo());
+        assertNotNull(t.findTimer(ServiceRepairStateMachine.TimerType.SETTLE));
+    }
+
+    @Test
+    public void userEnableWhenAlreadyBound_recoversWithoutRepair() {
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        initBound(machine, 1_000L);
+        ServiceRepairStateMachine.Snapshot disabled = snapshot(2_000L);
+        disabled.userDisabled = true;
+        machine.handle(ServiceRepairStateMachine.Event.userDisable(), disabled);
+
+        ServiceRepairStateMachine.Snapshot enabled = snapshot(3_000L);
+        enabled.userDisabled = false;
+        enabled.bound = true;
+        ServiceRepairStateMachine.Transition t = machine.handle(
+                ServiceRepairStateMachine.Event.userEnable(), enabled);
+
+        assertEquals(ServiceRepairStateMachine.State.BOUND, t.getTo());
+        assertTrue(t.hasEffect(ServiceRepairStateMachine.ActionType.CLEAR_CRASHED_MARKER));
+        assertFalse(t.hasEffect(ServiceRepairStateMachine.ActionType.REQUEST_REPAIR));
+    }
+
+    @Test
+    public void syncFromDisabled_userReEnabled_entersSuspectNotRepairImmediately() {
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        initBound(machine, 1_000L);
+        ServiceRepairStateMachine.Snapshot disabled = snapshot(2_000L);
+        disabled.userDisabled = true;
+        machine.handle(ServiceRepairStateMachine.Event.userDisable(), disabled);
+
+        ServiceRepairStateMachine.Snapshot enabled = snapshot(3_000L);
+        enabled.userDisabled = false;
+        enabled.inEnabledList = true;
+        enabled.bound = false;
+        ServiceRepairStateMachine.Transition t = machine.handle(
+                ServiceRepairStateMachine.Event.sync(), enabled);
+
+        assertEquals(ServiceRepairStateMachine.State.SUSPECT, t.getTo());
+        assertNotNull(t.findTimer(ServiceRepairStateMachine.TimerType.SETTLE));
+        assertFalse(t.hasEffect(ServiceRepairStateMachine.ActionType.REQUEST_REPAIR));
+    }
+
+    @Test
+    public void replay_secondaryCrashWithinStabilityWindow_isNotLost() {
+        // 复现真机事件序列：修复成功 1.7s 后又被 OEM 二次击杀（旧日志事件 2312），
+        // 状态机必须从 BOUND 重新进入 SUSPECT，最终因快速失败进入 BACKOFF，而不是丢事件。
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        initBound(machine, 1_000L);
+
+        ServiceRepairStateMachine.Transition firstDeath = machine.handle(
+                ServiceRepairStateMachine.Event.binderDied(false, false),
+                snapshot(2_000L));
+        assertEquals(ServiceRepairStateMachine.State.SUSPECT, firstDeath.getTo());
+
+        ServiceRepairStateMachine.Snapshot recovered = snapshot(2_100L);
+        recovered.bound = true;
+        ServiceRepairStateMachine.Transition recoveredT = machine.handle(
+                ServiceRepairStateMachine.Event.initialized(true, true), recovered);
+        assertEquals(ServiceRepairStateMachine.State.BOUND, recoveredT.getTo());
+        assertNotNull(recoveredT.findTimer(ServiceRepairStateMachine.TimerType.STABILITY));
+
+        ServiceRepairStateMachine.Transition secondDeath = machine.handle(
+                ServiceRepairStateMachine.Event.binderDied(false, false),
+                snapshot(2_200L));
+        assertEquals(ServiceRepairStateMachine.State.SUSPECT, secondDeath.getTo());
+        assertEquals(2, machine.getFastFailCount());
+
+        ServiceRepairStateMachine.Snapshot settle = snapshot(5_200L);
+        settle.bound = false;
+        settle.processRunning = false;
+        ServiceRepairStateMachine.Transition backoff = machine.handle(
+                ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.SETTLE,
+                        secondDeath.getGeneration()),
+                settle);
+        assertEquals(ServiceRepairStateMachine.State.BACKOFF, backoff.getTo());
+        assertEquals(RepairPolicy.repairBackoffMs(2),
+                backoff.findTimer(ServiceRepairStateMachine.TimerType.BACKOFF).getDelayMs());
+
+        ServiceRepairStateMachine.Transition retry = machine.handle(
+                ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.BACKOFF,
+                        backoff.getGeneration()),
+                settle);
+        assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR, retry.getTo());
+        assertFalse(retry.findEffect(ServiceRepairStateMachine.ActionType.REQUEST_REPAIR)
+                .isAllowKill());
+    }
+
+    @Test
+    public void replay_samePackageTwoServices_batchVerifiesEachIndependently() {
+        // 同包双服务：A、B 同时崩溃，协调器一次关开后分别 verify；
+        // A 重新绑定 → BOUND，B 仍未绑定 → NEEDS_REPAIR（而不是被 A 的恢复掩盖）。
+        ServiceRepairStateMachine a = new ServiceRepairStateMachine();
+        ServiceRepairStateMachine b = new ServiceRepairStateMachine();
+        initBound(a, 1_000L);
+        initBound(b, 1_000L);
+
+        ServiceRepairStateMachine.Transition aDeath = a.handle(
+                ServiceRepairStateMachine.Event.binderDied(false, false),
+                snapshot(2_000L));
+        ServiceRepairStateMachine.Transition bDeath = b.handle(
+                ServiceRepairStateMachine.Event.binderDied(false, false),
+                snapshot(2_000L));
+
+        ServiceRepairStateMachine.Snapshot settle = snapshot(5_000L);
+        settle.processRunning = false;
+        assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR,
+                a.handle(ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.SETTLE,
+                        aDeath.getGeneration()), settle).getTo());
+        assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR,
+                b.handle(ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.SETTLE,
+                        bDeath.getGeneration()), settle).getTo());
+
+        ServiceRepairStateMachine.Transition aStarted = a.handle(
+                ServiceRepairStateMachine.Event.packageRepairStarted(), settle);
+        ServiceRepairStateMachine.Transition bStarted = b.handle(
+                ServiceRepairStateMachine.Event.packageRepairStarted(), settle);
+        ServiceRepairStateMachine.Transition aApplied = a.handle(
+                ServiceRepairStateMachine.Event.packageRepairApplied(), snapshot(5_500L));
+        ServiceRepairStateMachine.Transition bApplied = b.handle(
+                ServiceRepairStateMachine.Event.packageRepairApplied(), snapshot(5_500L));
+        assertEquals(ServiceRepairStateMachine.State.REPAIRING, aStarted.getTo());
+        assertEquals(ServiceRepairStateMachine.State.REPAIRING, bStarted.getTo());
+        assertEquals(ServiceRepairStateMachine.State.VERIFYING, aApplied.getTo());
+        assertEquals(ServiceRepairStateMachine.State.VERIFYING, bApplied.getTo());
+
+        ServiceRepairStateMachine.Snapshot aBound = snapshot(7_500L);
+        aBound.bound = true;
+        assertEquals(ServiceRepairStateMachine.State.BOUND,
+                a.handle(ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.VERIFY,
+                        aApplied.getGeneration()), aBound).getTo());
+
+        ServiceRepairStateMachine.Snapshot bUnbound = snapshot(7_500L);
+        bUnbound.bound = false;
+        bUnbound.processRunning = false;
+        ServiceRepairStateMachine.Transition bRetry = b.handle(
+                ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.VERIFY,
+                        bApplied.getGeneration()), bUnbound);
+        assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR, bRetry.getTo());
+        assertNotNull(bRetry.findEffect(ServiceRepairStateMachine.ActionType.REQUEST_REPAIR));
+    }
+
+    @Test
+    public void replay_forceStopRemovedEnabledList_restoresThenBinds() {
+        // 复现 ColorOS force-stop 真机行为：服务从启用列表消失 → RESTORING 补回 → 绑定
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        initBound(machine, 1_000L);
+
+        ServiceRepairStateMachine.Snapshot missing = snapshot(2_000L);
+        missing.inEnabledList = false;
+        ServiceRepairStateMachine.Transition removed = machine.handle(
+                ServiceRepairStateMachine.Event.enabledListChanged(), missing);
+        assertEquals(ServiceRepairStateMachine.State.RESTORING, removed.getTo());
+        assertNotNull(removed.findEffect(ServiceRepairStateMachine.ActionType.REQUEST_RESTORE));
+
+        ServiceRepairStateMachine.Snapshot restored = snapshot(2_100L);
+        restored.inEnabledList = true;
+        restored.bound = false;
+        ServiceRepairStateMachine.Transition present = machine.handle(
+                ServiceRepairStateMachine.Event.enabledListChanged(), restored);
+        assertEquals(ServiceRepairStateMachine.State.SUSPECT, present.getTo());
+
+        ServiceRepairStateMachine.Snapshot bound = snapshot(2_400L);
+        bound.bound = true;
+        ServiceRepairStateMachine.Transition t = machine.handle(
+                ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.SETTLE,
+                        present.getGeneration()), bound);
+        assertEquals(ServiceRepairStateMachine.State.BOUND, t.getTo());
+        assertTrue(t.hasEffect(ServiceRepairStateMachine.ActionType.NOTIFY_RECOVERED));
+        assertNotNull(t.findTimer(ServiceRepairStateMachine.TimerType.STABILITY));
+    }
 }

@@ -522,7 +522,15 @@ final class ServiceRepairStateMachine {
         }
 
         if (from == State.BOUND || from == State.VERIFYING) {
-            long lifetime = boundAt > 0L ? Math.max(0L, snapshot.now - boundAt) : -1L;
+            // VERIFYING 阶段没有 boundAt 说明“修复写入完成但尚未见到有效连接”，
+            // 此时再次断开必须按快速失败累计，不能当成“寿命未知=健康”清零；
+            // BOUND 阶段的 boundAt 未知则多发生在热重载/加载前已绑定，按健康处理更稳妥。
+            long lifetime;
+            if (boundAt > 0L) {
+                lifetime = Math.max(0L, snapshot.now - boundAt);
+            } else {
+                lifetime = from == State.VERIFYING ? 0L : -1L;
+            }
             fastFailCount = RepairPolicy.nextFastFailCount(fastFailCount, lifetime);
             // 健康连接的新故障不是“修复尝试”；VERIFYING 阶段的二次死亡仍属于本轮修复
             repairAttempted = from == State.VERIFYING;
