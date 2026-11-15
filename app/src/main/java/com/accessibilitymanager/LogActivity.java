@@ -83,6 +83,8 @@ public class LogActivity extends AppCompatActivity {
             0xFFF48FB1  // 粉
     };
     private boolean night;
+    /** LSP 模式下日志主体来自 system_server 模块，展示时去掉每条前面的 [模块] 冗余前缀 */
+    private boolean mLsposedMode;
     private androidx.appcompat.widget.Toolbar toolbar;
     private boolean mIsMultiSelectMode = false;
     private final java.util.Set<Integer> mSelectedPositions = new java.util.TreeSet<>();
@@ -102,6 +104,8 @@ public class LogActivity extends AppCompatActivity {
 
         int nightMode = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
         night = nightMode == Configuration.UI_MODE_NIGHT_YES;
+        mLsposedMode = getSharedPreferences("data", MODE_PRIVATE)
+                .getBoolean("lsposed_mode", false);
 
         Window window = getWindow();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -542,10 +546,36 @@ public class LogActivity extends AppCompatActivity {
         if (rawLine == null || rawLine.isEmpty()) {
             return;
         }
-        String display = LogUtil.formatForDisplay(rawLine);
+        String display = formatLineForDisplay(rawLine);
         for (String key : LogUtil.extractComponentKeys(display)) {
             rememberServiceColor(key);
         }
+    }
+
+    /**
+     * 日志展示格式化：
+     * 普通模式保留 [模块] 前缀以区分管理器与模块日志；
+     * LSP 模式日志主体全部来自 system_server 模块，去掉每条前面的 [模块] 冗余前缀。
+     */
+    private String formatLineForDisplay(String rawLine) {
+        String line = LogUtil.formatForDisplay(rawLine);
+        if (!mLsposedMode || line == null) {
+            return line;
+        }
+        int index = line.indexOf("[模块]");
+        if (index < 0) {
+            return line;
+        }
+        // 只移除时间戳之后、正文之前的 [模块] 前缀，避免误删正文里偶尔出现的同名词
+        String before = line.substring(0, index).trim();
+        if (!before.isEmpty() && !before.matches("\\d{2}:\\d{2}:\\d{2}")) {
+            return line;
+        }
+        int end = index + "[模块]".length();
+        if (end < line.length() && line.charAt(end) == ' ') {
+            end++;
+        }
+        return line.substring(0, index) + line.substring(end);
     }
 
     private void rememberServiceColor(String key) {
@@ -1195,7 +1225,7 @@ public class LogActivity extends AppCompatActivity {
                     convertView = createLongLineView();
                 }
                 LongLineHolder holder = (LongLineHolder) convertView.getTag();
-                String line = LogUtil.formatForDisplay(entry.text);
+                String line = formatLineForDisplay(entry.text);
                 boolean expanded = mExpandedLongLines.contains(entry.rawStart);
                 holder.text.setMaxLines(expanded ? Integer.MAX_VALUE : 1);
                 holder.text.setEllipsize(expanded ? null : TextUtils.TruncateAt.END);
@@ -1232,7 +1262,7 @@ public class LogActivity extends AppCompatActivity {
                 }
                 String line = entry.kind == LogItem.KIND_GROUP
                         ? entry.text
-                        : LogUtil.formatForDisplay(entry.text);
+                        : formatLineForDisplay(entry.text);
                 SpannableStringBuilder ssb = new SpannableStringBuilder(line);
                 int baseColor;
                 if (entry.kind == LogItem.KIND_GROUP) {
