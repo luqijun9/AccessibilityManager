@@ -130,6 +130,19 @@ public class AutoRepairEntryTest {
     }
 
     @Test
+    public void shouldScheduleStabilityRepair_onlyWhenUnboundAndAllPreconditionsMet() {
+        // 模块启用、服务仍被锁定、仍在启用列表、绑定状态可读且确认未绑定 → 需要补修
+        assertTrue(RepairPolicy.shouldScheduleStabilityRepair(true, true, true, true, false));
+        // 已绑定 → 稳定，不补修
+        assertFalse(RepairPolicy.shouldScheduleStabilityRepair(true, true, true, true, true));
+        // 模块停用、服务移出锁定列表、用户已关闭服务、绑定状态不可读 → 均不得补修
+        assertFalse(RepairPolicy.shouldScheduleStabilityRepair(false, true, true, true, false));
+        assertFalse(RepairPolicy.shouldScheduleStabilityRepair(true, false, true, true, false));
+        assertFalse(RepairPolicy.shouldScheduleStabilityRepair(true, true, false, true, false));
+        assertFalse(RepairPolicy.shouldScheduleStabilityRepair(true, true, true, false, false));
+    }
+
+    @Test
     public void isWellKnownSystemPackage_identifiesOemAndAndroidPackages() {
         assertTrue(RepairPolicy.isWellKnownSystemPackage("android"));
         assertTrue(RepairPolicy.isWellKnownSystemPackage("com.android.settings"));

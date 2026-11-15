@@ -133,6 +133,9 @@ public class AutoRepairEntry extends XposedModule {
     private static final long SETTLE_MS = 3000L;
     private static final long TOGGLE_OFF_MS = 500L;
     private static final long VERIFY_MS = 3500L;
+    // 修复成功后的稳定性复查延迟：覆盖 OEM 在服务刚拉起后数秒内二次查杀，
+    // 以及 binderDied 回调丢失/被去重/被抑制窗口拦截时无人兜底的盲区
+    private static final long STABILITY_VERIFY_MS = 5000L;
     private static final long SUPPRESS_MS = 10000L;
     private static final long REPAIR_STUCK_MS = 15000L;
     private static final long SCAN_INIT_DELAY_MS = 10000L;
@@ -196,6 +199,7 @@ public class AutoRepairEntry extends XposedModule {
     private static final Map<String, Runnable> sPendingCheck = new HashMap<>();
     private static final Map<String, Integer> sCheckRetries = new HashMap<>();
     private static final Map<String, Runnable> sVerifyRun = new HashMap<>();
+    private static final Map<String, Runnable> sStabilityRun = new HashMap<>();
     private static final Map<String, Long> sSuppressUntil = new HashMap<>();
     private static final Map<String, Object> sConnections = new HashMap<>();
     private static boolean sBoundCheckAvailable;
@@ -407,6 +411,7 @@ public class AutoRepairEntry extends XposedModule {
         sPendingCheck.clear();
         sCheckRetries.clear();
         sVerifyRun.clear();
+        sStabilityRun.clear();
         sLastDied.clear();
         sLastInit.clear();
         sSuppressUntil.clear();
@@ -2515,6 +2520,11 @@ public class AutoRepairEntry extends XposedModule {
                     event("服务", "服务已就绪: " + key,
                             baseMeta + " state=connected");
                 }
+                // 修复成功或崩溃后自愈成功都只代表“此刻已绑定”，不稳定；
+                // 延迟做一次稳定性复查，防止 OEM 二次查杀或 binderDied 丢失后无人兜底
+                if (cancelled || wasRepairing) {
+                    scheduleStabilityCheck(component, key);
+                }
             } else {
                 eventNonManaged(key, "非保活服务连接(忽略)");
             }
@@ -2769,17 +2779,21 @@ public class AutoRepairEntry extends XposedModule {
                             "action=verify_ok conn=" + connId(boundConnection) + " cost=" + costMs + "ms"
                                     + " " + getPowerStateSummary());
                     showModuleToast("保活崩溃服务 " + getAppLabel(component));
+                    scheduleStabilityCheck(component, key);
                 } else if (!sBoundCheckAvailable) {
                     event("失败", "无法确认绑定状态，结束修复: " + key,
                             "action=verify_unknown cost=" + costMs + "ms");
                 } else {
                     // 修复校验失败且当前无绑定连接，立即清除抑制期，避免残留无意义的 10 秒抑制期阻塞后续检查
                     sSuppressUntil.remove(key);
-                    event("失败", "恢复失败: " + key,
-                            "action=verify_fail cost=" + costMs + "ms"
+                    // 校验失败不能就此收尾，否则服务会一直悬空到下一次外部扫描；
+                    // 交给 runCheck 重新检查（其中包含“应用进程正在启动”的宽限重试）
+                    event("失败", "恢复失败，排期复检: " + key,
+                            "action=verify_fail_retry cost=" + costMs + "ms"
                                     + " lastConn=" + connId(sConnections.get(key))
                                     + " " + getPackageProcessSummary(component.getPackageName())
                                     + " " + getPowerStateSummary());
+                    scheduleCheck(component, key, SETTLE_MS);
                 }
             } catch (Throwable t) {
                 event("失败", "恢复校验异常: " + t);
@@ -2789,6 +2803,64 @@ public class AutoRepairEntry extends XposedModule {
         };
         sVerifyRun.put(key, runnable);
         sHandler.postDelayed(runnable, VERIFY_MS);
+    }
+
+    /**
+     * 修复成功后的稳定性复查：
+     * “重新绑定成功”只代表此刻存在连接，OEM（如 ColorOS o-kill(4008)）可能在数百毫秒到数秒内再次查杀；
+     * 同时 binderDied 存在被去重、丢失或被抑制窗口拦截的可能，不能只依赖事件回调。
+     * 因此在修复成功后延迟 STABILITY_VERIFY_MS 再做一次绑定确认，仍未绑定则重新排期修复。
+     */
+    private static void scheduleStabilityCheck(ComponentName component, String key) {
+        if (sHandler == null) {
+            return;
+        }
+        Runnable old = sStabilityRun.remove(key);
+        if (old != null) {
+            sHandler.removeCallbacks(old);
+        }
+        Runnable runnable = () -> {
+            sStabilityRun.remove(key);
+            try {
+                runStabilityCheck(component, key);
+            } catch (Throwable t) {
+                event("失败", "稳定性复查异常: " + t);
+            }
+        };
+        sStabilityRun.put(key, runnable);
+        sHandler.postDelayed(runnable, STABILITY_VERIFY_MS);
+    }
+
+    private static void runStabilityCheck(ComponentName component, String key) {
+        if (sContext == null) {
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        // 用户在修复后的豁免窗口内手动关闭服务时不得复活
+        Long manual = sManualHiddenUntil.get(key);
+        if (manual != null && now < manual) {
+            return;
+        }
+        String enabled = readEnabled();
+        boolean inEnabled = enabled != null && containsComponent(enabled, component);
+        Object boundConnection = findBoundConnection(component);
+        boolean bound = boundConnection != null;
+        if (bound) {
+            clearCrashedMarker(boundConnection, component);
+            log("stability verified: " + key);
+            return;
+        }
+        // 模块停用、服务已移出锁定列表、用户主动关闭或绑定状态不可读时必须克制，
+        // 只对“仍在启用列表、仍在锁定列表且确认未绑定”的服务重新排期修复
+        if (!RepairPolicy.shouldScheduleStabilityRepair(
+                isModuleEnabled(), isManaged(component), inEnabled,
+                sBoundCheckAvailable, bound)) {
+            return;
+        }
+        event("保活", "稳定性复查仍未绑定，重新排期修复: " + key,
+                "action=stability_repair " + getPackageProcessSummary(component.getPackageName())
+                        + " " + getPowerStateSummary());
+        scheduleCheck(component, key, SETTLE_MS);
     }
 
     private static boolean isRepairInProgress(long now) {
