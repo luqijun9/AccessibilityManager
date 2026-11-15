@@ -6,6 +6,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
+import android.content.ComponentName;
 import android.os.Bundle;
 
 import java.util.ArrayDeque;
@@ -433,6 +434,13 @@ public class AutoRepairEntryTest {
         assertFalse(AutoRepairEntry.isPackageProcessRunning("com.arlosoft.macrodroid"));
         assertFalse(AutoRepairEntry.isPackageProcessRunning(null));
         assertFalse(AutoRepairEntry.isPackageProcessRunning(""));
+    }
+
+    @Test
+    public void isServiceProcessRunning_withNullContext_returnsFalse() {
+        assertFalse(AutoRepairEntry.isServiceProcessRunning(null));
+        assertFalse(AutoRepairEntry.isServiceProcessRunning(ComponentName.unflattenFromString(
+                "com.arlosoft.macrodroid/.triggers.services.MacroDroidAccessibilityServiceJellyBean")));
     }
 
     @Test

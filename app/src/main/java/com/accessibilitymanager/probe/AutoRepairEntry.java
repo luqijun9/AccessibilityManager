@@ -9,6 +9,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ServiceInfo;
 import android.database.ContentObserver;
 import android.net.Uri;
 import android.os.Build;
@@ -1784,6 +1785,10 @@ public class AutoRepairEntry extends XposedModule {
                 scheduleReconcile("power_save_changed", 500L);
                 scheduleScan(1500L, "power_save_changed");
             }
+            if (isModuleEnabled()) {
+                // 超级省电/Doze 切换会批量杀服务，立即让状态机按真实绑定状态重新评估
+                syncMachines("power_state:" + shortActionName(action));
+            }
             return;
         }
         if (Intent.ACTION_SCREEN_OFF.equals(action)) {
@@ -1799,6 +1804,7 @@ public class AutoRepairEntry extends XposedModule {
             if (isModuleEnabled()) {
                 scheduleReconcile("user_present", 500L);
                 scheduleScan(1000L, "user_present");
+                syncMachines("user_present");
             }
         }
     }
@@ -2558,7 +2564,7 @@ public class AutoRepairEntry extends XposedModule {
         Object bound = findBoundConnection(component);
         snapshot.bound = bound != null;
         snapshot.bindCheckAvailable = sBoundCheckAvailable && !enabledReadFailed;
-        snapshot.processRunning = isPackageProcessRunning(component.getPackageName());
+        snapshot.processRunning = isServiceProcessRunning(component);
 
         long remainingBoot = getRemainingBootGraceMs(now, sFirstServiceConnectAt);
         snapshot.bootGraceActive = remainingBoot > 0L;
@@ -2726,6 +2732,11 @@ public class AutoRepairEntry extends XposedModule {
         String key = component.flattenToString();
         if (!isManaged(component) || sUserDisabledKeys.contains(key)) {
             log("skip repair request (not managed/user disabled): " + key);
+            return;
+        }
+        if (!isPackageInstalled(component.getPackageName())) {
+            // 应用已卸载时不要再关开/强杀一个不存在的包，等管理器同步锁定列表
+            log("skip repair request (package not installed): " + key);
             return;
         }
         if (isDryRun()) {
@@ -3259,6 +3270,54 @@ public class AutoRepairEntry extends XposedModule {
         return sb.toString();
     }
 
+    /**
+     * 只检查目标服务实际所在进程是否存活。
+     *
+     * <p>为什么不能只看 uid：
+     * WebView 沙箱、隔离进程、同包其他子进程都可能共享 uid；旧逻辑会把它们当成“服务进程已启动”，
+     * 从而白白消耗两次 2 秒启动宽限，拖慢真正需要修复的服务。
+     *
+     * <p>优先使用 ServiceInfo.processName 精确匹配；解析失败时回退到整包 uid 检查，保持兼容。
+     */
+    static boolean isServiceProcessRunning(ComponentName component) {
+        if (component == null) {
+            return false;
+        }
+        Context ctx = sContext;
+        if (ctx == null) {
+            return false;
+        }
+        String processName = null;
+        try {
+            ServiceInfo info = ctx.getPackageManager().getServiceInfo(component, 0);
+            if (info != null && info.processName != null && !info.processName.isEmpty()) {
+                processName = info.processName;
+            }
+        } catch (Throwable t) {
+            log("resolve service process failed: " + component.flattenToShortString() + " " + t);
+        }
+        if (processName == null) {
+            return isPackageProcessRunning(component.getPackageName());
+        }
+        try {
+            ActivityManager am =
+                    (ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE);
+            if (am != null) {
+                List<ActivityManager.RunningAppProcessInfo> procs = am.getRunningAppProcesses();
+                if (procs != null) {
+                    for (ActivityManager.RunningAppProcessInfo info : procs) {
+                        if (info != null && processName.equals(info.processName)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            log("isServiceProcessRunning failed: " + t);
+        }
+        return false;
+    }
+
     static boolean isPackageProcessRunning(String pkg) {
         Context ctx = sContext;
         if (ctx == null || pkg == null || pkg.isEmpty()) {
@@ -3362,7 +3421,8 @@ public class AutoRepairEntry extends XposedModule {
                     event("失败", "绑定状态读取失败: " + t);
                 }
             }
-            break;
+            // 不 break：工作资料/多用户下不同连接可能持有不同的 UserState，
+            // 只看第一个连接会漏掉目标服务的真实绑定状态。
         }
         return null;
     }
