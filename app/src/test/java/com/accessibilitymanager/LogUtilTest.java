@@ -3,9 +3,12 @@ package com.accessibilitymanager;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
+
+import java.util.List;
 
 public class LogUtilTest {
 
@@ -82,6 +85,41 @@ public class LogUtilTest {
 
         assertNotNull(formatted);
         assertTrue(formatted.contains("[异常崩溃] 线程: unknown, 错误: Throwable"));
+    }
+
+    @Test
+    public void extractComponentKeys_normalizesShortAndLongForms() {
+        String text = "崩溃: com.foo/.Bar:com.foo/com.foo.Bar:"
+                + "com.baz/com.baz.Outer$Inner";
+
+        List<String> keys = LogUtil.extractComponentKeys(text);
+
+        // short/long 写法归一为同一个 key，并保持首次出现顺序
+        assertEquals(2, keys.size());
+        assertEquals("com.foo/com.foo.Bar", keys.get(0));
+        assertEquals("com.baz/com.baz.Outer$Inner", keys.get(1));
+        assertEquals("com.foo/com.foo.Bar", LogUtil.extractPrimaryComponentKey(text));
+    }
+
+    @Test
+    public void extractComponentKeys_ignoresUrlsAndBareClassNames() {
+        assertTrue(LogUtil.extractComponentKeys("https://github.com/owner/repo").isEmpty());
+        assertTrue(LogUtil.extractComponentKeys("com.foo/Service").isEmpty());
+        assertNull(LogUtil.extractPrimaryComponentKey("no component here"));
+    }
+
+    @Test
+    public void findComponentMatches_returnsTokenPositionsForPerServiceColors() {
+        String text = "崩溃: com.foo/.Bar 与 com.baz/com.baz.Qux";
+        List<LogUtil.ComponentMatch> matches = LogUtil.findComponentMatches(text);
+
+        assertEquals(2, matches.size());
+        assertEquals("com.foo/com.foo.Bar", matches.get(0).key);
+        assertEquals(text.indexOf("com.foo/.Bar"), matches.get(0).start);
+        assertEquals(text.indexOf("com.foo/.Bar") + "com.foo/.Bar".length(),
+                matches.get(0).end);
+        assertEquals("com.baz/com.baz.Qux", matches.get(1).key);
+        assertEquals(text.indexOf("com.baz/com.baz.Qux"), matches.get(1).start);
     }
 }
 

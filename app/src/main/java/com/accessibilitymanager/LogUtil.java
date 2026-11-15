@@ -207,6 +207,20 @@ public class LogUtil {
             java.util.regex.Pattern.compile(
                     "([a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_]*)+)/([a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_$]*)+)");
 
+    /**
+     * 日志中可能出现的无障碍组件（支持展示层 short 形式与落盘 long 形式）：
+     * - pkg/.ClassName
+     * - pkg/pkg.sub.ClassName
+     * - pkg/pkg.sub.ClassName$Inner
+     *
+     * <p>用于按服务分配日志颜色。裸类名（pkg/Service）不参与匹配，避免把 URL 里的
+     * "github.com/owner" 之类误判成服务组件，导致颜色分配被无关文本挤占。
+     */
+    private static final java.util.regex.Pattern LOG_COMPONENT_PATTERN =
+            java.util.regex.Pattern.compile(
+                    "([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)+)/"
+                            + "(\\.?[A-Za-z_][A-Za-z0-9_$]*(?:\\.[A-Za-z_][A-Za-z0-9_$]*)*)");
+
     static boolean shouldWriteDateHeader(String today, String currentDate, boolean fileExistsAndNonEmpty) {
         if (today == null || today.equals(currentDate)) {
             return false;
@@ -265,6 +279,73 @@ public class LogUtil {
         }
         matcher.appendTail(sb);
         return sb.toString();
+    }
+
+    /**
+     * 日志中出现的无障碍组件匹配结果（含文本位置），供日志页给每个服务单独上色。
+     * key 统一为 pkg/完整类名，start/end 为在原始展示文本中的下标。
+     */
+    public static final class ComponentMatch {
+        public final String key;
+        public final int start;
+        public final int end;
+
+        ComponentMatch(String key, int start, int end) {
+            this.key = key;
+            this.start = start;
+            this.end = end;
+        }
+    }
+
+    /**
+     * 提取文本中出现的所有无障碍组件规范键（pkg/完整类名），按首次出现顺序去重。
+     * 供日志页按服务分配颜色使用；无法识别的文本返回空列表。
+     */
+    public static List<String> extractComponentKeys(String text) {
+        List<String> keys = new ArrayList<>();
+        for (ComponentMatch match : findComponentMatches(text)) {
+            if (!keys.contains(match.key)) {
+                keys.add(match.key);
+            }
+        }
+        return keys;
+    }
+
+    /** 提取文本中的第一个无障碍组件规范键；没有则返回 null。 */
+    public static String extractPrimaryComponentKey(String text) {
+        List<ComponentMatch> matches = findComponentMatches(text);
+        return matches.isEmpty() ? null : matches.get(0).key;
+    }
+
+    /** 查找文本中所有可识别的无障碍组件及其位置，保持出现顺序。 */
+    public static List<ComponentMatch> findComponentMatches(String text) {
+        List<ComponentMatch> matches = new ArrayList<>();
+        if (text == null || text.indexOf('/') < 0) {
+            return matches;
+        }
+        java.util.regex.Matcher matcher = LOG_COMPONENT_PATTERN.matcher(text);
+        while (matcher.find()) {
+            String key = normalizeComponentKey(matcher.group(1), matcher.group(2));
+            if (key != null) {
+                matches.add(new ComponentMatch(key, matcher.start(), matcher.end()));
+            }
+        }
+        return matches;
+    }
+
+    private static String normalizeComponentKey(String pkg, String cls) {
+        if (pkg == null || cls == null || pkg.isEmpty() || cls.isEmpty()) {
+            return null;
+        }
+        if (cls.charAt(0) == '.') {
+            // short 形式补全包名，保证同一服务的 short/long 写法得到同一个颜色键
+            return pkg + "/" + pkg + cls;
+        }
+        // 纯类名没有包名信息，容易和 URL 等文本混淆，不参与颜色分配
+        if (cls.indexOf('.') < 0) {
+            return null;
+        }
+        return pkg + "/" + cls;
     }
 
     /**

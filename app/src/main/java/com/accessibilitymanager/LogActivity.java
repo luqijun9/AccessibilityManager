@@ -33,8 +33,10 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 public class LogActivity extends AppCompatActivity {
@@ -56,6 +58,30 @@ public class LogActivity extends AppCompatActivity {
     private final Set<Integer> mExpandedGroups = new HashSet<>();
     /** 已展开的长日志下标（同步列表类日志默认单行显示） */
     private final Set<Integer> mExpandedLongLines = new HashSet<>();
+    /**
+     * 服务日志颜色分配：按日志中首次出现顺序分配调色板下标，
+     * 超过调色板数量后循环复用，保证同一服务在滚动/重建列表时颜色稳定。
+     */
+    private final Map<String, Integer> mServiceColorIndex = new LinkedHashMap<>();
+    private int mNextServiceColorIndex;
+    private static final int[] DAY_SERVICE_COLORS = {
+            0xFF1565C0, // 蓝
+            0xFF2E7D32, // 绿
+            0xFFC62828, // 红
+            0xFF6A1B9A, // 紫
+            0xFF00838F, // 青
+            0xFFEF6C00, // 橙
+            0xFFAD1457  // 粉
+    };
+    private static final int[] NIGHT_SERVICE_COLORS = {
+            0xFF8AB4F8, // 蓝
+            0xFF81C995, // 绿
+            0xFFF28B82, // 红
+            0xFFD7AEFB, // 紫
+            0xFF78D9EC, // 青
+            0xFFFFB74D, // 橙
+            0xFFF48FB1  // 粉
+    };
     private boolean night;
     private androidx.appcompat.widget.Toolbar toolbar;
     private boolean mIsMultiSelectMode = false;
@@ -339,6 +365,9 @@ public class LogActivity extends AppCompatActivity {
         }
 
         LogUtil.LogEntry entry = new LogUtil.LogEntry(type, text);
+        if (type == LogUtil.LogEntry.TYPE_LOG_LINE) {
+            rememberServiceColors(text);
+        }
         entries.add(entry);
         int rawIndex = entries.size() - 1;
 
@@ -427,6 +456,13 @@ public class LogActivity extends AppCompatActivity {
     private List<LogItem> buildDisplayItems(List<LogUtil.LogEntry> raw) {
         List<LogItem> items = new ArrayList<>();
         if (raw == null) return items;
+        // 按原始日志顺序预扫描服务，保证颜色分配与滚动/展开操作无关
+        resetServiceColors();
+        for (LogUtil.LogEntry entry : raw) {
+            if (entry != null && entry.type == LogUtil.LogEntry.TYPE_LOG_LINE) {
+                rememberServiceColors(entry.text);
+            }
+        }
         int i = 0;
         while (i < raw.size()) {
             LogUtil.LogEntry e = raw.get(i);
@@ -489,6 +525,79 @@ public class LogActivity extends AppCompatActivity {
         }
         if (adapter != null) {
             adapter.notifyDataSetChanged();
+        }
+    }
+
+    /** 重建列表时按原始日志顺序重新分配颜色，保证同一服务颜色不变 */
+    private void resetServiceColors() {
+        mServiceColorIndex.clear();
+        mNextServiceColorIndex = 0;
+    }
+
+    /**
+     * 预扫描一条原始日志，把它出现的服务按首次出现顺序登记到颜色表。
+     * 扫描展示文本（去掉 | 之后元数据），避免把 rawMeta 里的组件也算进颜色顺序。
+     */
+    private void rememberServiceColors(String rawLine) {
+        if (rawLine == null || rawLine.isEmpty()) {
+            return;
+        }
+        String display = LogUtil.formatForDisplay(rawLine);
+        for (String key : LogUtil.extractComponentKeys(display)) {
+            rememberServiceColor(key);
+        }
+    }
+
+    private void rememberServiceColor(String key) {
+        if (key == null || key.isEmpty() || mServiceColorIndex.containsKey(key)) {
+            return;
+        }
+        mServiceColorIndex.put(key, mNextServiceColorIndex++);
+    }
+
+    /** 同一服务始终返回同一个颜色；超过 7 个服务后按调色板顺序循环复用 */
+    private int getServiceColor(String key) {
+        if (key == null || key.isEmpty()) {
+            return 0;
+        }
+        Integer index = mServiceColorIndex.get(key);
+        if (index == null) {
+            index = mNextServiceColorIndex++;
+            mServiceColorIndex.put(key, index);
+        }
+        int[] palette = night ? NIGHT_SERVICE_COLORS : DAY_SERVICE_COLORS;
+        return palette[Math.abs(index) % palette.length];
+    }
+
+    /**
+     * 给一行日志上色：
+     * - 有服务组件：整行使用该服务颜色，[分类] 前缀保留原来的分类色；
+     * - 一行出现多个服务（如同包批次）：每个组件片段再覆盖成自己的服务颜色；
+     * - 没有服务组件：保持原分类色/默认色。
+     */
+    private void applyServiceLineSpans(SpannableStringBuilder ssb, String line, int baseColor) {
+        if (line == null || line.isEmpty()) {
+            return;
+        }
+        List<LogUtil.ComponentMatch> matches = LogUtil.findComponentMatches(line);
+        String primaryKey = matches.isEmpty() ? null : matches.get(0).key;
+        int wholeLineColor = primaryKey == null ? baseColor : getServiceColor(primaryKey);
+        ssb.setSpan(new ForegroundColorSpan(wholeLineColor), 0, line.length(),
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+
+        int bracketStart = line.indexOf('[');
+        int bracketEnd = bracketStart >= 0 ? line.indexOf(']', bracketStart) : -1;
+        if (primaryKey != null && bracketStart >= 0 && bracketEnd > bracketStart) {
+            // 保留 [模块]/[检测] 等分类前缀的原色，方便继续按类别快速定位
+            ssb.setSpan(new ForegroundColorSpan(baseColor), bracketStart, bracketEnd + 1,
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        for (LogUtil.ComponentMatch match : matches) {
+            int serviceColor = getServiceColor(match.key);
+            if (serviceColor != 0) {
+                ssb.setSpan(new ForegroundColorSpan(serviceColor), match.start, match.end,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
         }
     }
 
@@ -1091,8 +1200,7 @@ public class LogActivity extends AppCompatActivity {
                 holder.text.setMaxLines(expanded ? Integer.MAX_VALUE : 1);
                 holder.text.setEllipsize(expanded ? null : TextUtils.TruncateAt.END);
                 SpannableStringBuilder ssb = new SpannableStringBuilder(line);
-                ssb.setSpan(new ForegroundColorSpan(getLineColor(line)), 0, line.length(),
-                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                applyServiceLineSpans(ssb, line, getLineColor(line));
                 holder.text.setText(ssb);
                 holder.button.setText(expanded ? "收起" : "展开");
                 holder.button.setTextColor(night ? 0xFF8AB4F8 : 0xFF1A73E8);
@@ -1126,17 +1234,16 @@ public class LogActivity extends AppCompatActivity {
                         ? entry.text
                         : LogUtil.formatForDisplay(entry.text);
                 SpannableStringBuilder ssb = new SpannableStringBuilder(line);
-                int color;
+                int baseColor;
                 if (entry.kind == LogItem.KIND_GROUP) {
                     // 折叠组表头使用弱化颜色，方便和真实日志区分
-                    color = night ? 0xFF9E9E9E : 0xFF757575;
+                    baseColor = night ? 0xFF9E9E9E : 0xFF757575;
                     tv.setTypeface(Typeface.DEFAULT_BOLD);
                 } else {
-                    color = getLineColor(line);
+                    baseColor = getLineColor(line);
                     tv.setTypeface(Typeface.DEFAULT);
                 }
-                ssb.setSpan(new ForegroundColorSpan(color), 0, line.length(),
-                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                applyServiceLineSpans(ssb, line, baseColor);
                 tv.setText(ssb);
 
                 if (mSelectedPositions.contains(position)) {
