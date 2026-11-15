@@ -169,7 +169,6 @@ public class AutoRepairEntry extends XposedModule {
             new HeartbeatTracker(MAX_HEARTBEAT_ATTEMPTS);
     private static boolean sHeartbeatRetryPending;
     private static volatile BroadcastReceiver sCommandReceiver;
-    private static volatile BroadcastReceiver sSystemStateReceiver;
     private static int sContextRetryCount;
 
     // 事件缓冲
@@ -399,15 +398,6 @@ public class AutoRepairEntry extends XposedModule {
                 ctx.unregisterReceiver(receiver);
             } catch (Throwable t) {
                 log("unregister receiver on hot reload failed: " + t);
-            }
-        }
-        BroadcastReceiver stateReceiver = sSystemStateReceiver;
-        sSystemStateReceiver = null;
-        if (stateReceiver != null && ctx != null) {
-            try {
-                ctx.unregisterReceiver(stateReceiver);
-            } catch (Throwable t) {
-                log("unregister system state receiver on hot reload failed: " + t);
             }
         }
     }
@@ -952,7 +942,7 @@ public class AutoRepairEntry extends XposedModule {
 
             Handler handler = sHandler;
             if (context != null && (sContext == null || sObserver == null
-                    || sCommandReceiver == null || sSystemStateReceiver == null)) {
+                    || sCommandReceiver == null)) {
                 final boolean changed = sContext != context;
                 sContext = context;
                 if (handler != null) {
@@ -962,7 +952,6 @@ public class AutoRepairEntry extends XposedModule {
                         }
                         ensureObserver();
                         ensureCommandReceiver();
-                        ensureSystemStateReceiver();
                     });
                 }
             }
@@ -1080,7 +1069,6 @@ public class AutoRepairEntry extends XposedModule {
         writeHeartbeatOnce("observer_check");
         flushEvents();
         ensureCommandReceiver();
-        ensureSystemStateReceiver();
         if (sObserver != null) {
             return;
         }
@@ -1715,103 +1703,15 @@ public class AutoRepairEntry extends XposedModule {
         }
         if (sContext != null) {
             ensureCommandReceiver();
-            ensureSystemStateReceiver();
             ensureObserver();
         }
-        if ((sCommandReceiver == null || sSystemStateReceiver == null || sObserver == null)
+        if ((sCommandReceiver == null || sObserver == null)
                 && sContextRetryCount < MAX_INIT_RETRY) {
             sContextRetryCount++;
             if (sHandler != null) {
                 sHandler.postDelayed(AutoRepairEntry::scheduleReceiverInit, INIT_RETRY_DELAY_MS);
             }
         }
-    }
-
-    private static synchronized void ensureSystemStateReceiver() {
-        if (sSystemStateReceiver != null) {
-            return;
-        }
-        Context ctx = sContext;
-        if (ctx == null) {
-            ctx = getSystemContext();
-        }
-        if (ctx == null) {
-            return;
-        }
-        try {
-            BroadcastReceiver receiver = new BroadcastReceiver() {
-                @Override
-                public void onReceive(Context context, Intent intent) {
-                    if (intent == null || intent.getAction() == null) {
-                        return;
-                    }
-                    final String action = intent.getAction();
-                    Handler handler = sHandler;
-                    if (handler != null) {
-                        handler.post(() -> handleSystemStateBroadcast(action));
-                    } else {
-                        handleSystemStateBroadcast(action);
-                    }
-                }
-            };
-            IntentFilter filter = new IntentFilter();
-            filter.addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                filter.addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED);
-            }
-            filter.addAction(Intent.ACTION_SCREEN_OFF);
-            filter.addAction(Intent.ACTION_SCREEN_ON);
-            filter.addAction(Intent.ACTION_USER_PRESENT);
-            if (Build.VERSION.SDK_INT >= 33) {
-                ctx.registerReceiver(receiver, filter, null, sHandler, Context.RECEIVER_EXPORTED);
-            } else {
-                ctx.registerReceiver(receiver, filter, null, sHandler);
-            }
-            sSystemStateReceiver = receiver;
-            log("[配置] 系统省电与屏幕广播监听已就绪");
-        } catch (Throwable t) {
-            event("失败", "注册系统省电/屏幕监听失败: " + t);
-        }
-    }
-
-    private static void handleSystemStateBroadcast(String action) {
-        if (PowerManager.ACTION_POWER_SAVE_MODE_CHANGED.equals(action)
-                || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
-                        && PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED.equals(action))) {
-            String enabled = readEnabled();
-            event("省电", "系统省电状态变更: " + shortActionName(action),
-                    getPowerStateSummary() + " enabled=" + (enabled == null ? "null" : enabled));
-            if (PowerManager.ACTION_POWER_SAVE_MODE_CHANGED.equals(action) && isModuleEnabled()) {
-                scheduleReconcile("power_save_changed", 500L);
-                scheduleScan(1500L, "power_save_changed");
-            }
-            if (isModuleEnabled()) {
-                // 超级省电/Doze 切换会批量杀服务，立即让状态机按真实绑定状态重新评估
-                syncMachines("power_state:" + shortActionName(action));
-            }
-            return;
-        }
-        if (Intent.ACTION_SCREEN_OFF.equals(action)) {
-            event("监听", "屏幕已熄屏 (SCREEN_OFF)", getPowerStateSummary());
-            return;
-        }
-        if (Intent.ACTION_SCREEN_ON.equals(action)) {
-            event("监听", "屏幕已点亮 (SCREEN_ON)", getPowerStateSummary());
-            return;
-        }
-        if (Intent.ACTION_USER_PRESENT.equals(action)) {
-            event("监听", "用户解锁屏幕 (USER_PRESENT)", getPowerStateSummary());
-            if (isModuleEnabled()) {
-                scheduleReconcile("user_present", 500L);
-                scheduleScan(1000L, "user_present");
-                syncMachines("user_present");
-            }
-        }
-    }
-
-    private static String shortActionName(String action) {
-        int lastDot = action.lastIndexOf('.');
-        return lastDot >= 0 ? action.substring(lastDot + 1) : action;
     }
 
     private static void notifyCommandAck() {
