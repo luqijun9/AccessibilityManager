@@ -114,6 +114,22 @@ public class AutoRepairEntryTest {
     }
 
     @Test
+    public void calculateSecondaryCrashDelay_schedulesCheckAfterSuppressionWindow() {
+        // 场景 1：在抑制期还剩 2500ms 时发生二次断开，应延迟 2500 + 500 = 3000ms 执行补偿检查
+        long now = 10_000L;
+        long suppressUntil = 12_500L;
+        assertEquals(3000L, RepairPolicy.calculateSecondaryCrashDelay(now, suppressUntil));
+
+        // 场景 2：在抑制期即将结束时（还剩 200ms）发生二次断开，保底延迟至少 1000ms
+        now = 12_300L;
+        assertEquals(1000L, RepairPolicy.calculateSecondaryCrashDelay(now, suppressUntil));
+
+        // 场景 3：抑制期已过，延迟为 0
+        now = 13_000L;
+        assertEquals(0L, RepairPolicy.calculateSecondaryCrashDelay(now, suppressUntil));
+    }
+
+    @Test
     public void isWellKnownSystemPackage_identifiesOemAndAndroidPackages() {
         assertTrue(RepairPolicy.isWellKnownSystemPackage("android"));
         assertTrue(RepairPolicy.isWellKnownSystemPackage("com.android.settings"));

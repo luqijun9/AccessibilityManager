@@ -2415,7 +2415,27 @@ public class AutoRepairEntry extends XposedModule {
 
         Long suppress = sSuppressUntil.get(key);
         if (suppress != null && now < suppress) {
-            eventSkip("died:suppress:" + key, "检测", "忽略（修复抑制窗口）: " + key);
+            // 注意：在此之前第 2395 行已检查过 findBoundConnection(component)。
+            // 若 findBoundConnection(component) != null，早已在第 2400 行作为“旧连接退役残留”清理标记并安全 return。
+            // 因此到达此处的服务必定满足：【抑制期生效中】且【AMS 中当前无任何存活绑定连接】！
+            // 此时必须细分两种场景：
+            // 场景 1：repair() 主流程当前正在执行中（sRepairInProgress == true 且 key 为 sRepairKey）：
+            //         当前正处于关开修复过程中（先解绑/强杀、等待 500ms 重新开启），旧连接断开属预期行为，记录后安全跳过；
+            // 场景 2：属于“二次查杀”严重异常：服务刚修复成功/刚拉起，但在 3 秒抑制期内再次被 OEM 系统击杀（如 ColorOS o-kill(4008) 强杀）！
+            //         此时绝不能裸 return 直接吞掉事件，否则服务将永久陷入无人托管的死亡悬空状态！
+            //         正确策略：计算排期延后检查延迟（抑制期剩余时间 + 缓冲），在抑制期结束后立即执行补偿检查与二次修复。
+            if (isRepairInProgress(now) && key.equals(sRepairKey)) {
+                eventSkip("died:suppress:repairing:" + key, "检测",
+                        "忽略（修复流程执行中预期的旧连接断开）: " + key);
+                return;
+            }
+
+            long delay = RepairPolicy.calculateSecondaryCrashDelay(now, suppress);
+            event("检测", "服务在抑制期内再次断开（疑似遭系统二次查杀，已排期延后检查）: " + key,
+                    "delay=" + delay + "ms remaining=" + (suppress - now) + "ms "
+                            + getPackageProcessSummary(component.getPackageName())
+                            + " " + getPowerStateSummary());
+            scheduleCheck(component, key, delay);
             return;
         }
 
@@ -2469,7 +2489,11 @@ public class AutoRepairEntry extends XposedModule {
             }
             boolean wasRepairing = key.equals(sRepairKey);
             if (wasRepairing) {
-                // 保留短暂抑制期，防止强杀修复后旧连接的延迟 binderDied 穿透造成假崩溃报警
+                // 保留短暂抑制期（SETTLE_MS = 3000ms）：
+                // 【设计原因】：强杀修复时旧进程被杀，AMS 内部旧连接的 binderDied 回调存在几十至几百毫秒的延迟到达。
+                // 若无抑制期，旧连接到达的 binderDied 会被误认为“刚拉起的服务又崩了”，从而陷入恶性修复死循环。
+                // 【二次崩溃保护】：若新服务在抑制期内真被 OEM 后台策略（如 ColorOS o-kill）二次击杀，
+                // onBinderDied 会检测到 findBoundConnection == null 并自动排期延后检查，在抑制期结束后立即二次拉起。
                 sSuppressUntil.put(key, now + SETTLE_MS);
             } else {
                 sSuppressUntil.remove(key);
@@ -2539,7 +2563,12 @@ public class AutoRepairEntry extends XposedModule {
 
         Long suppress = sSuppressUntil.get(key);
         if (suppress != null && now < suppress) {
-            eventSkip("check:suppress:" + key, "检测", "跳过检查：修复抑制窗口内: " + key);
+            // 若检查任务到达时仍在抑制期内，不能直接 return 丢弃，否则若服务未绑定将永远失去修复机会；
+            // 正确做法：自动延后至抑制期结束（剩余时间 + 500ms 缓冲）后重试检查。
+            long remaining = suppress - now;
+            eventSkip("check:suppress:" + key, "检测",
+                    "跳过当前检查（抑制期生效中，延后重试）: " + key + " remaining=" + remaining + "ms");
+            scheduleCheck(component, key, remaining + 500L);
             return;
         }
         if (!isManaged(component)) {
@@ -2744,6 +2773,8 @@ public class AutoRepairEntry extends XposedModule {
                     event("失败", "无法确认绑定状态，结束修复: " + key,
                             "action=verify_unknown cost=" + costMs + "ms");
                 } else {
+                    // 修复校验失败且当前无绑定连接，立即清除抑制期，避免残留无意义的 10 秒抑制期阻塞后续检查
+                    sSuppressUntil.remove(key);
                     event("失败", "恢复失败: " + key,
                             "action=verify_fail cost=" + costMs + "ms"
                                     + " lastConn=" + connId(sConnections.get(key))

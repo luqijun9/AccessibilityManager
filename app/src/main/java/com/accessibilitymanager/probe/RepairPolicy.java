@@ -134,6 +134,23 @@ final class RepairPolicy {
         return true;
     }
 
+    /**
+     * 计算服务在抑制期内再次断开时的延后检查延迟（毫秒）：
+     * 当处于修复抑制期内且当前服务已无任何存活连接时（说明新服务启动后遭遇系统二次查杀，而非旧连接残留回调），
+     * 绝不能直接丢弃事件，应计算延后检查的延迟毫秒数，待抑制期结束后立即执行补偿检查。
+     *
+     * @param now               当前时刻 (elapsedRealtime)
+     * @param suppressUntilMs   抑制期截止时刻 (elapsedRealtime)
+     * @return 延后检查所需的毫秒延迟；若抑制期已过则返回 0L
+     */
+    static long calculateSecondaryCrashDelay(long now, long suppressUntilMs) {
+        if (now >= suppressUntilMs) {
+            return 0L;
+        }
+        // 抑制期剩余时间 + 500ms 缓冲，且至少延后 1000ms，避开系统的查杀波动期
+        return Math.max(1000L, (suppressUntilMs - now) + 500L);
+    }
+
     /** 将开机相对毫秒格式化为秒（保留 1 位小数，如 142.3s） */
     static String formatUptimeSeconds(long elapsedRealtimeMs) {
         long tenths = Math.max(0L, elapsedRealtimeMs) / 100L;
