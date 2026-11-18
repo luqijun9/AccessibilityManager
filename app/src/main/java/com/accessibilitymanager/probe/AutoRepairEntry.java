@@ -163,6 +163,8 @@ public class AutoRepairEntry extends XposedModule {
             new HeartbeatTracker(MAX_HEARTBEAT_ATTEMPTS);
     private static boolean sHeartbeatRetryPending;
     private static volatile BroadcastReceiver sCommandReceiver;
+    // 阶段一测试：包启用状态广播接收器（冻结/解冻探测，仅记录日志，不触发补回）
+    private static volatile BroadcastReceiver sPackageStateReceiver;
     private static int sContextRetryCount;
 
     // 事件缓冲
@@ -392,6 +394,15 @@ public class AutoRepairEntry extends XposedModule {
                 ctx.unregisterReceiver(receiver);
             } catch (Throwable t) {
                 log("unregister receiver on hot reload failed: " + t);
+            }
+        }
+        BroadcastReceiver pkgReceiver = sPackageStateReceiver;
+        sPackageStateReceiver = null;
+        if (pkgReceiver != null && ctx != null) {
+            try {
+                ctx.unregisterReceiver(pkgReceiver);
+            } catch (Throwable t) {
+                log("unregister package receiver on hot reload failed: " + t);
             }
         }
     }
@@ -936,7 +947,7 @@ public class AutoRepairEntry extends XposedModule {
 
             Handler handler = sHandler;
             if (context != null && (sContext == null || sObserver == null
-                    || sCommandReceiver == null)) {
+                    || sCommandReceiver == null || sPackageStateReceiver == null)) {
                 final boolean changed = sContext != context;
                 sContext = context;
                 if (handler != null) {
@@ -946,6 +957,7 @@ public class AutoRepairEntry extends XposedModule {
                         }
                         ensureObserver();
                         ensureCommandReceiver();
+                        ensurePackageReceiver();
                     });
                 }
             }
@@ -1063,6 +1075,7 @@ public class AutoRepairEntry extends XposedModule {
         writeHeartbeatOnce("observer_check");
         flushEvents();
         ensureCommandReceiver();
+        ensurePackageReceiver();
         if (sObserver != null) {
             return;
         }
@@ -1686,6 +1699,93 @@ public class AutoRepairEntry extends XposedModule {
         }
     }
 
+    /**
+     * 阶段一测试：监听包启用状态广播（冻结/解冻），只记录日志，不做任何补回动作。
+     *
+     * 场景与边界：
+     * 1. 冰箱类工具与 `pm disable-user/enable` 最终调用 PackageManager.setApplicationEnabledSetting，
+     *    系统随后发送 ACTION_PACKAGE_CHANGED（冻结后 getApplicationEnabledSetting=3，解冻后恢复 0/1）；
+     *    这是"解冻"唯一与事件一一对应的系统信号，后续接入自动恢复就依赖它。
+     * 2. ACTION_PACKAGE_* 广播携带 data=package:xxx，动态接收器必须 addDataScheme("package")，
+     *    否则 IntentFilter 匹配失败、收不到任何事件（常见坑）。
+     * 3. system_server 内同样动态注册；为避免系统内其它应用的安装/更新刷爆持久事件缓冲，
+     *    只有 ACTION_PACKAGE_CHANGED 且包在受管列表中时才写入 event 主日志，其余只写 logcat。
+     */
+    private static void ensurePackageReceiver() {
+        if (sPackageStateReceiver != null) {
+            return;
+        }
+        Context ctx = sContext != null ? sContext : getSystemContext();
+        if (ctx == null) {
+            return;
+        }
+        try {
+            BroadcastReceiver receiver = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    if (intent == null) {
+                        return;
+                    }
+                    String action = intent.getAction();
+                    if (!Intent.ACTION_PACKAGE_CHANGED.equals(action)
+                            && !Intent.ACTION_PACKAGE_ADDED.equals(action)
+                            && !Intent.ACTION_PACKAGE_REMOVED.equals(action)) {
+                        return;
+                    }
+                    String pkg = intent.getData() != null
+                            ? intent.getData().getSchemeSpecificPart() : null;
+                    boolean replacing = intent.getBooleanExtra(Intent.EXTRA_REPLACING, false);
+                    String[] changedComponents = intent.getStringArrayExtra(Intent.EXTRA_CHANGED_COMPONENT_NAME_LIST);
+                    String curState = "未知";
+                    if (pkg != null) {
+                        try {
+                            curState = String.valueOf(context.getPackageManager()
+                                    .getApplicationEnabledSetting(pkg));
+                        } catch (IllegalArgumentException e) {
+                            curState = "未安装";
+                        } catch (Throwable t) {
+                            curState = "异常:" + t;
+                        }
+                    }
+                    String summary = "收到包状态广播 " + action + ": pkg=" + pkg
+                            + " enabled=" + curState
+                            + (changedComponents != null
+                                    ? " changed=" + java.util.Arrays.toString(changedComponents) : "")
+                            + (replacing ? " replacing=true" : "");
+                    log("[监听] " + summary);
+                    if (Intent.ACTION_PACKAGE_CHANGED.equals(action) && isManagedPackage(pkg)) {
+                        event("监听", summary);
+                    }
+                }
+            };
+            IntentFilter filter = new IntentFilter();
+            filter.addAction(Intent.ACTION_PACKAGE_CHANGED);
+            filter.addAction(Intent.ACTION_PACKAGE_ADDED);
+            filter.addAction(Intent.ACTION_PACKAGE_REMOVED);
+            filter.addDataScheme("package");
+            Handler handler = sHandler;
+            if (Build.VERSION.SDK_INT >= 33) {
+                ctx.registerReceiver(receiver, filter, null, handler, Context.RECEIVER_EXPORTED);
+            } else {
+                ctx.registerReceiver(receiver, filter, null, handler);
+            }
+            sPackageStateReceiver = receiver;
+            log("[监听] 包状态广播接收器已注册");
+        } catch (Throwable t) {
+            event("失败", "注册包状态广播接收器异常: " + t);
+        }
+    }
+
+    /** 包名是否属于当前受管列表（仅用于测试阶段过滤持久化日志，避免无关应用刷屏） */
+    private static boolean isManagedPackage(String pkg) {
+        if (pkg == null || pkg.isEmpty()) {
+            return false;
+        }
+        String managed = sManagedServicesCache != null
+                ? sManagedServicesCache : readConfig(KEY_SERVICES);
+        return managed != null && managed.contains(pkg + "/");
+    }
+
     private static void scheduleReceiverInit() {
         if (sContext == null) {
             sContext = getSystemContext();
@@ -1693,8 +1793,9 @@ public class AutoRepairEntry extends XposedModule {
         if (sContext != null) {
             ensureCommandReceiver();
             ensureObserver();
+            ensurePackageReceiver();
         }
-        if ((sCommandReceiver == null || sObserver == null)
+        if ((sCommandReceiver == null || sObserver == null || sPackageStateReceiver == null)
                 && sContextRetryCount < MAX_INIT_RETRY) {
             sContextRetryCount++;
             if (sHandler != null) {

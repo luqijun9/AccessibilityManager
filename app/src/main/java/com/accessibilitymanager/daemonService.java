@@ -166,6 +166,39 @@ public class daemonService extends Service {
         }
     };
 
+    // ── 包状态广播（阶段一：仅验证冻结/解冻时系统是否真的发广播）──
+    // 场景：冰箱类工具和 `pm disable-user/enable` 最终都走 PackageManager.setApplicationEnabledSetting，
+    // 系统随后发送 ACTION_PACKAGE_CHANGED；接收后用 getApplicationEnabledSetting 读取状态（冻结=3，解冻=0/1）。
+    // 本阶段只记录日志，不触发任何保活动作；确认广播可达后再接入三态判断与解冻恢复。
+    final private BroadcastReceiver mPackageStateReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent == null) return;
+            String action = intent.getAction();
+            String pkg = intent.getData() != null
+                    ? intent.getData().getSchemeSpecificPart() : null;
+            boolean replacing = intent.getBooleanExtra(Intent.EXTRA_REPLACING, false);
+            String[] changedComponents = intent.getStringArrayExtra(Intent.EXTRA_CHANGED_COMPONENT_NAME_LIST);
+            String enabledState = "未知";
+            if (pkg != null && packageManager != null) {
+                try {
+                    enabledState = String.valueOf(packageManager.getApplicationEnabledSetting(pkg));
+                } catch (IllegalArgumentException e) {
+                    enabledState = "未安装";
+                } catch (Throwable t) {
+                    enabledState = "异常:" + t;
+                }
+            }
+            String msg = "[包状态] 收到 " + action + ": pkg=" + pkg
+                    + " enabled=" + enabledState
+                    + (changedComponents != null ? " changed=" + java.util.Arrays.toString(changedComponents) : "")
+                    + (replacing ? " replacing=true" : "");
+            // logcat 用于 adb 抓取验证；LogUtil 同步到管理器日志页
+            Log.d("AM_DIAG", msg + " data=" + intent.getDataString());
+            LogUtil.log(daemonService.this, msg);
+        }
+    };
+
     /** 在 daemonExecutor 线程中执行 */
     private void handleUnlockBroadcast(String currentSetting) {
         if (currentSetting == null) currentSetting = "";
@@ -1045,6 +1078,19 @@ public class daemonService extends Service {
             registerReceiver(myReceiver, new IntentFilter("android.intent.action.USER_PRESENT"));
         }
 
+        // 阶段一测试：监听包启用状态变化（冻结/解冻），只写日志验证广播可达性。
+        // ACTION_PACKAGE_* 广播带 data=package:xxx，动态接收器必须声明 package 数据 scheme，否则匹配不到。
+        IntentFilter packageFilter = new IntentFilter();
+        packageFilter.addAction(Intent.ACTION_PACKAGE_CHANGED);
+        packageFilter.addAction(Intent.ACTION_PACKAGE_ADDED);
+        packageFilter.addAction(Intent.ACTION_PACKAGE_REMOVED);
+        packageFilter.addDataScheme("package");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(mPackageStateReceiver, packageFilter, Context.RECEIVER_EXPORTED);
+        } else {
+            registerReceiver(mPackageStateReceiver, packageFilter);
+        }
+
         // 注册前台应用变化监听器，应用切换时直接在进程内触发白名单状态同步，不启动新服务
         mForegroundPkgListener = (prefs, key) -> {
             if ("current_foreground_pkg".equals(key)
@@ -1081,6 +1127,7 @@ public class daemonService extends Service {
         cancelPostFixCheck();
         TimerReceiver.cancel(this, "服务销毁");
         try { unregisterReceiver(myReceiver); } catch (Exception ignored) { }
+        try { unregisterReceiver(mPackageStateReceiver); } catch (Exception ignored) { }
         if (mContentOb != null) {
             try { getContentResolver().unregisterContentObserver(mContentOb); } catch (Exception ignored) { }
         }
