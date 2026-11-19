@@ -6,7 +6,6 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
-import android.content.ComponentName;
 import android.os.Bundle;
 
 import java.util.ArrayDeque;
@@ -450,17 +449,30 @@ public class AutoRepairEntryTest {
     }
 
     @Test
-    public void isPackageProcessRunning_withNullContext_returnsFalse() {
-        assertFalse(AutoRepairEntry.isPackageProcessRunning("com.arlosoft.macrodroid"));
-        assertFalse(AutoRepairEntry.isPackageProcessRunning(null));
-        assertFalse(AutoRepairEntry.isPackageProcessRunning(""));
-    }
+    public void selectRepairBatch_keepsHealthySiblingsOnlyWhenKillingProcess() {
+        ComponentKey a = ComponentKey.parse("com.macro/.ServiceA");
+        ComponentKey b = ComponentKey.parse("com.macro/.ServiceB");
+        List<ComponentKey> candidates = new ArrayList<>();
+        candidates.add(a);
+        candidates.add(b);
 
-    @Test
-    public void isServiceProcessRunning_withNullContext_returnsFalse() {
-        assertFalse(AutoRepairEntry.isServiceProcessRunning(null));
-        assertFalse(AutoRepairEntry.isServiceProcessRunning(ComponentName.unflattenFromString(
-                "com.arlosoft.macrodroid/.triggers.services.MacroDroidAccessibilityServiceJellyBean")));
+        java.util.Set<ComponentKey> unbound = new java.util.LinkedHashSet<>();
+        unbound.add(a);
+
+        // 不强杀：只关开真正未绑定的 A，健康的 B 不参与，避免按键监听服务被无谓重绑
+        List<ComponentKey> noKill = RepairPolicy.selectRepairBatch(candidates, false, unbound);
+        assertEquals(1, noKill.size());
+        assertEquals(a, noKill.get(0));
+
+        // 强杀会杀死整包进程：A、B 都必须回加
+        List<ComponentKey> kill = RepairPolicy.selectRepairBatch(candidates, true, unbound);
+        assertEquals(2, kill.size());
+        assertTrue(kill.contains(a));
+        assertTrue(kill.contains(b));
+
+        // 没有未绑定成员时，不强杀不应产生空批次之外的动作
+        assertTrue(RepairPolicy.selectRepairBatch(
+                candidates, false, Collections.<ComponentKey>emptySet()).isEmpty());
     }
 
     @Test

@@ -39,7 +39,7 @@ final class ServiceRepairStateMachine {
         SUSPENDED,
         /** 最近一次已知连接健康 */
         BOUND,
-        /** 观察到断开，等待 AMS 自愈/OEM 瞬态恢复/启动宽限 */
+        /** 观察到断开，等待 AMS 自愈/OEM 瞬态恢复 */
         SUSPECT,
         /** 已确认未绑定且允许修复，等待包级协调器收编 */
         NEEDS_REPAIR,
@@ -59,8 +59,6 @@ final class ServiceRepairStateMachine {
     enum TimerType {
         /** 断开后的 settle 等待 */
         SETTLE,
-        /** 应用进程存活但服务未绑定时的启动宽限 */
-        GRACE,
         /** 关开写入后的绑定校验 */
         VERIFY,
         /** 修复成功后的稳定性复查 */
@@ -244,7 +242,6 @@ final class ServiceRepairStateMachine {
         boolean inEnabledList;
         boolean bound;
         boolean bindCheckAvailable;
-        boolean processRunning;
         boolean userDisabled;
         boolean bootGraceActive;
         long bootGraceRemainingMs;
@@ -363,7 +360,6 @@ final class ServiceRepairStateMachine {
     private long generation;
     private long boundAt;
     private int fastFailCount;
-    private int graceAttempts;
     private int bindRetryAttempts;
     private long lastDeathAt;
 
@@ -381,10 +377,6 @@ final class ServiceRepairStateMachine {
 
     int getFastFailCount() {
         return fastFailCount;
-    }
-
-    int getGraceAttempts() {
-        return graceAttempts;
     }
 
     long getLastDeathAt() {
@@ -518,7 +510,6 @@ final class ServiceRepairStateMachine {
             boundAt = 0L;
         }
         lastDeathAt = snapshot.now;
-        graceAttempts = 0;
         if (snapshot.bootGraceActive) {
             return change(from, State.SUSPECT, "died_boot_grace",
                     Effect.timer(TimerType.BOOT_GRACE, bootGraceDelay(snapshot), "died"));
@@ -534,7 +525,6 @@ final class ServiceRepairStateMachine {
                 return stay(from, Effect.clearCrashedMarker());
             }
             boundAt = snapshot.now;
-            graceAttempts = 0;
             bindRetryAttempts = 0;
             boolean recovered = from == State.SUSPECT || from == State.VERIFYING
                     || from == State.RESTORING || from == State.BACKOFF
@@ -555,7 +545,6 @@ final class ServiceRepairStateMachine {
             return noop(from);
         }
         boundAt = 0L;
-        graceAttempts = 0;
         if (snapshot.bootGraceActive) {
             return change(from, State.SUSPECT, "init_failed_boot_grace",
                     Effect.timer(TimerType.BOOT_GRACE, bootGraceDelay(snapshot), "init_failed"));
@@ -651,8 +640,7 @@ final class ServiceRepairStateMachine {
     }
 
     /**
-     * 定时器到点后的统一评估：先看是否已恢复，再看环境/配置门控，最后决定宽限、
-     * 重试、退避或请求修复。所有判断都使用快照，不直接读系统状态。
+     * 定时器到点后的统一评估：先看是否已恢复，再看环境/配置门控，最后决定重试、退避或请求修复。
      */
     private Transition evaluateUnbound(Snapshot snapshot, State from, String reason) {
         if (from == State.REPAIRING) {
@@ -681,14 +669,6 @@ final class ServiceRepairStateMachine {
                             RepairPolicy.FSM_BIND_RETRY_MS, reason));
         }
         bindRetryAttempts = 0;
-        if (snapshot.processRunning
-                && graceAttempts < RepairPolicy.FSM_MAX_GRACE_ATTEMPTS) {
-            graceAttempts++;
-            State next = from == State.VERIFYING ? State.VERIFYING : State.SUSPECT;
-            return change(from, next, reason + "_grace_" + graceAttempts,
-                    Effect.timer(TimerType.GRACE, RepairPolicy.FSM_GRACE_MS, reason));
-        }
-        graceAttempts = 0;
         long backoff = RepairPolicy.repairBackoffMs(fastFailCount);
         // BACKOFF 定时器到点时即使还有退避值也要前进，否则会永远停在退避
         if (backoff > 0L && from != State.BACKOFF) {
@@ -703,7 +683,6 @@ final class ServiceRepairStateMachine {
     /** 从故障/关闭状态恢复为 BOUND：清 crashed 标记、通知恢复，并安排一次稳定性复查。 */
     private Transition recoveryTransition(State from, Snapshot snapshot, String reason) {
         boundAt = snapshot.now;
-        graceAttempts = 0;
         bindRetryAttempts = 0;
         return change(from, State.BOUND, reason,
                 Effect.clearCrashedMarker(),

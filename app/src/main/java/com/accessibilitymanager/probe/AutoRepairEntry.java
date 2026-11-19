@@ -9,7 +9,6 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.content.pm.ServiceInfo;
 import android.database.ContentObserver;
 import android.net.Uri;
 import android.os.Build;
@@ -1037,21 +1036,32 @@ public class AutoRepairEntry extends XposedModule {
                     boolean ignoreSystem = shouldIgnoreSystemApp(pkg);
                     if (!died) {
                         Object existing = sConnections.get(connKey);
-                        if (!ignoreSystem && existing != null && existing != connection) {
-                            // 旧连接已经死亡时 unbindLocked 可能再次扰动 AMS 状态；
-                            // 只有旧连接仍然持有服务接口时才需要主动解绑。
-                            if (isConnectionBound(existing)) {
-                                event("警告", "检测到同名服务存在重复连接，自动解除旧连接: "
+                        boolean existingBound = existing != null && isConnectionBound(existing);
+                        if (!hasInterface && existingBound && existing != connection) {
+                            // 新连接初始化失败但旧连接仍然持有服务接口：说明这次 initializeService
+                            // 只是失败的重绑/延迟回调，旧连接仍可用。此时绝不能解绑旧连接，
+                            // 也不能用失败连接覆盖 sConnections，否则 findBoundConnection 会误判
+                            // 为“未绑定”，把一次失败重绑放大成整包关开修复。
+                            if (isDebugEnabled()) {
+                                log("ignore failed initializeService, existing connection still bound: "
                                         + component.flattenToShortString()
                                         + " old=" + connId(existing) + " new=" + connId(connection));
-                                unbindConnection(existing, "duplicate_detected");
-                            } else {
-                                if (isDebugEnabled()) {
-                                    log("stale duplicate connection already dead: "
-                                            + component.flattenToShortString()
-                                            + " old=" + connId(existing) + " new=" + connId(connection));
-                                }
                             }
+                            return;
+                        }
+                        if (!ignoreSystem && existing != null && existing != connection
+                                && existingBound) {
+                            // 只有新连接已经成功拿到服务接口时才解绑旧连接；
+                            // 否则可能把唯一存活的旧连接解掉，留下两个都不可用的连接。
+                            event("警告", "检测到同名服务存在重复连接，自动解除旧连接: "
+                                    + component.flattenToShortString()
+                                    + " old=" + connId(existing) + " new=" + connId(connection));
+                            unbindConnection(existing, "duplicate_detected");
+                        } else if (existing != null && existing != connection
+                                && !existingBound && isDebugEnabled()) {
+                            log("stale duplicate connection already dead: "
+                                    + component.flattenToShortString()
+                                    + " old=" + connId(existing) + " new=" + connId(connection));
                         }
                         sConnections.put(connKey, connection);
                         onInitializeService(component, finalCrashed, hasInterface, connection);
@@ -2650,7 +2660,6 @@ public class AutoRepairEntry extends XposedModule {
         Object bound = findBoundConnection(component);
         snapshot.bound = bound != null;
         snapshot.bindCheckAvailable = sBoundCheckAvailable && !enabledReadFailed;
-        snapshot.processRunning = isServiceProcessRunning(component);
 
         long remainingBoot = getRemainingBootGraceMs(now, sFirstServiceConnectAt);
         snapshot.bootGraceActive = remainingBoot > 0L;
@@ -2922,20 +2931,89 @@ public class AutoRepairEntry extends XposedModule {
                 continue;
             }
             ComponentKey trigger = ComponentKey.parse(request.trigger.flattenToString());
-            List<ComponentKey> batch = RepairPolicy.planPackageBatch(
+            List<ComponentKey> candidates = RepairPolicy.planPackageBatch(
                     managed, enabled, pkg, trigger);
-            if (batch.isEmpty()) {
+            if (candidates.isEmpty()) {
                 log("package repair batch empty, re-evaluate: " + pkg);
                 handleServiceEvent(request.trigger, ServiceRepairStateMachine.Event.sync());
                 continue;
             }
-            startPackageRepair(request, batch);
+            // 触发服务可能在排队/读取配置期间已经自愈。此时不能因为队列里还有旧请求
+            // 就去关开一个已经健康的服务，更不能在强杀模式下把整包进程再杀一次。
+            if (findBoundConnection(request.trigger) != null) {
+                log("package repair skipped, trigger already bound: "
+                        + request.trigger.flattenToShortString());
+                handleServiceEvent(request.trigger, ServiceRepairStateMachine.Event.sync());
+                continue;
+            }
+
+            boolean allowKill = computePackageKillAllowed(request);
+            Set<ComponentKey> unbound = allowKill
+                    ? Collections.<ComponentKey>emptySet()
+                    : findUnboundMembers(candidates);
+            // 不强杀时只关开真正未绑定的成员；强杀会杀死整包进程，才需要整批成员一起回加。
+            List<ComponentKey> batch = RepairPolicy.selectRepairBatch(
+                    candidates, allowKill, unbound);
+            if (batch.isEmpty()) {
+                log("package repair batch empty after trim, re-evaluate: " + pkg);
+                handleServiceEvent(request.trigger, ServiceRepairStateMachine.Event.sync());
+                continue;
+            }
+            if (!allowKill && batch.size() < candidates.size()) {
+                // 同包健康服务不参与无强杀关开：MacroDroid 的按键监听服务被无谓重绑时，
+                // 会重新引入音量键事件延迟；这里只处理确认未绑定的成员。
+                event("修复", "同包健康服务不参与关开: " + pkg,
+                        "action=fsm_batch_trim candidates=" + candidates.size()
+                                + " batch=" + batch.size());
+            }
+            startPackageRepair(request, batch, allowKill);
             return;
         }
     }
 
+    /**
+     * 计算本次包级修复是否允许强杀。
+     *
+     * <p>场景与边界：状态机的 allowKill 只是“快速失败策略允许”，最终还要叠加
+     * 强杀模式开关、同包冷却、禁用列表和系统/自身包排除。这个计算必须在规划批次之前完成，
+     * 因为“是否强杀”直接决定要不要把同包健康服务一起关开。
+     */
+    private static boolean computePackageKillAllowed(PackageRepairRequest request) {
+        if (request == null || !request.allowKill) {
+            return false;
+        }
+        boolean fixMode = sFixModeCache != null
+                ? "1".equals(sFixModeCache) : "1".equals(readConfig(KEY_FIX_MODE));
+        String disabled = sFixDisabledCache != null
+                ? sFixDisabledCache : readConfig(KEY_FIX_DISABLED);
+        String contextPkg = sContext != null ? sContext.getPackageName() : null;
+        Long lastKill = sLastPackageKillAt.get(request.pkg);
+        return RepairPolicy.shouldKillPackage(
+                request.pkg, contextPkg, fixMode, disabled,
+                request.trigger.flattenToString(), lastKill,
+                SystemClock.elapsedRealtime(), getFastFailCountForPackage(request.pkg));
+    }
+
+    /** 按 AMS 当前连接状态找出候选批次中真正未绑定的成员；只在 handler 线程调用。 */
+    private static Set<ComponentKey> findUnboundMembers(List<ComponentKey> candidates) {
+        Set<ComponentKey> unbound = new LinkedHashSet<>();
+        if (candidates == null) {
+            return unbound;
+        }
+        for (ComponentKey key : candidates) {
+            if (key == null) {
+                continue;
+            }
+            ComponentName component = new ComponentName(key.getPackageName(), key.getClassName());
+            if (findBoundConnection(component) == null) {
+                unbound.add(key);
+            }
+        }
+        return unbound;
+    }
+
     private static void startPackageRepair(PackageRepairRequest request,
-            List<ComponentKey> batch) {
+            List<ComponentKey> batch, boolean allowKill) {
         sRepairTransactionActive = true;
         sRepairTransactionPackage = request.pkg;
         long generation = ++sRepairTransactionGeneration;
@@ -2961,17 +3039,6 @@ public class AutoRepairEntry extends XposedModule {
             failActivePackageRepair("disable_write_failed");
             return;
         }
-
-        boolean fixMode = sFixModeCache != null
-                ? "1".equals(sFixModeCache) : "1".equals(readConfig(KEY_FIX_MODE));
-        String disabled = sFixDisabledCache != null
-                ? sFixDisabledCache : readConfig(KEY_FIX_DISABLED);
-        String contextPkg = sContext != null ? sContext.getPackageName() : null;
-        Long lastKill = sLastPackageKillAt.get(request.pkg);
-        boolean allowKill = request.allowKill && RepairPolicy.shouldKillPackage(
-                request.pkg, contextPkg, fixMode, disabled,
-                request.trigger.flattenToString(), lastKill,
-                SystemClock.elapsedRealtime(), getFastFailCountForPackage(request.pkg));
 
         if (allowKill) {
             sLastPackageKillAt.put(request.pkg, SystemClock.elapsedRealtime());
@@ -3380,94 +3447,6 @@ public class AutoRepairEntry extends XposedModule {
         }
         sb.append(']');
         return sb.toString();
-    }
-
-    /**
-     * 只检查目标服务实际所在进程是否存活。
-     *
-     * <p>为什么不能只看 uid：
-     * WebView 沙箱、隔离进程、同包其他子进程都可能共享 uid；旧逻辑会把它们当成“服务进程已启动”，
-     * 从而白白消耗两次 2 秒启动宽限，拖慢真正需要修复的服务。
-     *
-     * <p>优先使用 ServiceInfo.processName 精确匹配；解析失败时回退到整包 uid 检查，保持兼容。
-     */
-    static boolean isServiceProcessRunning(ComponentName component) {
-        if (component == null) {
-            return false;
-        }
-        Context ctx = sContext;
-        if (ctx == null) {
-            return false;
-        }
-        String processName = null;
-        try {
-            ServiceInfo info = ctx.getPackageManager().getServiceInfo(component, 0);
-            if (info != null && info.processName != null && !info.processName.isEmpty()) {
-                processName = info.processName;
-            }
-        } catch (Throwable t) {
-            // 冻结/禁用包的 ServiceInfo 本来就查不到，这是预期状态而不是异常，避免冻结时每次解析都刷日志
-            if (!isPackageFrozen(component.getPackageName())) {
-                log("resolve service process failed: " + component.flattenToShortString() + " " + t);
-            }
-        }
-        if (processName == null) {
-            return isPackageProcessRunning(component.getPackageName());
-        }
-        try {
-            ActivityManager am =
-                    (ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE);
-            if (am != null) {
-                List<ActivityManager.RunningAppProcessInfo> procs = am.getRunningAppProcesses();
-                if (procs != null) {
-                    for (ActivityManager.RunningAppProcessInfo info : procs) {
-                        if (info != null && processName.equals(info.processName)) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        } catch (Throwable t) {
-            log("isServiceProcessRunning failed: " + t);
-        }
-        return false;
-    }
-
-    static boolean isPackageProcessRunning(String pkg) {
-        Context ctx = sContext;
-        if (ctx == null || pkg == null || pkg.isEmpty()) {
-            return false;
-        }
-        final int uid;
-        try {
-            uid = ctx.getPackageManager().getApplicationInfo(pkg, 0).uid;
-        } catch (Throwable t) {
-            return false;
-        }
-        try {
-            ActivityManager am =
-                    (ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE);
-            if (am != null) {
-                List<ActivityManager.RunningAppProcessInfo> procs = am.getRunningAppProcesses();
-                if (procs != null) {
-                    for (ActivityManager.RunningAppProcessInfo info : procs) {
-                        if (info != null && info.uid == uid) {
-                            return true;
-                        }
-                    }
-                }
-                List<ActivityManager.RunningServiceInfo> svcs = am.getRunningServices(Integer.MAX_VALUE);
-                if (svcs != null) {
-                    for (ActivityManager.RunningServiceInfo info : svcs) {
-                        if (info != null && info.uid == uid && info.pid > 0) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        } catch (Throwable ignored) {
-        }
-        return false;
     }
 
     private static void unbindConnection(Object connection, String reason) {

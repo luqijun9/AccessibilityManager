@@ -41,16 +41,12 @@ public final class RepairPolicy {
     // ── 服务状态机时序 ────────────────────────────────────────────────
     /** 观察到断开后的 settle 等待：给 AMS 自动重绑/OEM 瞬态恢复留出时间 */
     static final long FSM_SETTLE_MS = 3_000L;
-    /** 应用进程已存活但服务未绑定时的启动宽限，每次 2 秒 */
-    static final long FSM_GRACE_MS = 2_000L;
     /** 关开写入完成后的首次绑定校验延迟 */
     static final long FSM_VERIFY_MS = 2_000L;
     /** 修复成功后的稳定性复查延迟，覆盖 OEM 数秒内二次查杀与事件丢失 */
     static final long FSM_STABILITY_MS = 5_000L;
     /** 绑定状态不可读时的重试间隔 */
     static final long FSM_BIND_RETRY_MS = 5_000L;
-    /** 启动宽限最多 2 次，避免应用进程长期存活但服务永远不绑定时无限等待 */
-    static final int FSM_MAX_GRACE_ATTEMPTS = 2;
     /** 绑定状态不可读时最多重试 3 次，之后等服务/配置事件重新触发，避免定时器空转 */
     static final int FSM_MAX_BIND_RETRY_ATTEMPTS = 3;
 
@@ -319,6 +315,37 @@ public final class RepairPolicy {
                 && managed.contains(trigger) && enabled.contains(trigger)
                 && seen.add(trigger)) {
             result.add(trigger);
+        }
+        return result;
+    }
+
+    /**
+     * 按“本次是否真的会强杀进程”裁剪同包批成员。
+     *
+     * <p>真实场景与边界：
+     * <ul>
+     *   <li>allowKill=true：{@code killAppProcesses} 会杀死整包进程，同包所有已启用服务都会断开，
+     *       必须整批关开，否则未纳入批次的健康服务会停留在“启用但未绑定”状态；</li>
+     *   <li>allowKill=false：只关开当前确认未绑定的成员。MacroDroid 等应用可能同时启用多个
+     *       无障碍服务且共享同一进程；健康兄弟服务（尤其按键监听服务）被一起解绑/重绑时，
+     *       会重新引入音量键事件延迟，因此不能因为“同包”就无条件整批处理；</li>
+     *   <li>unbound 必须由调用方在真正执行修复前按 AMS 当前连接状态计算，不能复用旧快照，
+     *       避免把已经自愈的服务再次加入批次。</li>
+     * </ul>
+     */
+    static List<ComponentKey> selectRepairBatch(List<ComponentKey> candidates,
+            boolean allowKill, Set<ComponentKey> unbound) {
+        List<ComponentKey> result = new ArrayList<>();
+        if (candidates == null || candidates.isEmpty()) {
+            return result;
+        }
+        for (ComponentKey key : candidates) {
+            if (key == null) {
+                continue;
+            }
+            if (allowKill || (unbound != null && unbound.contains(key))) {
+                result.add(key);
+            }
         }
         return result;
     }

@@ -42,7 +42,6 @@ public class ServiceRepairStateMachineTest {
                 ServiceRepairStateMachine.Event.binderDied(false),
                 snapshot(start + 1_000L));
         ServiceRepairStateMachine.Snapshot settleSnapshot = snapshot(start + 4_000L);
-        settleSnapshot.processRunning = false;
         return machine.handle(
                 ServiceRepairStateMachine.Event.timer(
                         ServiceRepairStateMachine.TimerType.SETTLE,
@@ -133,43 +132,28 @@ public class ServiceRepairStateMachineTest {
     }
 
     @Test
-    public void settleTimer_unbound_processRunning_grantsTwoGracesThenRepairs() {
+    public void settleTimer_unbound_requestsRepairWithoutProcessGrace() {
+        // 真机回放：MacroDroid 双服务同进程，A 崩溃后 B 仍存活，旧实现仅因“进程存活”
+        // 就追加 2×2s 启动宽限；现在 settle 到点且确认未绑定即请求修复，不再猜测进程状态。
         ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
         initBound(machine, 1_000L);
         ServiceRepairStateMachine.Transition died = machine.handle(
                 ServiceRepairStateMachine.Event.binderDied(false),
                 snapshot(2_000L));
 
-        ServiceRepairStateMachine.Snapshot graceSnapshot = snapshot(5_000L);
-        graceSnapshot.processRunning = true;
-        ServiceRepairStateMachine.Transition first = machine.handle(
+        ServiceRepairStateMachine.Transition t = machine.handle(
                 ServiceRepairStateMachine.Event.timer(
                         ServiceRepairStateMachine.TimerType.SETTLE,
                         died.getGeneration()),
-                graceSnapshot);
-        assertEquals(ServiceRepairStateMachine.State.SUSPECT, first.getTo());
-        assertEquals(1, machine.getGraceAttempts());
-        assertEquals(RepairPolicy.FSM_GRACE_MS,
-                first.findTimer(ServiceRepairStateMachine.TimerType.GRACE).getDelayMs());
+                snapshot(5_000L));
 
-        ServiceRepairStateMachine.Transition second = machine.handle(
-                ServiceRepairStateMachine.Event.timer(
-                        ServiceRepairStateMachine.TimerType.GRACE,
-                        first.getGeneration()),
-                graceSnapshot);
-        assertEquals(ServiceRepairStateMachine.State.SUSPECT, second.getTo());
-        assertEquals(2, machine.getGraceAttempts());
-
-        ServiceRepairStateMachine.Transition third = machine.handle(
-                ServiceRepairStateMachine.Event.timer(
-                        ServiceRepairStateMachine.TimerType.GRACE,
-                        second.getGeneration()),
-                graceSnapshot);
-        assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR, third.getTo());
-        ServiceRepairStateMachine.Effect repair = third.findEffect(
+        assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR, t.getTo());
+        ServiceRepairStateMachine.Effect repair = t.findEffect(
                 ServiceRepairStateMachine.ActionType.REQUEST_REPAIR);
         assertNotNull(repair);
         assertTrue(repair.isAllowKill());
+        assertNull("宽限定时器已删除，settle 后不得再排 GRACE",
+                t.findTimer(ServiceRepairStateMachine.TimerType.SETTLE));
     }
 
     @Test
@@ -189,7 +173,6 @@ public class ServiceRepairStateMachineTest {
         assertEquals(2, machine.getFastFailCount());
 
         ServiceRepairStateMachine.Snapshot settleSnapshot = snapshot(5_200L);
-        settleSnapshot.processRunning = false;
         ServiceRepairStateMachine.Transition backoff = machine.handle(
                 ServiceRepairStateMachine.Event.timer(
                         ServiceRepairStateMachine.TimerType.SETTLE,
@@ -499,7 +482,6 @@ public class ServiceRepairStateMachineTest {
 
         ServiceRepairStateMachine.Snapshot unbound = snapshot(8_000L);
         unbound.bound = false;
-        unbound.processRunning = false;
         ServiceRepairStateMachine.Transition t = machine.handle(
                 ServiceRepairStateMachine.Event.timer(
                         ServiceRepairStateMachine.TimerType.STABILITY,
@@ -669,7 +651,6 @@ public class ServiceRepairStateMachineTest {
 
         ServiceRepairStateMachine.Snapshot settle = snapshot(5_200L);
         settle.bound = false;
-        settle.processRunning = false;
         ServiceRepairStateMachine.Transition backoff = machine.handle(
                 ServiceRepairStateMachine.Event.timer(
                         ServiceRepairStateMachine.TimerType.SETTLE,
@@ -706,7 +687,6 @@ public class ServiceRepairStateMachineTest {
                 snapshot(2_000L));
 
         ServiceRepairStateMachine.Snapshot settle = snapshot(5_000L);
-        settle.processRunning = false;
         assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR,
                 a.handle(ServiceRepairStateMachine.Event.timer(
                         ServiceRepairStateMachine.TimerType.SETTLE,
@@ -738,7 +718,6 @@ public class ServiceRepairStateMachineTest {
 
         ServiceRepairStateMachine.Snapshot bUnbound = snapshot(7_500L);
         bUnbound.bound = false;
-        bUnbound.processRunning = false;
         ServiceRepairStateMachine.Transition bRetry = b.handle(
                 ServiceRepairStateMachine.Event.timer(
                         ServiceRepairStateMachine.TimerType.VERIFY,
