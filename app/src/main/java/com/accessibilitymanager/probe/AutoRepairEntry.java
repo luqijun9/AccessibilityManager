@@ -86,14 +86,6 @@ public class AutoRepairEntry extends XposedModule {
      * 用于真机观察“旧连接迟到事件”与“双连接是否真的存在”。默认 0，不影响正常保活。
      */
     private static final String KEY_DEBUG_PAUSE_UNBIND = "a11y_module_debug_pause_unbind";
-    /**
-     * 实验开关：跳过 AMS mCrashedServices 清理，仅保留 info.crashed 清理。
-     *
-     * <p>用途：验证“恢复后 dumpsys 仍显示 crashed”到底是 AMS 的短时延迟，
-     * 还是必须由模块显式清理的持久 set。默认 0；打开后只写诊断日志，不改 set。
-     */
-    private static final String KEY_DEBUG_SKIP_CRASHED_SET_CLEAR =
-            "a11y_module_debug_skip_crashed_set_clear";
     private static final String KEY_FIX_MODE = "a11y_module_fix_mode";
     private static final String KEY_FIX_DISABLED = "a11y_module_fix_disabled";
     private static final String KEY_IGNORE_SYSTEM = "a11y_module_ignore_system";
@@ -3571,11 +3563,6 @@ public class AutoRepairEntry extends XposedModule {
         return "1".equals(readSecure(KEY_DEBUG_PAUSE_UNBIND));
     }
 
-    /** 实验开关：跳过 mCrashedServices 清理，用于验证残留是否为 AMS 延迟。 */
-    private static boolean isDebugSkipCrashedSetClear() {
-        return "1".equals(readSecure(KEY_DEBUG_SKIP_CRASHED_SET_CLEAR));
-    }
-
     /**
      * 发现同组件两个 bound 连接后，先登记一条延迟确认，而不是立即 unbind。
      *
@@ -3841,67 +3828,6 @@ public class AutoRepairEntry extends XposedModule {
             }
         } catch (Throwable t) {
             log("clear crashed flag failed: " + t);
-        }
-        if (isDebugSkipCrashedSetClear()) {
-            log("skip AMS crashed set clear (debug switch): "
-                    + component.flattenToShortString());
-        } else {
-            clearAmsCrashedSetIfCurrent(connection, component);
-        }
-    }
-
-    /**
-     * 清理 AMS AccessibilityUserState.mCrashedServices 中残留的组件。
-     *
-     * <p>真实场景：旧连接在新连接已经 bound 之后才回调 binderDied；AMS 的
-     * serviceDisconnectedLocked 会把组件加入 mCrashedServices，即使当前已有新连接。
-     * 之后 updateServicesLocked 看到 crashedServices.contains(component) 会直接跳过绑定，
-     * 形成“实际已 bound，但 dumpsys 仍显示 crashed”的残留状态。
-     *
-     * <p>安全边界：只有确认 AMS 的 mComponentNameToServiceMap 当前就指向这个 connection，
-     * 并且 connection 仍持有 mServiceInterface 时才删除；否则宁可保留，避免像旧实现那样
-     * 无条件清 set 导致 AMS 再次 bind 出多重连接。
-     */
-    private static void clearAmsCrashedSetIfCurrent(Object connection, ComponentName component) {
-        if (connection == null || component == null) {
-            return;
-        }
-        Object userState = getUserState(connection);
-        if (userState == null) {
-            return;
-        }
-        Object lock = getFieldValue(connection, "mLock");
-        if (lock != null) {
-            synchronized (lock) {
-                clearAmsCrashedSetLocked(connection, userState, component);
-            }
-        } else {
-            clearAmsCrashedSetLocked(connection, userState, component);
-        }
-    }
-
-    private static void clearAmsCrashedSetLocked(Object connection, Object userState,
-            ComponentName component) {
-        Object map = getFieldValue(userState, "mComponentNameToServiceMap");
-        if (!(map instanceof Map)) {
-            return;
-        }
-        Object current = ((Map<?, ?>) map).get(component);
-        if (current != connection || !isConnectionBound(connection)) {
-            // 不是 AMS 当前连接：清 set 可能让 AMS 再 bind 一次，必须保持克制。
-            if (isDebugEnabled()) {
-                log("skip AMS crashed set clear (not current): "
-                        + component.flattenToShortString()
-                        + " current=" + connId(current) + " conn=" + connId(connection));
-            }
-            return;
-        }
-        Object crashed = getFieldValue(userState, "mCrashedServices");
-        if (crashed instanceof Set) {
-            boolean removed = ((Set<?>) crashed).remove(component);
-            if (removed) {
-                log("cleared AMS crashed set: " + component.flattenToShortString());
-            }
         }
     }
 
