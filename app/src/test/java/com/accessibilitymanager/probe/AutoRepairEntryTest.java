@@ -476,6 +476,42 @@ public class AutoRepairEntryTest {
     }
 
     @Test
+    public void decideConnectionDedupe_waitsForAmsMapToSwitch() {
+        // AMS 仍指向旧连接：不能立即解绑旧连接，先等待
+        assertEquals(RepairPolicy.ConnectionDedupeAction.WAIT,
+                RepairPolicy.decideConnectionDedupe(true, true, true,
+                        false, true, 0, 2));
+        // 等待次数用尽后，AMS 仍指向旧连接：incoming 是多余绑定，解绑 incoming
+        assertEquals(RepairPolicy.ConnectionDedupeAction.UNBIND_INCOMING,
+                RepairPolicy.decideConnectionDedupe(true, true, true,
+                        false, true, 2, 2));
+        // incoming 自己没 bound：没有重复连接，放弃
+        assertEquals(RepairPolicy.ConnectionDedupeAction.GIVE_UP,
+                RepairPolicy.decideConnectionDedupe(true, false, true,
+                        false, true, 2, 2));
+
+        // AMS 已指向 incoming 且 incoming 仍 bound：可以解绑旧连接
+        assertEquals(RepairPolicy.ConnectionDedupeAction.UNBIND_EXISTING,
+                RepairPolicy.decideConnectionDedupe(true, true, true,
+                        true, false, 0, 2));
+        // AMS 已指向 incoming，但模块 map 已被更新连接替换：放弃，避免操作过期对象
+        assertEquals(RepairPolicy.ConnectionDedupeAction.GIVE_UP,
+                RepairPolicy.decideConnectionDedupe(true, true, false,
+                        true, false, 0, 2));
+        // 旧连接已经死亡：无需 dedupe
+        assertEquals(RepairPolicy.ConnectionDedupeAction.GIVE_UP,
+                RepairPolicy.decideConnectionDedupe(false, true, true,
+                        true, false, 0, 2));
+        // AMS map 完全读不到：先等，超时后放弃，绝不在未知状态下动手
+        assertEquals(RepairPolicy.ConnectionDedupeAction.WAIT,
+                RepairPolicy.decideConnectionDedupe(true, true, true,
+                        false, false, 0, 2));
+        assertEquals(RepairPolicy.ConnectionDedupeAction.GIVE_UP,
+                RepairPolicy.decideConnectionDedupe(true, true, true,
+                        false, false, 2, 2));
+    }
+
+    @Test
     public void nextFastFailCount_usesConnectionLifetime() {
         // 寿命未知（热重载/加载前已绑定）按健康处理，避免一上来就退避
         assertEquals(0, RepairPolicy.nextFastFailCount(3, -1L));

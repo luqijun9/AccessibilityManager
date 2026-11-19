@@ -50,6 +50,19 @@ public final class RepairPolicy {
     /** 绑定状态不可读时最多重试 3 次，之后等服务/配置事件重新触发，避免定时器空转 */
     static final int FSM_MAX_BIND_RETRY_ATTEMPTS = 3;
 
+    // ── 旧连接重复检测 ────────────────────────────────────────────────
+    /**
+     * 发现“同组件两个 bound 连接”后，不立即解绑，先等 AMS 把
+     * mComponentNameToServiceMap 从旧连接切到新连接。
+     *
+     * <p>真实场景：AMS 的 unbindLocked 会 removeServiceLocked 并重建 map；如果模块在
+     * 新连接还没进入 mBoundServices/map 时立即 unbind 旧连接，会和 AMS 的 map 重建赛跑，
+     * 甚至反向解绑刚建立的新连接。500ms 覆盖一次 AMS bind/initializeService 的常见延迟。
+     */
+    static final long CONNECTION_DEDUPE_DELAY_MS = 500L;
+    /** 最多再确认 2 次（总计约 1.5s），避免在 AMS 异常时无限重试。 */
+    static final int CONNECTION_DEDUPE_MAX_ATTEMPTS = 2;
+
     // ── 连接寿命与快速失败退避 ────────────────────────────────────────
     /** 连接存活超过 30 秒视为健康服务：下一次崩溃按“新故障”处理并清空快速失败计数 */
     static final long HEALTHY_CONNECTION_MS = 30_000L;
@@ -348,6 +361,58 @@ public final class RepairPolicy {
             }
         }
         return result;
+    }
+
+    /** 重复连接延迟确认的下一步动作。 */
+    enum ConnectionDedupeAction {
+        /** 等 AMS 的 map 切换/重试 */
+        WAIT,
+        /** AMS 已指向新连接，可以解绑旧连接 */
+        UNBIND_EXISTING,
+        /** AMS 仍指向旧连接，新连接是多余绑定，解绑新连接 */
+        UNBIND_INCOMING,
+        /** 状态不满足/无法判断，放弃本次 dedupe */
+        GIVE_UP
+    }
+
+    /**
+     * 根据 AMS 当前 map、双方 bound 状态和重试次数决定 dedupe 动作。
+     *
+     * <p>边界与安全原则：
+     * <ul>
+     *   <li>旧连接已经死了：无需动作；</li>
+     *   <li>AMS 已指向 incoming 且 incoming 仍 bound：可以解绑 existing；</li>
+     *   <li>AMS 仍指向 existing：说明 AMS 还没切过来，不能解绑 existing；
+     *       等重试耗尽后，如果 incoming 也 bound，则解绑 incoming（AMS 不认它是当前连接）；</li>
+     *   <li>AMS map 读不到（null/第三方）：先等重试，超时后放弃，绝不在未知状态下动手；</li>
+     *   <li>currentIsIncoming=false：模块 map 已被更新的连接替换，放弃，避免操作过期对象。</li>
+     * </ul>
+     */
+    static ConnectionDedupeAction decideConnectionDedupe(boolean existingBound,
+            boolean incomingBound, boolean currentIsIncoming, boolean amsPointsIncoming,
+            boolean amsPointsExisting, int attempts, int maxAttempts) {
+        if (!existingBound) {
+            return ConnectionDedupeAction.GIVE_UP;
+        }
+        if (amsPointsIncoming) {
+            if (incomingBound && currentIsIncoming) {
+                return ConnectionDedupeAction.UNBIND_EXISTING;
+            }
+            return ConnectionDedupeAction.GIVE_UP;
+        }
+        if (amsPointsExisting) {
+            if (!incomingBound) {
+                return ConnectionDedupeAction.GIVE_UP;
+            }
+            if (attempts < Math.max(1, maxAttempts)) {
+                return ConnectionDedupeAction.WAIT;
+            }
+            return ConnectionDedupeAction.UNBIND_INCOMING;
+        }
+        if (attempts < Math.max(1, maxAttempts)) {
+            return ConnectionDedupeAction.WAIT;
+        }
+        return ConnectionDedupeAction.GIVE_UP;
     }
 
     /**

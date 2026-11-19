@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
@@ -75,6 +76,16 @@ public class AutoRepairEntry extends XposedModule {
     private static final String KEY_SCAN = "a11y_module_scan";
     private static final String KEY_DEBUG = "a11y_module_debug";
     private static final String KEY_DEBUG_KILL = "a11y_module_debug_kill";
+    /**
+     * 实验开关：暂停“主动解绑重复连接”，只保留只读诊断。
+     *
+     * <p>真实场景：AMS 的 unbind 会把这个组件的连接从 mBoundServices 和
+     * mComponentNameToServiceMap 中移除；如果此时新连接还没完成 addServiceLocked，
+     * 主动 unbind 旧连接会与 AMS 的 map 重建赛跑，可能反向解绑刚建立的新连接。
+     * 打开该开关后只记录 init/died、map 当前连接和 AMS 当前连接，不主动 unbind，
+     * 用于真机观察“旧连接迟到事件”与“双连接是否真的存在”。默认 0，不影响正常保活。
+     */
+    private static final String KEY_DEBUG_PAUSE_UNBIND = "a11y_module_debug_pause_unbind";
     private static final String KEY_FIX_MODE = "a11y_module_fix_mode";
     private static final String KEY_FIX_DISABLED = "a11y_module_fix_disabled";
     private static final String KEY_IGNORE_SYSTEM = "a11y_module_ignore_system";
@@ -227,6 +238,7 @@ public class AutoRepairEntry extends XposedModule {
     private static final Map<String, Long> sLastDied = new HashMap<>();
     private static final Map<String, Long> sLastInit = new HashMap<>();
     private static final Map<String, Object> sConnections = new HashMap<>();
+    private static final AtomicLong sConnEventSeq = new AtomicLong();
     private static boolean sBoundCheckAvailable;
     private static boolean sBoundCheckErrorLogged;
 
@@ -234,6 +246,7 @@ public class AutoRepairEntry extends XposedModule {
     private static final Map<String, ServiceRepairStateMachine> sMachines = new HashMap<>();
     private static final Map<String, Runnable> sMachineTimers = new HashMap<>();
     private static final Map<String, Runnable> sPendingMachineSync = new HashMap<>();
+    private static final Map<String, ConnectionDedupeTask> sPendingConnectionDedupe = new HashMap<>();
     private static final Set<String> sUserDisabledKeys = new LinkedHashSet<>();
     // 解冻时刻（pkg -> elapsedRealtime）：用于解冻静默期/保守期，避免把 AMS 刷新滞后误判为崩溃
     private static final Map<String, Long> sPackageUnfrozenAt = new HashMap<>();
@@ -261,6 +274,26 @@ public class AutoRepairEntry extends XposedModule {
             this.allowKill = allowKill;
             this.reason = reason;
             this.requestedAt = requestedAt;
+        }
+    }
+
+    /**
+     * 一条待确认的重复连接：等到 AMS 的 mComponentNameToServiceMap 明确指向 incoming 后，
+     * 才解绑 existing；否则先等待/重试，避免和 AMS 的 map 重建赛跑。
+     */
+    private static final class ConnectionDedupeTask {
+        final ComponentName component;
+        final String key;
+        Object incoming;
+        Object existing;
+        int attempts;
+        Runnable runnable;
+
+        ConnectionDedupeTask(ComponentName component, Object incoming, Object existing) {
+            this.component = component;
+            this.key = component.flattenToString();
+            this.incoming = incoming;
+            this.existing = existing;
         }
     }
 
@@ -478,6 +511,7 @@ public class AutoRepairEntry extends XposedModule {
         sMachines.clear();
         sMachineTimers.clear();
         sPendingMachineSync.clear();
+        sPendingConnectionDedupe.clear();
         sUserDisabledKeys.clear();
         sPackageUnfrozenAt.clear();
         sPackageRepairRequests.clear();
@@ -989,6 +1023,8 @@ public class AutoRepairEntry extends XposedModule {
             if (component == null) {
                 return;
             }
+            final long hookSeq = sConnEventSeq.incrementAndGet();
+            final long hookAt = SystemClock.elapsedRealtime();
             Object info = getFieldValue(connection, "mAccessibilityServiceInfo");
             boolean crashed = false;
             if (info != null) {
@@ -1023,7 +1059,16 @@ public class AutoRepairEntry extends XposedModule {
             final boolean finalCrashed = crashed;
             handler.post(() -> {
                 try {
-                    long now = SystemClock.elapsedRealtime();
+                    long handleAt = SystemClock.elapsedRealtime();
+                    boolean pauseUnbind = isDebugPauseUnbind();
+                    String connKeyForDiag = component.flattenToString();
+                    if (isDebugEnabled() || pauseUnbind) {
+                        logConnectionEvent(died ? "died" : "init", component, connection,
+                                sConnections.get(connKeyForDiag),
+                                findAmsCurrentConnection(component), finalCrashed, hasInterface,
+                                pauseUnbind, hookSeq, hookAt, handleAt);
+                    }
+                    long now = handleAt;
                     if (!died && sFirstServiceConnectAt == 0L) {
                         sFirstServiceConnectAt = now;
                         long remainingBoot = getRemainingBootGraceMs(now, sFirstServiceConnectAt);
@@ -1051,12 +1096,21 @@ public class AutoRepairEntry extends XposedModule {
                         }
                         if (!ignoreSystem && existing != null && existing != connection
                                 && existingBound) {
-                            // 只有新连接已经成功拿到服务接口时才解绑旧连接；
-                            // 否则可能把唯一存活的旧连接解掉，留下两个都不可用的连接。
-                            event("警告", "检测到同名服务存在重复连接，自动解除旧连接: "
-                                    + component.flattenToShortString()
-                                    + " old=" + connId(existing) + " new=" + connId(connection));
-                            unbindConnection(existing, "duplicate_detected");
+                            if (pauseUnbind) {
+                                // 实验路径：只记录，不解绑。用于观察“旧连接迟到 init”是否真的
+                                // 会与 AMS 的 mComponentNameToServiceMap 重建赛跑，以及双连接
+                                // 是否会长期存活。默认关闭，不影响正常保活。
+                                event("调试", "重复连接解绑已暂停: "
+                                                + component.flattenToShortString()
+                                                + " old=" + connId(existing)
+                                                + " new=" + connId(connection),
+                                        "action=duplicate_unbind_paused");
+                            } else {
+                                // 不能在这里立即 unbind：AMS 的 mComponentNameToServiceMap
+                                // 可能仍指向 existing，主动解绑会和 AMS 的 map 重建赛跑，
+                                // 甚至反向解绑刚建立的新连接。交给延迟确认，以 AMS map 为准。
+                                scheduleConnectionDedupe(component, connection, existing);
+                            }
                         } else if (existing != null && existing != connection
                                 && !existingBound && isDebugEnabled()) {
                             log("stale duplicate connection already dead: "
@@ -3447,6 +3501,213 @@ public class AutoRepairEntry extends XposedModule {
         }
         sb.append(']');
         return sb.toString();
+    }
+
+    /**
+     * 连接生命周期诊断：把 Hook 时刻序号、handler 延迟、当前 map 对象和 AMS 当前连接
+     * 一次性打出来，用于区分“旧连接迟到事件”和“AMS 真的重新 bind”。
+     *
+     * <p>只在 debug 开关打开时调用；不影响正常保活路径。
+     */
+    private static void logConnectionEvent(String kind, ComponentName component,
+            Object connection, Object existing, Object amsCurrent, boolean crashed,
+            boolean hasInterface, boolean pauseUnbind, long hookSeq, long hookAt,
+            long handleAt) {
+        StringBuilder sb = new StringBuilder("conn ");
+        sb.append(kind)
+                .append(" hookSeq=").append(hookSeq)
+                .append(" hookAt=").append(hookAt)
+                .append(" handleAt=").append(handleAt)
+                .append(" delay=").append(Math.max(0L, handleAt - hookAt))
+                .append(" key=").append(component.flattenToShortString())
+                .append(" conn=").append(connId(connection))
+                .append(" existing=").append(connId(existing))
+                .append(" existingBound=").append(isConnectionBound(existing))
+                .append(" incomingBound=").append(isConnectionBound(connection))
+                .append(" amsCurrent=").append(connId(amsCurrent))
+                .append(" iface=").append(hasInterface)
+                .append(" crashed=").append(crashed)
+                .append(" pauseUnbind=").append(pauseUnbind);
+        log(sb.toString());
+    }
+
+    /**
+     * 读取 AMS 视角下该组件当前登记在 mComponentNameToServiceMap 里的连接。
+     *
+     * <p>为什么需要它：模块自己的 sConnections 只是“最近一次 initializeService 的对象”，
+     * 并不等于 AMS 当前 map 中的对象。主动 unbind 前必须先确认 AMS 也认为 incoming 是当前连接，
+     * 否则会和 AMS 的 map 重建赛跑。
+     */
+    private static Object findAmsCurrentConnection(ComponentName target) {
+        if (target == null) {
+            return null;
+        }
+        for (Object connection : sConnections.values()) {
+            Object userState = getUserState(connection);
+            if (userState == null) {
+                continue;
+            }
+            Object map = getFieldValue(userState, "mComponentNameToServiceMap");
+            if (map instanceof Map) {
+                Object current = ((Map<?, ?>) map).get(target);
+                if (current != null) {
+                    return current;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** 实验开关：仅 debug 排障使用，默认关闭；打开后暂停主动解绑重复连接。 */
+    private static boolean isDebugPauseUnbind() {
+        return "1".equals(readSecure(KEY_DEBUG_PAUSE_UNBIND));
+    }
+
+    /**
+     * 发现同组件两个 bound 连接后，先登记一条延迟确认，而不是立即 unbind。
+     *
+     * <p>线程模型：只在 sHandler 线程调用/执行；同一组件只保留一条 pending，
+     * 新连接到来时替换旧 pending，避免多个 dedupe 任务同时操作同一组件。
+     */
+    private static void scheduleConnectionDedupe(ComponentName component,
+            Object incoming, Object existing) {
+        if (component == null || incoming == null || existing == null
+                || incoming == existing) {
+            return;
+        }
+        Handler handler = sHandler;
+        if (handler == null) {
+            log("duplicate dedupe skipped (handler null): " + component.flattenToShortString());
+            return;
+        }
+        String key = component.flattenToString();
+        ConnectionDedupeTask pending = sPendingConnectionDedupe.get(key);
+        if (pending != null) {
+            if (incoming == existing) {
+                // 最新事件又回到了同一个对象：当前没有“两个不同连接”的重复，
+                // 取消 pending，避免后续把当前连接误当成旧连接解绑。
+                finishConnectionDedupe(pending);
+                return;
+            }
+            // 同一组件在 500ms 内可能连续 init 两个对象（AMS map 重建/旧连接迟到）。
+            // 这里只更新候选，不重置定时器，避免事件间隔小于 500ms 时 dedupe 永远被推迟。
+            pending.incoming = incoming;
+            pending.existing = existing;
+            log("duplicate dedupe coalesced: " + component.flattenToShortString()
+                    + " old=" + connId(existing) + " new=" + connId(incoming)
+                    + " attempts=" + pending.attempts);
+            return;
+        }
+        ConnectionDedupeTask task = new ConnectionDedupeTask(component, incoming, existing);
+        task.runnable = () -> runConnectionDedupe(task);
+        sPendingConnectionDedupe.put(key, task);
+        handler.postDelayed(task.runnable, RepairPolicy.CONNECTION_DEDUPE_DELAY_MS);
+        log("duplicate dedupe scheduled in " + RepairPolicy.CONNECTION_DEDUPE_DELAY_MS
+                + "ms: " + component.flattenToShortString()
+                + " old=" + connId(existing) + " new=" + connId(incoming));
+    }
+
+    /**
+     * 延迟确认：以 AMS 的 mComponentNameToServiceMap 为准决定解绑谁。
+     *
+     * <p>为什么不能按模块 sConnections 判断：AMS 的 unbind/bind 是异步的，
+     * 模块看到的“最新 initializeService”不一定已经是 AMS map 中的当前连接。
+     * 只有 AMS 也指向 incoming 时，解绑 existing 才是安全的；否则宁可等待/放弃。
+     */
+    private static void runConnectionDedupe(ConnectionDedupeTask task) {
+        if (task == null) {
+            return;
+        }
+        if (sPendingConnectionDedupe.get(task.key) != task) {
+            return;
+        }
+        if (task.incoming == task.existing) {
+            finishConnectionDedupe(task);
+            return;
+        }
+        if (sHandler == null) {
+            finishConnectionDedupe(task);
+            return;
+        }
+        if (isDebugPauseUnbind()) {
+            event("调试", "重复连接确认已暂停: " + task.component.flattenToShortString()
+                            + " old=" + connId(task.existing) + " new=" + connId(task.incoming),
+                    "action=duplicate_dedupe_paused");
+            finishConnectionDedupe(task);
+            return;
+        }
+
+        Object current = sConnections.get(task.key);
+        boolean existingBound = isConnectionBound(task.existing);
+        boolean incomingBound = isConnectionBound(task.incoming);
+        Object amsCurrent = findAmsCurrentConnection(task.component);
+        boolean amsPointsIncoming = amsCurrent == task.incoming;
+        boolean amsPointsExisting = amsCurrent == task.existing;
+        RepairPolicy.ConnectionDedupeAction action = RepairPolicy.decideConnectionDedupe(
+                existingBound, incomingBound, current == task.incoming,
+                amsPointsIncoming, amsPointsExisting, task.attempts,
+                RepairPolicy.CONNECTION_DEDUPE_MAX_ATTEMPTS);
+
+        switch (action) {
+            case WAIT:
+                task.attempts++;
+                log("duplicate dedupe wait #" + task.attempts
+                        + ": " + task.component.flattenToShortString()
+                        + " old=" + connId(task.existing)
+                        + " new=" + connId(task.incoming)
+                        + " ams=" + connId(amsCurrent)
+                        + " oldBound=" + existingBound
+                        + " newBound=" + incomingBound);
+                sHandler.removeCallbacks(task.runnable);
+                sHandler.postDelayed(task.runnable, RepairPolicy.CONNECTION_DEDUPE_DELAY_MS);
+                return;
+            case UNBIND_EXISTING:
+                event("警告", "AMS 已切换到新连接，解除旧连接: "
+                                + task.component.flattenToShortString()
+                                + " old=" + connId(task.existing)
+                                + " new=" + connId(task.incoming),
+                        "action=duplicate_unbind_old ams=" + connId(amsCurrent));
+                unbindConnection(task.existing, "duplicate_confirmed");
+                finishConnectionDedupe(task);
+                return;
+            case UNBIND_INCOMING:
+                // AMS 仍认为 existing 是当前连接；incoming 是多出来的绑定。
+                // 解绑 incoming 并恢复模块 map，避免后续事件继续围绕它打转。
+                event("警告", "AMS 仍指向旧连接，解除多余新连接: "
+                                + task.component.flattenToShortString()
+                                + " old=" + connId(task.existing)
+                                + " new=" + connId(task.incoming),
+                        "action=duplicate_unbind_incoming ams=" + connId(amsCurrent));
+                unbindConnection(task.incoming, "duplicate_incoming");
+                if (sConnections.get(task.key) == task.incoming) {
+                    sConnections.put(task.key, task.existing);
+                }
+                finishConnectionDedupe(task);
+                return;
+            case GIVE_UP:
+            default:
+                log("duplicate dedupe give up: " + task.component.flattenToShortString()
+                        + " old=" + connId(task.existing)
+                        + " new=" + connId(task.incoming)
+                        + " ams=" + connId(amsCurrent)
+                        + " oldBound=" + existingBound
+                        + " newBound=" + incomingBound
+                        + " attempts=" + task.attempts);
+                finishConnectionDedupe(task);
+                return;
+        }
+    }
+
+    private static void finishConnectionDedupe(ConnectionDedupeTask task) {
+        if (task == null) {
+            return;
+        }
+        if (sPendingConnectionDedupe.get(task.key) == task) {
+            sPendingConnectionDedupe.remove(task.key);
+        }
+        if (task.runnable != null && sHandler != null) {
+            sHandler.removeCallbacks(task.runnable);
+        }
     }
 
     private static void unbindConnection(Object connection, String reason) {
