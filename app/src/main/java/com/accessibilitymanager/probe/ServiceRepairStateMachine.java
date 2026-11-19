@@ -271,9 +271,7 @@ final class ServiceRepairStateMachine {
 
         private final Type type;
         private boolean success;
-        private boolean hasInterface;
         private boolean newerConnectionBound;
-        private boolean expectedDeath;
         private TimerType timerType;
         private long generation;
 
@@ -285,17 +283,15 @@ final class ServiceRepairStateMachine {
             return new Event(Type.SYNC);
         }
 
-        static Event binderDied(boolean newerConnectionBound, boolean expectedDeath) {
+        static Event binderDied(boolean newerConnectionBound) {
             Event event = new Event(Type.BINDER_DIED);
             event.newerConnectionBound = newerConnectionBound;
-            event.expectedDeath = expectedDeath;
             return event;
         }
 
-        static Event initialized(boolean success, boolean hasInterface) {
+        static Event initialized(boolean success) {
             Event event = new Event(Type.INITIALIZED);
             event.success = success;
-            event.hasInterface = hasInterface;
             return event;
         }
 
@@ -350,16 +346,8 @@ final class ServiceRepairStateMachine {
             return success;
         }
 
-        boolean hasInterface() {
-            return hasInterface;
-        }
-
         boolean isNewerConnectionBound() {
             return newerConnectionBound;
-        }
-
-        boolean isExpectedDeath() {
-            return expectedDeath;
         }
 
         TimerType getTimerType() {
@@ -377,7 +365,6 @@ final class ServiceRepairStateMachine {
     private int fastFailCount;
     private int graceAttempts;
     private int bindRetryAttempts;
-    private boolean repairAttempted;
     private long lastDeathAt;
 
     State getState() {
@@ -398,10 +385,6 @@ final class ServiceRepairStateMachine {
 
     int getGraceAttempts() {
         return graceAttempts;
-    }
-
-    boolean isRepairAttempted() {
-        return repairAttempted;
     }
 
     long getLastDeathAt() {
@@ -498,7 +481,7 @@ final class ServiceRepairStateMachine {
 
     private Transition handleBinderDied(Event event, Snapshot snapshot, State from) {
         // 包级事务正在关开/强杀，断开是预期行为；由 PACKAGE_REPAIR_APPLIED 统一进入 VERIFYING
-        if (from == State.REPAIRING || event.isExpectedDeath()) {
+        if (from == State.REPAIRING) {
             return noop(from);
         }
         // 旧连接退役：AMS 中已经有更新连接，清掉可能被写入的 crashed 标记即可
@@ -532,8 +515,6 @@ final class ServiceRepairStateMachine {
                 lifetime = from == State.VERIFYING ? 0L : -1L;
             }
             fastFailCount = RepairPolicy.nextFastFailCount(fastFailCount, lifetime);
-            // 健康连接的新故障不是“修复尝试”；VERIFYING 阶段的二次死亡仍属于本轮修复
-            repairAttempted = from == State.VERIFYING;
             boundAt = 0L;
         }
         lastDeathAt = snapshot.now;
@@ -547,7 +528,7 @@ final class ServiceRepairStateMachine {
     }
 
     private Transition handleInitialized(Event event, Snapshot snapshot, State from) {
-        if (event.isSuccess() && event.hasInterface()) {
+        if (event.isSuccess()) {
             // 重复 initializeService：不重置 boundAt，也不取消尚未到期的稳定性复查
             if (from == State.BOUND) {
                 return stay(from, Effect.clearCrashedMarker());
@@ -559,7 +540,6 @@ final class ServiceRepairStateMachine {
                     || from == State.RESTORING || from == State.BACKOFF
                     || from == State.DISABLED || from == State.QUEUED
                     || from == State.REPAIRING;
-            repairAttempted = false;
             if (recovered) {
                 return recoveryTransition(from, snapshot, "init_success");
             }
@@ -574,7 +554,6 @@ final class ServiceRepairStateMachine {
         if (from == State.UNMANAGED || from == State.DISABLED || from == State.SUSPENDED) {
             return noop(from);
         }
-        repairAttempted = repairAttempted || from == State.VERIFYING;
         boundAt = 0L;
         graceAttempts = 0;
         if (snapshot.bootGraceActive) {
@@ -629,7 +608,6 @@ final class ServiceRepairStateMachine {
         if (!snapshot.managed || snapshot.userDisabled || !snapshot.moduleEnabled) {
             return stay(from, Effect.removeFromBatch());
         }
-        repairAttempted = true;
         return change(from, State.REPAIRING, "package_repair_started");
     }
 
@@ -727,7 +705,6 @@ final class ServiceRepairStateMachine {
         boundAt = snapshot.now;
         graceAttempts = 0;
         bindRetryAttempts = 0;
-        repairAttempted = false;
         return change(from, State.BOUND, reason,
                 Effect.clearCrashedMarker(),
                 Effect.notifyRecovered(),

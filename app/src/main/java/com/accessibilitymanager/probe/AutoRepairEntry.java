@@ -90,8 +90,6 @@ public class AutoRepairEntry extends XposedModule {
     static final int SECURE_MAX_CHARS = 20000;
     static final int PULL_BATCH_LINES = 120;
     static final int PULL_BATCH_MAX_CHARS = 64000;
-    // 非保活服务（便签输入法等）连接日志聚合窗口：本身不重要，1 小时一条；明细仍全部写 logcat
-    private static final long NON_MANAGED_EVENT_WINDOW_MS = 60 * 60 * 1000L;
     // 跳过路径聚合窗口：原因有诊断价值，保留 10 分钟粒度
     private static final long SKIP_EVENT_WINDOW_MS = 10 * 60 * 1000L;
     private static final String SETTING_ENABLED =
@@ -125,17 +123,52 @@ public class AutoRepairEntry extends XposedModule {
     public static final String BUNDLE_HAS_MORE = "has_more";
     public static final String BUNDLE_DUMP = "dump";
 
+    /**
+     * 同一崩溃事件去重窗口。
+     *
+     * <p>真实场景：AMS 的 AccessibilityServiceConnection 对同一次进程死亡可能连续回调两次
+     * binderDied；极少数 ROM 的 initializeService 也会在短窗口内重复投递。
+     * 1.5s 内同组件只处理第一条，避免状态机重复累计快速失败、重复排期修复。
+     */
     private static final long DEDUPE_MS = 1500L;
-    private static final long SETTLE_MS = 3000L;
+    /**
+     * 关开修复时“移除启用项 → 重新加入”之间的等待。
+     *
+     * <p>Settings.Secure 写入是同步返回，但 AMS 处理启用列表变化是异步的；
+     * 立即回加可能被 AMS 合并成一次无变化写入，服务实际没有被重新绑定。
+     * 500ms 是 ColorOS/HyperOS 下 AMS 处理完移除事件的最小安全间隔。
+     */
     private static final long TOGGLE_OFF_MS = 500L;
+    /**
+     * 冷启动首次全量扫描延迟。
+     *
+     * <p>onSystemServerStarting 阶段 ActivityManagerService/ContentService 尚未就绪，
+     * 立即扫描只会读到空状态；10s 后 AMS 基本可用，后续重试链继续兜底。
+     */
     private static final long SCAN_INIT_DELAY_MS = 10000L;
+    /**
+     * 热重载后的首次扫描延迟。
+     *
+     * <p>热重载时 system_server 已就绪，只需给新 Hook/状态机一个很短的落位时间，
+     * 不需要像冷启动那样等 10s，否则管理器会长时间看到旧状态。
+     */
     private static final long SCAN_CONFIG_DELAY_MS = 1500L;
 
     // 关闭补回配置
+    /**
+     * 补回写入的最小间隔（合并窗口）。
+     *
+     * <p>启用列表的 ContentObserver 可能在一次系统变更中连续回调多次；
+     * 250ms 内只允许一次实际补回写入，避免“写→事件→再写”放大成写风暴。
+     */
     private static final long CLOSE_MIN_INTERVAL_MS = 250L;
+    /**
+     * 管理器配置写入后的防抖延迟。
+     *
+     * <p>管理器通常连续写 enable/services/dry-run 等多个键，立即对账会读到中间态；
+     * 500ms 后配置已稳定，是做一次补回成本最低的时机。
+     */
     private static final long RECONCILE_CONFIG_DELAY_MS = 500L;
-    // 补回写入后延迟检查是否真正绑定（force-stop 后可能“列表已恢复但未绑定”）
-    private static final long BIND_VERIFY_DELAY_MS = 2000L;
     static final long BOOT_GRACE_MS = RepairPolicy.BOOT_GRACE_MS;
     static final long BOOT_FIRST_CONNECT_WINDOW_MS = RepairPolicy.BOOT_FIRST_CONNECT_WINDOW_MS;
     static final long BOOT_WAVE_GRACE_MS = RepairPolicy.BOOT_WAVE_GRACE_MS;
@@ -188,8 +221,6 @@ public class AutoRepairEntry extends XposedModule {
     private static String sEventSession =
             Long.toHexString(System.currentTimeMillis());
     private static long sEventSeq;
-    private static final EventThrottle sNonManagedThrottle =
-            new EventThrottle(NON_MANAGED_EVENT_WINDOW_MS);
     private static final EventThrottle sSkipThrottle =
             new EventThrottle(SKIP_EVENT_WINDOW_MS);
 
@@ -236,13 +267,11 @@ public class AutoRepairEntry extends XposedModule {
 
     private static boolean sReconcilePending;
     private static boolean sReconcileRetryPending;
-    private static boolean sBindVerifyPending;
     private static long sLastReconcileWriteAt;
     private static long sModuleStartAt = SystemClock.elapsedRealtime();
     private static long sFirstServiceConnectAt;
     private static Runnable sPostBootCheckRunnable;
     private static final Map<String, Long> sLastPackageKillAt = new HashMap<>();
-    private static final Set<String> sPendingVerifyKeys = new LinkedHashSet<>();
     private static volatile String sModuleEnabledCache;
     private static volatile String sManagedServicesCache;
     private static volatile String sFixModeCache;
@@ -427,7 +456,6 @@ public class AutoRepairEntry extends XposedModule {
         sScanPending = false;
         sReconcilePending = false;
         sReconcileRetryPending = false;
-        sBindVerifyPending = false;
         sHeartbeatRetryPending = false;
         sPostBootCheckRunnable = null;
         sLastObservedEnabled = null;
@@ -448,7 +476,6 @@ public class AutoRepairEntry extends XposedModule {
         sLastDied.clear();
         sLastInit.clear();
         sLastPackageKillAt.clear();
-        sPendingVerifyKeys.clear();
         sMachines.clear();
         sMachineTimers.clear();
         sPendingMachineSync.clear();
@@ -723,7 +750,12 @@ public class AutoRepairEntry extends XposedModule {
                 : ("@" + Integer.toHexString(System.identityHashCode(connection)));
     }
 
-    /** 非保活服务的连接/断开：仅记录到底层诊断轨迹与 logcat，不再写入持久主日志列表干扰用户 */
+    /**
+     * 非保活服务的连接/断开：只写 logcat。
+     *
+     * <p>这类服务（便签输入法等）由系统自行管理，模块不参与修复，
+     * 也不写入持久事件缓冲，避免与受管服务的排障日志混在一起。
+     */
     private static void eventNonManaged(String key, String summary) {
         log("[监听] " + summary + ": " + key);
     }
@@ -1155,8 +1187,9 @@ public class AutoRepairEntry extends XposedModule {
                         syncMachines("module_enabled_setting");
                     } else if (KEY_SERVICES.equals(key)) {
                         sManagedServicesCache = readSecure(KEY_SERVICES);
+                        // 锁定列表变化只做补回 + 状态机同步；全量扫描保留给开机/手动/定时兜底，
+                        // 避免每次配置写入都重复遍历启用列表并与补回路径互相打架。
                         scheduleReconcile("services", RECONCILE_CONFIG_DELAY_MS);
-                        scheduleScan(SCAN_CONFIG_DELAY_MS, "services changed");
                         syncMachines("managed_setting");
                     }
                 }
@@ -1207,6 +1240,8 @@ public class AutoRepairEntry extends XposedModule {
             sObserverAttempts++;
             log("register observer deferred (" + sObserverAttempts + "): " + t);
             if (sContextRetryCount >= MAX_INIT_RETRY && sObserverAttempts <= 3) {
+                // 主重试链已用完 15 次（约 75s），但监听仍未注册成功：每 5s 再补 3 次，
+                // 既覆盖 ContentService 极晚就绪的机型，又避免无限重试刷日志。
                 sHandler.postDelayed(AutoRepairEntry::ensureObserver, 5000L);
             } else if (sContextRetryCount >= MAX_INIT_RETRY) {
                 event("失败", "配置监听注册失败 (" + sObserverAttempts + "): " + t);
@@ -1239,6 +1274,8 @@ public class AutoRepairEntry extends XposedModule {
             long now = SystemClock.elapsedRealtime();
             long remaining = getRemainingBootGraceMs(now, sFirstServiceConnectAt);
             if (remaining > 0L) {
+                // 还剩一点冷却时间时 500ms 后再查，避免正好卡在边界反复触发；
+                // 该路径只在开机/软重启后的极短窗口内运行，不会形成长期轮询。
                 schedulePostBootCheck(remaining + 500L);
                 return;
             }
@@ -1348,7 +1385,9 @@ public class AutoRepairEntry extends XposedModule {
             event("检测", "扫描发现未绑定服务: " + key,
                     "action=scan_hit reason=" + reason + " lastConn=" + connId(sConnections.get(key))
                             + " crashedMarker=" + getCrashedMarker(component));
-            scheduleMachineSync(component, SETTLE_MS, "scan");
+            // 扫描刚刚读取了最新启用列表与绑定状态，立即投递 SYNC；
+            // 断开后的等待统一由状态机 FSM_SETTLE_MS 控制，扫描路径不再额外叠加 3s。
+            scheduleMachineSync(component, 0L, "scan");
         }
         if (candidates > 0 || "manual scan".equals(reason)) {
             event("扫描", "扫描完成 (" + reason + ")，发现 " + candidates + " 个异常服务",
@@ -1461,7 +1500,6 @@ public class AutoRepairEntry extends XposedModule {
         String desired = enabled;
         StringBuilder added = new StringBuilder();
         Set<String> addedLabels = new LinkedHashSet<>();
-        Set<String> newlyAddedKeys = new LinkedHashSet<>();
         List<ComponentKey> addKeys = new ArrayList<>();
         int count = 0;
         for (String raw : managed.split(":")) {
@@ -1500,7 +1538,6 @@ public class AutoRepairEntry extends XposedModule {
             }
             added.append(key);
             addedLabels.add(getAppLabel(component));
-            newlyAddedKeys.add(key);
             addKeys.add(ComponentKey.of(component.getPackageName(), component.getClassName()));
             count++;
         }
@@ -1543,94 +1580,9 @@ public class AutoRepairEntry extends XposedModule {
         }
         ensureAccessibilitySwitchOn();
         showModuleToast("保活 " + joinLabels(addedLabels));
-        sPendingVerifyKeys.addAll(newlyAddedKeys);
-        scheduleBindVerify(reason);
-    }
-
-    /** 补回后等待 AMS 绑定，仅校验本次实际补回的服务是否起来了，避免误伤其他正常服务 */
-    private static void scheduleBindVerify(String reason) {
-        if (sBindVerifyPending) {
-            return;
-        }
-        sBindVerifyPending = true;
-        sHandler.postDelayed(() -> {
-            sBindVerifyPending = false;
-            try {
-                verifyBindings(reason);
-            } catch (Throwable t) {
-                log("bind verify error: " + t);
-            }
-        }, BIND_VERIFY_DELAY_MS);
-    }
-
-    private static void verifyBindings(String reason) {
-        if (sPendingVerifyKeys.isEmpty()) {
-            return;
-        }
-        Set<String> targets = new LinkedHashSet<>(sPendingVerifyKeys);
-        sPendingVerifyKeys.clear();
-        if (sContext == null) {
-            return;
-        }
-        if (!isModuleEnabled()) {
-            eventSkip("verify:disabled", "保活", "跳过补回后校验 (" + reason + ")：模块已停用");
-            return;
-        }
-        long now = SystemClock.elapsedRealtime();
-        long remainingBoot = getRemainingBootGraceMs(now, sFirstServiceConnectAt);
-        if (remainingBoot > 0L) {
-            eventSkip("verify:boot-grace", "保活", "跳过补回后校验 (" + reason + ")：开机冷却期内");
-            schedulePostBootCheck(remainingBoot + 1000L);
-            return;
-        }
-        if (!hasConnectionState()) {
-            eventSkip("verify:no-conn", "失败", "补回后校验跳过 (" + reason + ")：没有可用的连接状态");
-            return;
-        }
-        String enabled = readEnabled();
-        if (enabled == null) {
-            eventSkip("verify:no-enabled", sLastEnabledReadError != null ? "失败" : "保活",
-                    "补回后校验跳过 (" + reason + ")：" + enabledReadSkipReason());
-            return;
-        }
-        int unbound = 0;
-        for (String raw : targets) {
-            ComponentName component = ComponentName.unflattenFromString(raw);
-            if (component == null || !isManaged(component)) {
-                continue;
-            }
-            String key = component.flattenToString();
-            if (!containsComponent(enabled, component)) {
-                continue; // 已被关闭，交给对账路径
-            }
-            if (isRepairingKey(key)) {
-                continue; // 包级修复事务自己的临时移除
-            }
-            if (sUserDisabledKeys.contains(key)) {
-                continue; // 用户手动关闭
-            }
-            if (isPackageFrozen(component.getPackageName())) {
-                continue; // 冻结核验交给解冻后的 reconcile，不在冻结期间判成"未绑定"再修复
-            }
-            if (isInUnfrozenSettle(component.getPackageName())) {
-                continue; // 解冻静默期内不判未绑定，避免刚解冻就被安排修复
-            }
-            if (findBoundConnection(component) != null) {
-                continue;
-            }
-            if (!sBoundCheckAvailable) {
-                eventSkip("verify:no-bound-check", "失败",
-                        "补回后校验中止 (" + reason + ")：无法读取绑定状态: " + key);
-                return;
-            }
-            unbound++;
-            scheduleMachineSync(component, SETTLE_MS, "verify_bindings");
-        }
-        if (unbound > 0) {
-            event("检测", "补回后仍未绑定 " + unbound + " 个，准备修复",
-                    "action=verify_bindings reason=" + reason + " unbound=" + unbound
-                            + " checked=" + targets.size());
-        }
+        // 补回写入后不再单独排 2s 绑定校验：
+        // 启用列表观察器会立即把变化投递给状态机，状态机自身有 VERIFY/STABILITY 复查；
+        // 旧的 verifyBindings 会再叠加 2s + 3s，属于状态机重构前的重复路径，已移除。
     }
 
     private static void scheduleReconcile(String reason, long delayMs) {
@@ -2006,7 +1958,6 @@ public class AutoRepairEntry extends XposedModule {
             }
             if (enable) {
                 scheduleReconcile("enable_module", RECONCILE_CONFIG_DELAY_MS);
-                scheduleScan(SCAN_CONFIG_DELAY_MS, "enable_module");
                 event("配置", "模块已启用 (广播指令)");
             } else {
                 event("配置", "模块已停用 (广播指令)");
@@ -2074,10 +2025,9 @@ public class AutoRepairEntry extends XposedModule {
                 }
             }
             if (changed) {
-                // 只有锁定列表真正变化时才做补回/扫描/状态机同步；
+                // 只有锁定列表真正变化时才做补回/状态机同步；
                 // 管理器每次 onResume 都会重发同一份列表，未变化时重复执行会产生无意义日志与遍历。
                 scheduleReconcile("sync_services cmd", RECONCILE_CONFIG_DELAY_MS);
-                scheduleScan(SCAN_CONFIG_DELAY_MS, "sync_services cmd");
                 syncMachines("sync_services cmd");
                 event("配置", "模块已生效最新锁定列表: " + component);
             } else {
@@ -2434,6 +2384,7 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static void scheduleDebugKill() {
+        // 调试指令由管理器写入后再读回，500ms 等待 Settings 写入完成，避免读到旧值。
         sHandler.postDelayed(() -> {
             try {
                 runDebugKill();
@@ -2618,7 +2569,7 @@ public class AutoRepairEntry extends XposedModule {
                         + " " + getPackageProcessSummary(component.getPackageName())
                         + " " + getPowerStateSummary());
         handleServiceEvent(component,
-                ServiceRepairStateMachine.Event.binderDied(newerConnectionBound, false));
+                ServiceRepairStateMachine.Event.binderDied(newerConnectionBound));
     }
 
     private static void onInitializeService(ComponentName component, boolean crashed,
@@ -2649,7 +2600,7 @@ public class AutoRepairEntry extends XposedModule {
                             + " crashed=" + crashed + " iface=" + hasInterface);
         }
         handleServiceEvent(component,
-                ServiceRepairStateMachine.Event.initialized(success, hasInterface));
+                ServiceRepairStateMachine.Event.initialized(success));
     }
 
     /** Settings.Secure 启用列表的唯一写入器：短临界区、按 delta 读写，绝不在 verify 阶段持锁。 */
@@ -2855,6 +2806,8 @@ public class AutoRepairEntry extends XposedModule {
             sRestoreRetryScheduled.remove(key);
             handleServiceEvent(component, ServiceRepairStateMachine.Event.enabledListChanged());
         } else if (sRestoreRetryScheduled.add(key) && sHandler != null) {
+            // 极少数 ROM 写入后需要更久才把服务真正加入启用列表：
+            // 3s 后补投一次 SYNC 做兜底，sRestoreRetryScheduled 保证同一组件只补一次，不会形成轮询。
             sHandler.postDelayed(() -> {
                 sRestoreRetryScheduled.remove(key);
                 handleServiceEvent(component, ServiceRepairStateMachine.Event.sync());
@@ -2884,6 +2837,7 @@ public class AutoRepairEntry extends XposedModule {
             // 确保静默期结束时的兜底修复一定会执行（解冻保守期内仍禁止强杀）。
             eventSkip("repair:unfrozen-settle:" + key, "修复", "解冻静默期内跳过修复: " + key);
             Long at = sPackageUnfrozenAt.get(component.getPackageName());
+            // 静默期剩余时间 + 200ms 边界缓冲，至少 500ms，避免定时器正好落在窗口边界被再次判定为“静默期内”。
             long delay = at == null ? RepairPolicy.UNFROZEN_SETTLE_MS
                     : Math.max(500L, at + RepairPolicy.UNFROZEN_SETTLE_MS
                             - SystemClock.elapsedRealtime() + 200L);
@@ -2946,6 +2900,7 @@ public class AutoRepairEntry extends XposedModule {
                 // 同时保证静默期后仍有兜底修复机会（不能直接丢弃请求）。
                 eventSkip("repair:unfrozen-settle:" + pkg, "修复", "解冻静默期内跳过包级修复: " + pkg);
                 Long at = sPackageUnfrozenAt.get(pkg);
+                // 与单服务路径一致：静默期剩余时间 + 200ms 边界缓冲，至少 500ms。
                 long delay = at == null ? RepairPolicy.UNFROZEN_SETTLE_MS
                         : Math.max(500L, at + RepairPolicy.UNFROZEN_SETTLE_MS
                                 - SystemClock.elapsedRealtime() + 200L);
@@ -2961,6 +2916,8 @@ public class AutoRepairEntry extends XposedModule {
             if (managed == null || enabled == null) {
                 event("失败", "包级修复读取配置失败: " + pkg,
                         "action=fsm_repair_read_fail");
+                // Settings 读取失败通常是 ContentService 短暂不可用；3s 后重新投递 SYNC 而不是立即重试，
+                // 避免在系统繁忙时形成忙循环。
                 scheduleMachineSync(request.trigger, 3000L, "repair_read_failed");
                 continue;
             }

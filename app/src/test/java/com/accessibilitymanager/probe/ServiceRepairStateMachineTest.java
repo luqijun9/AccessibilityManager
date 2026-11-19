@@ -29,7 +29,7 @@ public class ServiceRepairStateMachineTest {
 
     private static void initBound(ServiceRepairStateMachine machine, long now) {
         ServiceRepairStateMachine.Transition transition =
-                machine.handle(ServiceRepairStateMachine.Event.initialized(true, true),
+                machine.handle(ServiceRepairStateMachine.Event.initialized(true),
                         snapshot(now));
         assertEquals(ServiceRepairStateMachine.State.BOUND, transition.getTo());
     }
@@ -39,7 +39,7 @@ public class ServiceRepairStateMachineTest {
             ServiceRepairStateMachine machine, long start) {
         initBound(machine, start);
         ServiceRepairStateMachine.Transition died = machine.handle(
-                ServiceRepairStateMachine.Event.binderDied(false, false),
+                ServiceRepairStateMachine.Event.binderDied(false),
                 snapshot(start + 1_000L));
         ServiceRepairStateMachine.Snapshot settleSnapshot = snapshot(start + 4_000L);
         settleSnapshot.processRunning = false;
@@ -87,7 +87,7 @@ public class ServiceRepairStateMachineTest {
         initBound(machine, 1_000L);
 
         ServiceRepairStateMachine.Transition t = machine.handle(
-                ServiceRepairStateMachine.Event.binderDied(false, false),
+                ServiceRepairStateMachine.Event.binderDied(false),
                 snapshot(2_000L));
 
         assertEquals(ServiceRepairStateMachine.State.SUSPECT, t.getTo());
@@ -102,7 +102,7 @@ public class ServiceRepairStateMachineTest {
         initBound(machine, 1_000L);
 
         ServiceRepairStateMachine.Transition t = machine.handle(
-                ServiceRepairStateMachine.Event.binderDied(true, false),
+                ServiceRepairStateMachine.Event.binderDied(true),
                 snapshot(2_000L));
 
         assertEquals(ServiceRepairStateMachine.State.BOUND, t.getTo());
@@ -116,7 +116,7 @@ public class ServiceRepairStateMachineTest {
         ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
         initBound(machine, 1_000L);
         ServiceRepairStateMachine.Transition died = machine.handle(
-                ServiceRepairStateMachine.Event.binderDied(false, false),
+                ServiceRepairStateMachine.Event.binderDied(false),
                 snapshot(2_000L));
 
         ServiceRepairStateMachine.Snapshot recovered = snapshot(5_000L);
@@ -137,7 +137,7 @@ public class ServiceRepairStateMachineTest {
         ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
         initBound(machine, 1_000L);
         ServiceRepairStateMachine.Transition died = machine.handle(
-                ServiceRepairStateMachine.Event.binderDied(false, false),
+                ServiceRepairStateMachine.Event.binderDied(false),
                 snapshot(2_000L));
 
         ServiceRepairStateMachine.Snapshot graceSnapshot = snapshot(5_000L);
@@ -176,15 +176,15 @@ public class ServiceRepairStateMachineTest {
     public void fastFail_secondShortLivedDeath_backsOffAndDisablesKill() {
         ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
         initBound(machine, 1_000L);
-        machine.handle(ServiceRepairStateMachine.Event.binderDied(false, false),
+        machine.handle(ServiceRepairStateMachine.Event.binderDied(false),
                 snapshot(2_000L));
         assertEquals(1, machine.getFastFailCount());
 
         // 自愈后再次短命崩溃：快速失败计数累计到 2
-        machine.handle(ServiceRepairStateMachine.Event.initialized(true, true),
+        machine.handle(ServiceRepairStateMachine.Event.initialized(true),
                 snapshot(2_100L));
         ServiceRepairStateMachine.Transition died = machine.handle(
-                ServiceRepairStateMachine.Event.binderDied(false, false),
+                ServiceRepairStateMachine.Event.binderDied(false),
                 snapshot(2_200L));
         assertEquals(2, machine.getFastFailCount());
 
@@ -223,7 +223,7 @@ public class ServiceRepairStateMachineTest {
         bootGrace.bootGraceRemainingMs = 5_000L;
 
         ServiceRepairStateMachine.Transition died = machine.handle(
-                ServiceRepairStateMachine.Event.binderDied(false, false), bootGrace);
+                ServiceRepairStateMachine.Event.binderDied(false), bootGrace);
         assertEquals(ServiceRepairStateMachine.State.SUSPECT, died.getTo());
         assertEquals(5_000L,
                 died.findTimer(ServiceRepairStateMachine.TimerType.BOOT_GRACE)
@@ -367,12 +367,12 @@ public class ServiceRepairStateMachineTest {
         ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
         initBound(machine, 1_000L);
         ServiceRepairStateMachine.Transition died = machine.handle(
-                ServiceRepairStateMachine.Event.binderDied(false, false),
+                ServiceRepairStateMachine.Event.binderDied(false),
                 snapshot(2_000L));
         long oldGeneration = died.getGeneration();
 
         // 服务自愈，状态迁移到 BOUND，generation 递增
-        machine.handle(ServiceRepairStateMachine.Event.initialized(true, true),
+        machine.handle(ServiceRepairStateMachine.Event.initialized(true),
                 snapshot(2_100L));
 
         ServiceRepairStateMachine.Transition stale = machine.handle(
@@ -422,7 +422,7 @@ public class ServiceRepairStateMachineTest {
         initBound(machine, 1_000L);
         assertEquals(1_000L, machine.getBoundAt());
 
-        machine.handle(ServiceRepairStateMachine.Event.initialized(true, true),
+        machine.handle(ServiceRepairStateMachine.Event.initialized(true),
                 snapshot(9_000L));
 
         assertEquals(ServiceRepairStateMachine.State.BOUND, machine.getState());
@@ -460,7 +460,7 @@ public class ServiceRepairStateMachineTest {
         assertEquals(ServiceRepairStateMachine.State.VERIFYING, machine.getState());
 
         ServiceRepairStateMachine.Transition t = machine.handle(
-                ServiceRepairStateMachine.Event.binderDied(false, false),
+                ServiceRepairStateMachine.Event.binderDied(false),
                 snapshot(5_900L));
 
         assertEquals(ServiceRepairStateMachine.State.SUSPECT, t.getTo());
@@ -469,26 +469,17 @@ public class ServiceRepairStateMachineTest {
     }
 
     @Test
-    public void binderDied_duringRepairingOrExpected_doesNotScheduleAnotherRepair() {
+    public void binderDied_duringRepairing_doesNotScheduleAnotherRepair() {
         ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
         driveToNeedsRepair(machine, 1_000L);
         machine.handle(ServiceRepairStateMachine.Event.packageRepairStarted(),
                 snapshot(5_000L));
 
         ServiceRepairStateMachine.Transition duringRepair = machine.handle(
-                ServiceRepairStateMachine.Event.binderDied(false, false),
+                ServiceRepairStateMachine.Event.binderDied(false),
                 snapshot(5_100L));
         assertTrue(duringRepair.isNoOp());
         assertEquals(ServiceRepairStateMachine.State.REPAIRING, machine.getState());
-
-        ServiceRepairStateMachine bound = new ServiceRepairStateMachine();
-        initBound(bound, 1_000L);
-        ServiceRepairStateMachine.Transition expected = bound.handle(
-                ServiceRepairStateMachine.Event.binderDied(false, true),
-                snapshot(2_000L));
-        assertTrue("旧连接/事务内预期断开不能被当作真实崩溃",
-                expected.isNoOp());
-        assertEquals(ServiceRepairStateMachine.State.BOUND, bound.getState());
     }
 
     @Test
@@ -496,13 +487,13 @@ public class ServiceRepairStateMachineTest {
         ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
         initBound(machine, 1_000L);
         ServiceRepairStateMachine.Transition died = machine.handle(
-                ServiceRepairStateMachine.Event.binderDied(false, false),
+                ServiceRepairStateMachine.Event.binderDied(false),
                 snapshot(2_000L));
 
         ServiceRepairStateMachine.Snapshot recovered = snapshot(2_100L);
         recovered.bound = true;
         ServiceRepairStateMachine.Transition init = machine.handle(
-                ServiceRepairStateMachine.Event.initialized(true, true), recovered);
+                ServiceRepairStateMachine.Event.initialized(true), recovered);
         assertEquals(ServiceRepairStateMachine.State.BOUND, init.getTo());
         assertNotNull(init.findTimer(ServiceRepairStateMachine.TimerType.STABILITY));
 
@@ -546,7 +537,7 @@ public class ServiceRepairStateMachineTest {
         ServiceRepairStateMachine.Snapshot bound = snapshot(5_300L);
         bound.bound = true;
         ServiceRepairStateMachine.Transition t = machine.handle(
-                ServiceRepairStateMachine.Event.initialized(true, true), bound);
+                ServiceRepairStateMachine.Event.initialized(true), bound);
 
         assertEquals(ServiceRepairStateMachine.State.BOUND, t.getTo());
         assertTrue(t.hasEffect(ServiceRepairStateMachine.ActionType.NOTIFY_RECOVERED));
@@ -564,7 +555,6 @@ public class ServiceRepairStateMachineTest {
                 snapshot(2_000L));
 
         assertEquals(ServiceRepairStateMachine.State.REPAIRING, t.getTo());
-        assertTrue(machine.isRepairAttempted());
     }
 
     @Test
@@ -578,7 +568,6 @@ public class ServiceRepairStateMachineTest {
 
         assertEquals(ServiceRepairStateMachine.State.REPAIRING, t.getTo());
         assertFalse(t.hasEffect(ServiceRepairStateMachine.ActionType.REMOVE_FROM_BATCH));
-        assertTrue(machine.isRepairAttempted());
     }
 
     @Test
@@ -661,19 +650,19 @@ public class ServiceRepairStateMachineTest {
         initBound(machine, 1_000L);
 
         ServiceRepairStateMachine.Transition firstDeath = machine.handle(
-                ServiceRepairStateMachine.Event.binderDied(false, false),
+                ServiceRepairStateMachine.Event.binderDied(false),
                 snapshot(2_000L));
         assertEquals(ServiceRepairStateMachine.State.SUSPECT, firstDeath.getTo());
 
         ServiceRepairStateMachine.Snapshot recovered = snapshot(2_100L);
         recovered.bound = true;
         ServiceRepairStateMachine.Transition recoveredT = machine.handle(
-                ServiceRepairStateMachine.Event.initialized(true, true), recovered);
+                ServiceRepairStateMachine.Event.initialized(true), recovered);
         assertEquals(ServiceRepairStateMachine.State.BOUND, recoveredT.getTo());
         assertNotNull(recoveredT.findTimer(ServiceRepairStateMachine.TimerType.STABILITY));
 
         ServiceRepairStateMachine.Transition secondDeath = machine.handle(
-                ServiceRepairStateMachine.Event.binderDied(false, false),
+                ServiceRepairStateMachine.Event.binderDied(false),
                 snapshot(2_200L));
         assertEquals(ServiceRepairStateMachine.State.SUSPECT, secondDeath.getTo());
         assertEquals(2, machine.getFastFailCount());
@@ -710,10 +699,10 @@ public class ServiceRepairStateMachineTest {
         initBound(b, 1_000L);
 
         ServiceRepairStateMachine.Transition aDeath = a.handle(
-                ServiceRepairStateMachine.Event.binderDied(false, false),
+                ServiceRepairStateMachine.Event.binderDied(false),
                 snapshot(2_000L));
         ServiceRepairStateMachine.Transition bDeath = b.handle(
-                ServiceRepairStateMachine.Event.binderDied(false, false),
+                ServiceRepairStateMachine.Event.binderDied(false),
                 snapshot(2_000L));
 
         ServiceRepairStateMachine.Snapshot settle = snapshot(5_000L);
