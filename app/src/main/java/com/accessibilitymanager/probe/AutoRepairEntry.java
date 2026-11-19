@@ -3829,6 +3829,62 @@ public class AutoRepairEntry extends XposedModule {
         } catch (Throwable t) {
             log("clear crashed flag failed: " + t);
         }
+        clearAmsCrashedSetIfCurrent(connection, component);
+    }
+
+    /**
+     * 清理 AMS AccessibilityUserState.mCrashedServices 中残留的组件。
+     *
+     * <p>真实场景：旧连接在新连接已经 bound 之后才回调 binderDied；AMS 的
+     * serviceDisconnectedLocked 会把组件加入 mCrashedServices，即使当前已有新连接。
+     * 之后 updateServicesLocked 看到 crashedServices.contains(component) 会直接跳过绑定，
+     * 形成“实际已 bound，但 dumpsys 仍显示 crashed”的残留状态。
+     *
+     * <p>安全边界：只有确认 AMS 的 mComponentNameToServiceMap 当前就指向这个 connection，
+     * 并且 connection 仍持有 mServiceInterface 时才删除；否则宁可保留，避免像旧实现那样
+     * 无条件清 set 导致 AMS 再次 bind 出多重连接。
+     */
+    private static void clearAmsCrashedSetIfCurrent(Object connection, ComponentName component) {
+        if (connection == null || component == null) {
+            return;
+        }
+        Object userState = getUserState(connection);
+        if (userState == null) {
+            return;
+        }
+        Object lock = getFieldValue(connection, "mLock");
+        if (lock != null) {
+            synchronized (lock) {
+                clearAmsCrashedSetLocked(connection, userState, component);
+            }
+        } else {
+            clearAmsCrashedSetLocked(connection, userState, component);
+        }
+    }
+
+    private static void clearAmsCrashedSetLocked(Object connection, Object userState,
+            ComponentName component) {
+        Object map = getFieldValue(userState, "mComponentNameToServiceMap");
+        if (!(map instanceof Map)) {
+            return;
+        }
+        Object current = ((Map<?, ?>) map).get(component);
+        if (current != connection || !isConnectionBound(connection)) {
+            // 不是 AMS 当前连接：清 set 可能让 AMS 再 bind 一次，必须保持克制。
+            if (isDebugEnabled()) {
+                log("skip AMS crashed set clear (not current): "
+                        + component.flattenToShortString()
+                        + " current=" + connId(current) + " conn=" + connId(connection));
+            }
+            return;
+        }
+        Object crashed = getFieldValue(userState, "mCrashedServices");
+        if (crashed instanceof Set) {
+            boolean removed = ((Set<?>) crashed).remove(component);
+            if (removed) {
+                log("cleared AMS crashed set: " + component.flattenToShortString());
+            }
+        }
     }
 
     private static ComponentName getComponentName(Object connection) {
