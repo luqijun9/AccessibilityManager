@@ -1102,6 +1102,8 @@ public class SettingsActivity extends AppCompatActivity {
             ModuleConfig.startLogSync(this);
             ModuleConfig.drainLogs(this);
             TimerReceiver.cancel(this, "LSPosed 模块模式");
+            // 普通模式的前台保活服务在模块模式下没有职责，停掉以减少常驻通知/前台服务耗电。
+            stopService(new Intent(this, daemonService.class));
 
             LogUtil.log(this, "[模块] 开启 LSPosed 模式 loaded=" + loaded
                     + " enableWritten=" + written

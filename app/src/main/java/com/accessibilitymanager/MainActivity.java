@@ -2738,6 +2738,7 @@ public class MainActivity extends Activity {
                         .putBoolean("crashfix", false)
                         .putBoolean("mode_chosen", true)
                         .apply();
+                stopService(new Intent(MainActivity.this, daemonService.class));
                 ModuleConfig.setEnabled(MainActivity.this, true);
                 ModuleConfig.setDryRun(MainActivity.this, false);
                 syncModuleServicesIfNeeded("选择LSPosed模式");
@@ -3043,6 +3044,14 @@ public class MainActivity extends Activity {
     //启动前台服务，进行保活!
     void StartForeGroundDaemon() {
         Log.d("AM_DIAG", "[MainActivity] StartForeGroundDaemon() 被调用");
+        SharedPreferences prefs = sp != null ? sp : getSharedPreferences("data", 0);
+        if (prefs.getBoolean("lsposed_mode", false)) {
+            // LSPosed 模式由 system_server 模块接管保活/崩溃修复，普通模式前台服务不再需要。
+            // 这里既阻止新启动，也顺手停掉切换模式后可能残留的旧服务。
+            Log.d("AM_DIAG", "[MainActivity] LSPosed 模式，跳过并停止普通保活服务");
+            stopService(new Intent(this, daemonService.class));
+            return;
+        }
         if (daemon.isEmpty()) {
             Log.d("AM_DIAG", "[MainActivity] daemon为空，跳过启动保活服务");
             return;

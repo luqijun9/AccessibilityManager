@@ -44,6 +44,11 @@ public class StartReceiver extends BroadcastReceiver {
         new Thread(() -> {
             SharedPreferences sp = context.getSharedPreferences("data", 0);
             if (!sp.getBoolean("boot", true)) return;
+            if (sp.getBoolean("lsposed_mode", false)) {
+                // LSPosed 模式下由 system_server 模块负责保活，不再启动普通模式前台服务。
+                Log.d("AM_DIAG", "[StartReceiver] LSPosed 模式，跳过普通保活服务");
+                return;
+            }
             // daemon 为空时无需启动保活服务，避免 startForegroundService 后 onCreate
             // 中因 daemon 为空而 stopSelf() 导致 ForegroundServiceDidNotStartInTimeException
             if (sp.getString("daemon", "").length() == 0) return;

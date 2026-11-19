@@ -132,6 +132,8 @@ public class daemonService extends Service {
     private String mCrashedFixServiceName;
     private String mCrashedFixLabel;
     private boolean mFirstCommandAfterCreate = true;
+    // LSPosed 模式下主动停止普通模式前台服务时，避免再弹“停止保活”提示
+    private boolean mStoppedForLsposed = false;
     // 标记本次 Settings 变化是由白名单应用切换引起的，ContentObserver 应跳过崩溃检测
     private boolean mIsWhitelistAppSwitch = false;
 
@@ -1367,6 +1369,16 @@ public class daemonService extends Service {
             }
         }
 
+        // LSPosed 模式下由 system_server 内的模块接管保活/崩溃修复，普通模式前台服务没有职责。
+        // 必须先 startForeground 再 stopSelf，避免 startForegroundService 的 5 秒超时；
+        // 正常情况下 StartReceiver/MainActivity 会直接跳过启动，这里只处理系统重启等兜底启动。
+        if (sp.getBoolean("lsposed_mode", false)) {
+            mStoppedForLsposed = true;
+            LogUtil.log(this, "[保活服务] LSPosed 模式，普通模式保活服务自动停止");
+            stopSelf();
+            return;
+        }
+
         // ★ 先无条件取消旧定时器，避免更新/重启后残留定时器触发
         // 即使 daemon 为空也执行 cancel，防止旧 PendingIntent 残留
         TimerReceiver.cancel(this, "服务启动清理");
@@ -1458,11 +1470,19 @@ public class daemonService extends Service {
             crashCheckExecutor.shutdownNow();
         }
         
-        Toast.makeText(daemonService.this, "停止保活", Toast.LENGTH_SHORT).show();
+        if (!mStoppedForLsposed && (sp == null || !sp.getBoolean("lsposed_mode", false))) {
+            Toast.makeText(daemonService.this, "停止保活", Toast.LENGTH_SHORT).show();
+        }
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (sp != null && sp.getBoolean("lsposed_mode", false)) {
+            // onCreate 已经做了同一判断；这里防止服务被 START_STICKY/系统重启后继续跑。
+            mStoppedForLsposed = true;
+            stopSelf(startId);
+            return START_NOT_STICKY;
+        }
         if (intent != null && "UPDATE_NOTIFY".equals(intent.getAction())) {
             updateNotification();
             return START_STICKY;
