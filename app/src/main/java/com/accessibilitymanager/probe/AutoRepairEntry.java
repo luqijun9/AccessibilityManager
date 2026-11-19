@@ -170,6 +170,19 @@ public class AutoRepairEntry extends XposedModule {
     // 事件缓冲
     private static final int RAW_TRACE_LIMIT = 1000;
     private static final Object sEventLock = new Object();
+    /**
+     * 日志重入保护（线程级）。
+     *
+     * <p>真实故障场景：软重启后 system_server 在约 15~20 秒时，SettingsProvider/ContentService 仍可能未就绪。
+     * 此时模块线程写日志（log）会通过 isDebugEnabled -> readConfig -> readSecure 读取 Settings；
+     * 读取失败后 readSecure 的 catch 又调用 log，再次读取……形成无限递归。
+     * 递归会把 A11yAutoRepair 线程栈打爆，tombstone 表现为 SIGSEGV(SEGV_ACCERR, stack overflow)，
+     * 进而被 LSPosed 判定为模块导致 system_server 崩溃并禁用全部模块。
+     *
+     * <p>这层保护是最后一道防线：只要当前线程已经在写日志，任何嵌套 log（包括读取失败的补偿日志）
+     * 直接丢弃到 logcat 之外，绝不再次进入配置读取，保证递归在物理上不可能发生。
+     */
+    private static final ThreadLocal<Boolean> sLoggingGuard = new ThreadLocal<>();
     private static final Deque<String> sEventLines = new ArrayDeque<>();
     private static final Deque<String> sRawTraceLines = new ArrayDeque<>();
     private static String sEventSession =
@@ -591,6 +604,15 @@ public class AutoRepairEntry extends XposedModule {
     private void installHooks(ClassLoader classLoader, boolean isHotReload) {
         try {
             HandlerThread thread = new HandlerThread("A11yAutoRepair");
+            // system_server 的默认未捕获异常处理器会直接杀死整个进程（表现为整机软重启/开机卡死）。
+            // 模块自己的 HandlerThread 即使因未知 bug 崩溃，也只应让保活功能降级，绝不能连坐 system_server。
+            // 这里只记录原始异常；不使用 event()/readConfig()，避免异常处理路径再次访问 Settings。
+            thread.setUncaughtExceptionHandler((t, e) -> {
+                try {
+                    Log.e(TAG, "A11yAutoRepair 线程未捕获异常，已拦截以避免 system_server 崩溃", e);
+                } catch (Throwable ignored) {
+                }
+            });
             thread.start();
             sHandlerThread = thread;
             if (thread.getLooper() != null) {
@@ -1161,6 +1183,12 @@ public class AutoRepairEntry extends XposedModule {
                     false, sObserver);
             sObserverAttempts = 0;
             log("[配置] 配置监听已注册 (含 boot_count 实时同步)");
+            // 监听注册成功说明 ContentService 已可用，此时才预热调试开关缓存。
+            // isDebugEnabled() 改为纯缓存读取后，必须在这里补一次初始值，否则开机后调试日志永远不镜像到 LSPosed；
+            // 读取仍可能失败，但 readSecure 内部只写 logcat，不会反向读取配置，因此不会再触发递归。
+            if (sDebugCache == null) {
+                sDebugCache = readSecure(KEY_DEBUG);
+            }
             writeHeartbeatOnce("observer_ready");
             // 热重载/进程重启后状态机内存为空，必须按真实锁定列表与绑定状态重建一次
             syncMachines("observer_ready");
@@ -3231,7 +3259,11 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     static boolean isDebugEnabled() {
-        return "1".equals(readConfig(KEY_DEBUG));
+        // 只读缓存，禁止在这里触发 Settings 读取。
+        // 原因：bindLocked/unbindLocked 钩子运行在 system_server 主线程，开机早期读 Settings 可能阻塞或抛异常；
+        // 而异常补偿日志又会回调 isDebugEnabled，历史上正是这条路径把主线程/模块线程拖入递归。
+        // 缓存由 ensureObserver 在配置服务就绪后预热，并由 KEY_DEBUG 的 ContentObserver 实时更新。
+        return "1".equals(sDebugCache);
     }
 
     private static String getAppLabel(ComponentName component) {
@@ -3874,30 +3906,42 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static void log(String message) {
+        // 重入直接返回：正常日志不会嵌套调用 log；只有“读取配置失败 -> 补偿日志”这类异常路径会嵌套。
+        // 在开机早期 Settings 不可用时，宁可丢失这一条嵌套日志，也不能让递归继续增长。
+        if (Boolean.TRUE.equals(sLoggingGuard.get())) {
+            return;
+        }
+        sLoggingGuard.set(Boolean.TRUE);
         try {
-            synchronized (sEventLock) {
-                String trace = System.currentTimeMillis()
-                        + " (up=" + RepairPolicy.formatUptimeSeconds(SystemClock.elapsedRealtime())
-                        + ") " + message;
-                sRawTraceLines.addLast(trace);
-                while (sRawTraceLines.size() > RAW_TRACE_LIMIT) {
-                    sRawTraceLines.removeFirst();
+            try {
+                synchronized (sEventLock) {
+                    String trace = System.currentTimeMillis()
+                            + " (up=" + RepairPolicy.formatUptimeSeconds(SystemClock.elapsedRealtime())
+                            + ") " + message;
+                    sRawTraceLines.addLast(trace);
+                    while (sRawTraceLines.size() > RAW_TRACE_LIMIT) {
+                        sRawTraceLines.removeFirst();
+                    }
                 }
+            } catch (Throwable ignored) {
             }
-        } catch (Throwable ignored) {
-        }
-        try {
-            Log.i(TAG, message);
-        } catch (Throwable ignored) {
-        }
-        try {
-            AutoRepairEntry inst = sModuleInstance;
-            // XposedModule.log 会再向 LSPosedFramework 输出一份，与上面的 Log.i 重复；
-            // 仅在调试开关打开时保留，release 默认只写一份 logcat。
-            if (inst != null && isDebugEnabled()) {
-                inst.log(Log.INFO, TAG, message);
+            try {
+                Log.i(TAG, message);
+            } catch (Throwable ignored) {
             }
-        } catch (Throwable ignored) {
+            try {
+                AutoRepairEntry inst = sModuleInstance;
+                // XposedModule.log 会再向 LSPosedFramework 输出一份，与上面的 Log.i 重复；
+                // 仅在调试开关打开时保留，release 默认只写一份 logcat。
+                // 关键：这里绝不能调用 isDebugEnabled()/readConfig()，否则会重新进入 Settings 读取，
+                // 在 Settings 未就绪时形成 log -> readSecure -> log 的递归（栈溢出导致 system_server 崩溃）。
+                if (inst != null && "1".equals(sDebugCache)) {
+                    inst.log(Log.INFO, TAG, message);
+                }
+            } catch (Throwable ignored) {
+            }
+        } finally {
+            sLoggingGuard.remove();
         }
     }
 
