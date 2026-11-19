@@ -51,7 +51,7 @@ final class ServiceRepairStateMachine {
         VERIFYING,
         /** 快速失败退避中，定时器到点后重新评估 */
         BACKOFF,
-        /** 受管服务从启用列表消失（OEM force-stop/外部移除），只做 delta 补回，不强杀 */
+        /** 锁定服务从启用列表消失（OEM force-stop/外部移除），只做 delta 补回，不强杀 */
         RESTORING
     }
 
@@ -389,7 +389,7 @@ final class ServiceRepairStateMachine {
      * <p>防御性约定：
      * - event/snapshot 为 null 时返回 no-op，绝不让 system_server 内的状态机因空指针抛异常；
      * - 过期定时器（generation 不匹配）直接忽略，避免旧 verify/stability 穿透到新状态；
-     * - 模块停用、非受管、用户关闭三个全局门控优先于所有事件，防止复活不该复活的服务。
+     * - 模块停用、未锁定、用户关闭三个全局门控优先于所有事件，防止复活不该复活的服务。
      */
     Transition handle(Event event, Snapshot snapshot) {
         State from = state;

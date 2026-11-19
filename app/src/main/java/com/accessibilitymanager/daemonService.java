@@ -190,11 +190,11 @@ public class daemonService extends Service {
             String stateText = pkgState == RepairPolicy.PKG_STATE_DISABLED ? "冻结/禁用"
                     : (pkgState == RepairPolicy.PKG_STATE_UNINSTALLED ? "未安装" : "正常");
             boolean managed = isManagedPackage(pkg);
-            String msg = "[包状态] " + (managed ? "受管包" : "忽略") + " " + action
+            String msg = "[包状态] " + (managed ? "已锁定应用" : "未锁定应用") + " " + action
                     + ": pkg=" + pkg + " state=" + stateText
                     + (changedComponents != null ? " changed=" + java.util.Arrays.toString(changedComponents) : "")
                     + (replacing ? " replacing=true" : "");
-            // 全量写 logcat 便于 adb 排障；管理器日志页只记录受管包，避免系统其它应用的状态变化刷屏
+            // 全量写 logcat 便于 adb 排障；管理器日志页只记录锁定应用，避免系统其它应用的状态变化刷屏
             Log.d("AM_DIAG", msg + " data=" + intent.getDataString());
             if (!managed) {
                 return;
@@ -376,7 +376,7 @@ public class daemonService extends Service {
         return slash > 0 ? component.substring(0, slash) : "";
     }
 
-    /** 包是否在 daemon 锁定列表或全局白名单中（包广播只对受管包做日志/恢复，避免无关包刷屏）。 */
+    /** 包是否在 daemon 锁定列表或全局白名单中（包广播只对锁定应用做日志/恢复，避免无关包刷屏）。 */
     private boolean isManagedPackage(String pkg) {
         if (pkg == null || pkg.isEmpty()) {
             return false;

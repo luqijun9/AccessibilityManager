@@ -770,10 +770,10 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     /**
-     * 非保活服务的连接/断开：只写 logcat。
+     * 未锁定服务的连接/断开：只写 logcat。
      *
      * <p>这类服务（便签输入法等）由系统自行管理，模块不参与修复，
-     * 也不写入持久事件缓冲，避免与受管服务的排障日志混在一起。
+     * 也不写入持久事件缓冲，避免与锁定服务的排障日志混在一起。
      */
     private static void eventNonManaged(String key, String summary) {
         log("[监听] " + summary + ": " + key);
@@ -2464,7 +2464,7 @@ public class AutoRepairEntry extends XposedModule {
                 return;
             }
             sLastDied.put(key, now);
-            eventNonManaged(key, "非保活服务挂掉(忽略) crashed=" + crashed);
+            eventNonManaged(key, "未锁定服务挂掉(忽略) crashed=" + crashed);
             return;
         }
         if (sContext == null) {
@@ -2517,8 +2517,8 @@ public class AutoRepairEntry extends XposedModule {
 
         if (!managed) {
             eventNonManaged(key, success
-                    ? "非保活服务连接(忽略)"
-                    : "非保活服务重绑失败(忽略) crashed=" + crashed + ", iface=" + hasInterface);
+                    ? "未锁定服务连接(忽略)"
+                    : "未锁定服务重绑失败(忽略) crashed=" + crashed + ", iface=" + hasInterface);
             return;
         }
 
@@ -2717,7 +2717,7 @@ public class AutoRepairEntry extends XposedModule {
 
     /**
      * RESTORING 状态只做 delta 补回，不加强杀：
-     * 复用现有 reconcileMissing 一次恢复所有缺失的受管服务，避免和启用列表观察器互相打架。
+     * 复用现有 reconcileMissing 一次恢复所有缺失的锁定服务，避免和启用列表观察器互相打架。
      */
     private static void requestRestore(ComponentName component, String reason) {
         if (!isModuleEnabled()) {

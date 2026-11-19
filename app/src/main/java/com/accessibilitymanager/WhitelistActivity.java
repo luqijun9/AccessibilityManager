@@ -483,7 +483,7 @@ public class WhitelistActivity extends AppCompatActivity {
         return containsService(settingValue, ownServiceId);
     }
 
-    /** LSPosed 模块模式下把受管列表同步给模块 */
+    /** LSPosed 模块模式下把锁定列表同步给模块 */
     private void syncModuleServicesIfNeeded() {
         if (sp == null) {
             sp = getSharedPreferences("data", 0);

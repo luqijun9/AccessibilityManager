@@ -541,7 +541,7 @@ public class ServiceRepairStateMachineTest {
 
     @Test
     public void packageRepairStartedFromStaleUnmanaged_managedSnapshot_entersRepairing() {
-        // 协调器刚创建机器时状态还是 UNMANAGED，但快照确认服务仍受管且启用；
+        // 协调器刚创建机器时状态还是 UNMANAGED，但快照确认服务仍锁定且启用；
         // 不能把该成员移出批次，否则整包关开后它会失去追踪。
         ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
         ServiceRepairStateMachine.Transition t = machine.handle(

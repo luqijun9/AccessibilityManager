@@ -90,7 +90,7 @@ public class LogActivity extends AppCompatActivity {
     private final java.util.Set<Integer> mSelectedPositions = new java.util.TreeSet<>();
 
     /** 可折叠日志的分组标签：只有连续且同组的日志才会合并 */
-    private static final String GROUP_IGNORED_SERVICE = "非保活服务";
+    private static final String GROUP_IGNORED_SERVICE = "未锁定服务";
 
     // ── 实时监听 ──
     private LogUtil.LogListener mLogListener;
@@ -508,10 +508,10 @@ public class LogActivity extends AppCompatActivity {
         return items;
     }
 
-    /** 返回可折叠日志的分组标签，null 表示不折叠；兼容旧版本的“非受管”写法 */
+    /** 返回可折叠日志的分组标签，null 表示不折叠；兼容旧版本的“非保活/非受管”写法 */
     private static String collapseGroupLabel(String text) {
         if (text == null) return null;
-        if (text.contains("非保活服务") || text.contains("非受管服务")) {
+        if (text.contains("未锁定服务") || text.contains("非保活服务") || text.contains("非受管服务")) {
             return GROUP_IGNORED_SERVICE;
         }
         return null;

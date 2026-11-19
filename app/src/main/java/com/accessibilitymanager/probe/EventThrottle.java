@@ -4,7 +4,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 非受管服务的日志聚合器：同一组件在时间窗口内只放行一条持久事件，
+ * 未锁定服务的日志聚合器：同一组件在时间窗口内只放行一条持久事件，
  * 其余只计数并合并进下一条，明细仍由调用方写 logcat，避免高频连接日志挤占事件缓冲。
  */
 final class EventThrottle {
