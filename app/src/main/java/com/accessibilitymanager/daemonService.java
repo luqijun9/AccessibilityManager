@@ -999,51 +999,39 @@ public class daemonService extends Service {
         // ── 解锁检测短时间防抖（15秒内重复解锁不重复触发 dumpsys） ──
         if ("解锁".equals(source) || "解锁(无障碍检测)".equals(source)) {
             if (now - mLastDumpsysTime < 15_000L) {
-                Log.d("AccMgrDebug", "[TASK-" + Integer.toHexString(System.identityHashCode(this)) + "] unlock 15s debounce intercepted");
                 return;
             }
         }
 
-        String taskId = Integer.toHexString(System.identityHashCode(this)) + "-" + (int)(Math.random() * 0xFFFF);
-        Log.d("AccMgrDebug", "[TASK-" + taskId + "] ENTER source=" + source);
         String daemonList = sp.getString("daemon", "");
         boolean globalWhitelistEnable = sp.getBoolean("whitelist_global_enable", false);
         String whitelistStr = globalWhitelistEnable ? sp.getString("whitelist_services", "") : "";
         if (daemonList.length() == 0 && whitelistStr.length() == 0) {
-            Log.d("AccMgrDebug", "[TASK-" + taskId + "] daemonList and whitelist empty, return");
             return;
         }
         // 先检查 DUMP 权限
         if (!ShellUtil.hasDumpPermission(this)) {
             LogUtil.log(daemonService.this, "[崩溃检测] 触发来源：" + source + "，未授予 DUMP 权限，跳过检测（请通过 ADB 授予：adb shell pm grant " + getPackageName() + " android.permission.DUMP）");
-            Log.d("AccMgrDebug", "[TASK-" + taskId + "] DUMP permission not granted, skip");
             return;
         }
 
         try {
             mLastDumpsysTime = System.currentTimeMillis();
-            Log.d("AccMgrDebug", "[TASK-" + taskId + "] Executing dumpsys accessibility directly (DUMP)...");
             Process p = Runtime.getRuntime().exec("dumpsys accessibility");
-            Log.d("AccMgrDebug", "[TASK-" + taskId + "] Direct exec() OK pid=" + p);
 
             BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
             StringBuilder allOutput = new StringBuilder();
             String line;
-            int lineCount = 0;
             while ((line = reader.readLine()) != null) {
                 allOutput.append(line).append("\n");
-                lineCount++;
             }
             reader.close();
-            Log.d("AccMgrDebug", "[TASK-" + taskId + "] Read complete, lines=" + lineCount + ", waiting for process...");
 
             if (!p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
                 p.destroyForcibly();
                 LogUtil.log(daemonService.this, "[崩溃检测] 触发来源：" + source + "，dumpsys 超时(10s)，强制终止");
-                Log.d("AccMgrDebug", "[TASK-" + taskId + "] waitFor TIMEOUT, destroyed");
                 return;
             }
-            Log.d("AccMgrDebug", "[TASK-" + taskId + "] waitFor OK, parsing output...");
 
             String fullOutput = allOutput.toString();
 
@@ -1054,7 +1042,6 @@ public class daemonService extends Service {
             } else {
                 rawCrashedLine = "Crashed services: (未找到此行)";
             }
-            Log.d("AccMgrDebug", "[TASK-" + taskId + "] rawCrashedLine=" + rawCrashedLine);
             LogUtil.log(daemonService.this, "[崩溃检测] 触发来源：" + source + "，返回 " + rawCrashedLine);
 
             List<String> crashedServicesList = new ArrayList<>();
@@ -1067,10 +1054,8 @@ public class daemonService extends Service {
             }
 
             if (crashedServicesList.isEmpty()) {
-                Log.d("AccMgrDebug", "[TASK-" + taskId + "] crashedServicesList empty, return");
                 return;
             }
-            Log.d("AccMgrDebug", "[TASK-" + taskId + "] crashedServicesList=" + crashedServicesList);
 
             java.util.Set<String> trackedSet = new java.util.HashSet<>(java.util.Arrays.asList(daemonList.split(":")));
             trackedSet.addAll(java.util.Arrays.asList(whitelistStr.split(":")));
@@ -1103,10 +1088,8 @@ public class daemonService extends Service {
                     }
                 }
             }
-            Log.d("AccMgrDebug", "[TASK-" + taskId + "] NORMAL_EXIT");
         } catch (Exception e) {
             LogUtil.log(daemonService.this, "[崩溃检测] 触发来源：" + source + "，异常: " + e.getClass().getName() + ": " + e.getMessage());
-            Log.d("AccMgrDebug", "[TASK-" + taskId + "] OUTER_CATCH: " + e.getClass().getName() + ": " + e.getMessage());
         }
     }
     //endregion

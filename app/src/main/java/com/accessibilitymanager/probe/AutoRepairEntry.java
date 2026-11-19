@@ -992,9 +992,11 @@ public class AutoRepairEntry extends XposedModule {
                                         + " old=" + connId(existing) + " new=" + connId(connection));
                                 unbindConnection(existing, "duplicate_detected");
                             } else {
-                                log("stale duplicate connection already dead: "
-                                        + component.flattenToShortString()
-                                        + " old=" + connId(existing) + " new=" + connId(connection));
+                                if (isDebugEnabled()) {
+                                    log("stale duplicate connection already dead: "
+                                            + component.flattenToShortString()
+                                            + " old=" + connId(existing) + " new=" + connId(connection));
+                                }
                             }
                         }
                         sConnections.put(connKey, connection);
@@ -1348,7 +1350,12 @@ public class AutoRepairEntry extends XposedModule {
         // 先把“启用列表变化”投递给每个服务的状态机，让它们决定 RESTORING/BOUND；
         // reconcileMissing 仍作为批量补回兜底，两者都只在 sHandler 线程执行。
         notifyMachinesEnabledListChanged();
-        reconcileMissing("enabled change");
+        if (isModuleEnabled()) {
+            reconcileMissing("enabled change");
+        } else if (isDebugEnabled()) {
+            // 模块停用时不再执行批量补回，避免普通模式下每次系统无障碍设置变化都刷“模块已停用”
+            log("enabled change ignored (module disabled)");
+        }
     }
 
     private static void onAccessibilitySwitchChanged() {
@@ -3393,7 +3400,10 @@ public class AutoRepairEntry extends XposedModule {
                 processName = info.processName;
             }
         } catch (Throwable t) {
-            log("resolve service process failed: " + component.flattenToShortString() + " " + t);
+            // 冻结/禁用包的 ServiceInfo 本来就查不到，这是预期状态而不是异常，避免冻结时每次解析都刷日志
+            if (!isPackageFrozen(component.getPackageName())) {
+                log("resolve service process failed: " + component.flattenToShortString() + " " + t);
+            }
         }
         if (processName == null) {
             return isPackageProcessRunning(component.getPackageName());
@@ -3865,7 +3875,9 @@ public class AutoRepairEntry extends XposedModule {
         }
         try {
             AutoRepairEntry inst = sModuleInstance;
-            if (inst != null) {
+            // XposedModule.log 会再向 LSPosedFramework 输出一份，与上面的 Log.i 重复；
+            // 仅在调试开关打开时保留，release 默认只写一份 logcat。
+            if (inst != null && isDebugEnabled()) {
                 inst.log(Log.INFO, TAG, message);
             }
         } catch (Throwable ignored) {
