@@ -144,6 +144,55 @@ public class AutoRepairEntryTest {
     }
 
     @Test
+    public void classifyPackageState_mapsEnabledSettingToThreeStates() {
+        // 0=DEFAULT / 1=ENABLED 都代表包可运行
+        assertEquals(RepairPolicy.PKG_STATE_ENABLED, RepairPolicy.classifyPackageState(0));
+        assertEquals(RepairPolicy.PKG_STATE_ENABLED, RepairPolicy.classifyPackageState(1));
+        // 2=DISABLED，3=DISABLED_USER（冰箱/pm disable-user 冻结），4=DISABLED_UNTIL_USED
+        assertEquals(RepairPolicy.PKG_STATE_DISABLED, RepairPolicy.classifyPackageState(2));
+        assertEquals(RepairPolicy.PKG_STATE_DISABLED, RepairPolicy.classifyPackageState(3));
+        assertEquals(RepairPolicy.PKG_STATE_DISABLED, RepairPolicy.classifyPackageState(4));
+        // ROM 私有值：保守按可运行处理，避免误跳过正常服务
+        assertEquals(RepairPolicy.PKG_STATE_ENABLED, RepairPolicy.classifyPackageState(99));
+    }
+
+    @Test
+    public void isPackageUnavailable_onlySkipsUninstalledAndDisabled() {
+        assertTrue(RepairPolicy.isPackageUnavailable(RepairPolicy.PKG_STATE_UNINSTALLED));
+        assertTrue(RepairPolicy.isPackageUnavailable(RepairPolicy.PKG_STATE_DISABLED));
+        assertFalse(RepairPolicy.isPackageUnavailable(RepairPolicy.PKG_STATE_ENABLED));
+    }
+
+    @Test
+    public void shouldRecoverOnPackageChange_onlyWhenPackageIsUsable() {
+        // 解冻（3 -> 0/1）归一化为 ENABLED，应触发补回
+        assertTrue(RepairPolicy.shouldRecoverOnPackageChange(RepairPolicy.PKG_STATE_ENABLED));
+        // 冻结事件、卸载事件不触发补回，避免冻结期间重新写入启用列表形成循环
+        assertFalse(RepairPolicy.shouldRecoverOnPackageChange(RepairPolicy.PKG_STATE_DISABLED));
+        assertFalse(RepairPolicy.shouldRecoverOnPackageChange(RepairPolicy.PKG_STATE_UNINSTALLED));
+    }
+
+    @Test
+    public void unfrozenWindows_suppressRepairAndKillForBoundedTime() {
+        long unfrozenAt = 10_000L;
+        // 静默期：0 ~ 15s 内不做扫描/修复
+        assertTrue(RepairPolicy.isInUnfrozenSettle(unfrozenAt + 1L, unfrozenAt));
+        assertTrue(RepairPolicy.isInUnfrozenSettle(
+                unfrozenAt + RepairPolicy.UNFROZEN_SETTLE_MS - 1L, unfrozenAt));
+        assertFalse(RepairPolicy.isInUnfrozenSettle(
+                unfrozenAt + RepairPolicy.UNFROZEN_SETTLE_MS, unfrozenAt));
+        // 保守期：0 ~ 60s 内禁止强杀与崩溃修复
+        assertTrue(RepairPolicy.isInUnfrozenGuard(unfrozenAt + 1L, unfrozenAt));
+        assertTrue(RepairPolicy.isInUnfrozenGuard(
+                unfrozenAt + RepairPolicy.UNFROZEN_GUARD_MS - 1L, unfrozenAt));
+        assertFalse(RepairPolicy.isInUnfrozenGuard(
+                unfrozenAt + RepairPolicy.UNFROZEN_GUARD_MS, unfrozenAt));
+        // 时间未知/时钟回拨时不启用窗口，保持原行为
+        assertFalse(RepairPolicy.isInUnfrozenSettle(unfrozenAt, 0L));
+        assertFalse(RepairPolicy.isInUnfrozenGuard(unfrozenAt - 1L, unfrozenAt));
+    }
+
+    @Test
     public void isWellKnownSystemPackage_identifiesOemAndAndroidPackages() {
         assertTrue(RepairPolicy.isWellKnownSystemPackage("android"));
         assertTrue(RepairPolicy.isWellKnownSystemPackage("com.android.settings"));

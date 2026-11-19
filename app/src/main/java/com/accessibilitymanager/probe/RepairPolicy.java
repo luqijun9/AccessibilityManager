@@ -9,14 +9,34 @@ import java.util.Set;
  * 无障碍自动修复的策略计算辅助类（无 Android / Xposed 框架依赖，便于单元测试验证）：
  * 1. 开机与首次连接启动潮冷却期计算；
  * 2. 强杀进程时的系统/自身包名排除与同包冷却防连环双杀判定；
- * 3. 重构后的状态机时序、连接寿命与快速失败退避策略。
+ * 3. 重构后的状态机时序、连接寿命与快速失败退避策略；
+ * 4. 目标包可用性三态（卸载 / 冻结禁用 / 正常）判定，供管理器与模块共用。
  */
-final class RepairPolicy {
+public final class RepairPolicy {
+
+    // ── 包可用性三态 ──────────────────────────────────────────────────
+    // 与 PackageManager.COMPONENT_ENABLED_STATE_* 的数值解耦，避免纯逻辑测试依赖 Android SDK。
+    public static final int PKG_STATE_UNINSTALLED = 0;
+    public static final int PKG_STATE_ENABLED = 1;
+    public static final int PKG_STATE_DISABLED = 2;
+
+    // PackageManager 的启用状态常量取值（Android 框架固定值）
+    private static final int ENABLED_SETTING_DEFAULT = 0;
+    private static final int ENABLED_SETTING_ENABLED = 1;
+    private static final int ENABLED_SETTING_DISABLED = 2;
+    private static final int ENABLED_SETTING_DISABLED_USER = 3;
+    private static final int ENABLED_SETTING_DISABLED_UNTIL_USED = 4;
 
     static final long BOOT_GRACE_MS = 90_000L;
     static final long BOOT_FIRST_CONNECT_WINDOW_MS = 180_000L;
     static final long BOOT_WAVE_GRACE_MS = 30_000L;
     static final long PACKAGE_KILL_COOLDOWN_MS = 10_000L;
+
+    // ── 解冻恢复窗口 ──────────────────────────────────────────────────
+    /** 解冻后静默期：给 AMS 刷新已安装服务列表与冷启动应用进程留出时间，期间不做修复 */
+    static final long UNFROZEN_SETTLE_MS = 15_000L;
+    /** 解冻后保守期：禁止强杀与崩溃修复，避免把"刚解冻尚未绑定"误判为崩溃 */
+    static final long UNFROZEN_GUARD_MS = 60_000L;
 
     // ── 服务状态机时序 ────────────────────────────────────────────────
     /** 观察到断开后的 settle 等待：给 AMS 自动重绑/OEM 瞬态恢复留出时间 */
@@ -52,6 +72,55 @@ final class RepairPolicy {
     };
 
     private RepairPolicy() {
+    }
+
+    /**
+     * 把 PackageManager.getApplicationEnabledSetting() 的返回值归一化为三态。
+     *
+     * <p>场景与边界：
+     * <ul>
+     *   <li>0(DEFAULT)/1(ENABLED)：包可运行，允许保活与修复；</li>
+     *   <li>2(DISABLED)/3(DISABLED_USER)/4(DISABLED_UNTIL_USED)：包不可运行。
+     *       冰箱类工具与 `pm disable-user` 冻结使用 3；这几种状态都必须跳过保活与修复，
+     *       但**不删除锁定**，等解冻(ACTION_PACKAGE_CHANGED)后自动恢复；</li>
+     *   <li>未知取值：按可运行处理，宁可多尝试一次，也不要因为 ROM 私有状态值把正常服务误判为冻结。</li>
+     * </ul>
+     */
+    public static int classifyPackageState(int enabledSetting) {
+        switch (enabledSetting) {
+            case ENABLED_SETTING_DEFAULT:
+            case ENABLED_SETTING_ENABLED:
+                return PKG_STATE_ENABLED;
+            case ENABLED_SETTING_DISABLED:
+            case ENABLED_SETTING_DISABLED_USER:
+            case ENABLED_SETTING_DISABLED_UNTIL_USED:
+                return PKG_STATE_DISABLED;
+            default:
+                return PKG_STATE_ENABLED;
+        }
+    }
+
+    /** 目标不可保活/不可修复（已卸载或冻结禁用）；冻结时必须保留锁，卸载沿用原有清理逻辑。 */
+    public static boolean isPackageUnavailable(int state) {
+        return state == PKG_STATE_UNINSTALLED || state == PKG_STATE_DISABLED;
+    }
+
+    /**
+     * 包状态广播到达时是否值得触发一次恢复对账：
+     * 只有“已安装且恢复正常启用状态”才代表解冻/重新启用，才需要补回启用列表。
+     */
+    public static boolean shouldRecoverOnPackageChange(int state) {
+        return state == PKG_STATE_ENABLED;
+    }
+
+    /** 解冻后的静默期内：跳过扫描/绑定校验/关开修复，等待系统自然刷新与绑定。 */
+    public static boolean isInUnfrozenSettle(long now, long unfrozenAt) {
+        return unfrozenAt > 0L && now >= unfrozenAt && now - unfrozenAt < UNFROZEN_SETTLE_MS;
+    }
+
+    /** 解冻后的保守期内：禁止强杀与崩溃修复，避免把"刚解冻未绑定"当成崩溃处理。 */
+    public static boolean isInUnfrozenGuard(long now, long unfrozenAt) {
+        return unfrozenAt > 0L && now >= unfrozenAt && now - unfrozenAt < UNFROZEN_GUARD_MS;
     }
 
     /**

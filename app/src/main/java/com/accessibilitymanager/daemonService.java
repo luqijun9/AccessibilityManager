@@ -23,6 +23,8 @@ import android.provider.Settings;
 import android.view.accessibility.AccessibilityManager;
 import android.widget.Toast;
 
+import com.accessibilitymanager.probe.RepairPolicy;
+
 import android.util.Log;
 
 import java.io.BufferedReader;
@@ -122,6 +124,11 @@ public class daemonService extends Service {
     private int mFixRetryRemaining = 2;
     private long mLastFixStartTime = 0;
     private final Map<String, Long> mLastFixTime = new HashMap<>();
+    // 冻结目标跳过日志冷却（component -> 上次打印时间），10 分钟：只降噪日志，不影响解冻恢复
+    private static final long FROZEN_SKIP_LOG_WINDOW_MS = 10 * 60 * 1000L;
+    private final Map<String, Long> mFrozenSkipLogAt = new HashMap<>();
+    // 解冻时刻（pkg -> 时间戳）：60s 内禁止崩溃修复，避免把"刚解冻尚未绑定"当成崩溃处理
+    private final Map<String, Long> mRecentlyUnfrozenAt = new HashMap<>();
     private String mCrashedFixServiceName;
     private String mCrashedFixLabel;
     private boolean mFirstCommandAfterCreate = true;
@@ -166,10 +173,10 @@ public class daemonService extends Service {
         }
     };
 
-    // ── 包状态广播（阶段一：仅验证冻结/解冻时系统是否真的发广播）──
+    // ── 包状态广播：冻结/解冻感知（普通模式）──
     // 场景：冰箱类工具和 `pm disable-user/enable` 最终都走 PackageManager.setApplicationEnabledSetting，
     // 系统随后发送 ACTION_PACKAGE_CHANGED；接收后用 getApplicationEnabledSetting 读取状态（冻结=3，解冻=0/1）。
-    // 本阶段只记录日志，不触发任何保活动作；确认广播可达后再接入三态判断与解冻恢复。
+    // 恢复入口是 doDaemon（把服务写回启用列表），不是崩溃检测：解冻后的服务并不在 dumpsys Crashed 列表里。
     final private BroadcastReceiver mPackageStateReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -179,23 +186,27 @@ public class daemonService extends Service {
                     ? intent.getData().getSchemeSpecificPart() : null;
             boolean replacing = intent.getBooleanExtra(Intent.EXTRA_REPLACING, false);
             String[] changedComponents = intent.getStringArrayExtra(Intent.EXTRA_CHANGED_COMPONENT_NAME_LIST);
-            String enabledState = "未知";
-            if (pkg != null && packageManager != null) {
-                try {
-                    enabledState = String.valueOf(packageManager.getApplicationEnabledSetting(pkg));
-                } catch (IllegalArgumentException e) {
-                    enabledState = "未安装";
-                } catch (Throwable t) {
-                    enabledState = "异常:" + t;
-                }
-            }
-            String msg = "[包状态] 收到 " + action + ": pkg=" + pkg
-                    + " enabled=" + enabledState
+            int pkgState = getPackageState(pkg);
+            String stateText = pkgState == RepairPolicy.PKG_STATE_DISABLED ? "冻结/禁用"
+                    : (pkgState == RepairPolicy.PKG_STATE_UNINSTALLED ? "未安装" : "正常");
+            boolean managed = isManagedPackage(pkg);
+            String msg = "[包状态] " + (managed ? "受管包" : "忽略") + " " + action
+                    + ": pkg=" + pkg + " state=" + stateText
                     + (changedComponents != null ? " changed=" + java.util.Arrays.toString(changedComponents) : "")
                     + (replacing ? " replacing=true" : "");
-            // logcat 用于 adb 抓取验证；LogUtil 同步到管理器日志页
+            // 全量写 logcat 便于 adb 排障；管理器日志页只记录受管包，避免系统其它应用的状态变化刷屏
             Log.d("AM_DIAG", msg + " data=" + intent.getDataString());
+            if (!managed) {
+                return;
+            }
             LogUtil.log(daemonService.this, msg);
+            // 解冻（3 -> 0/1）才触发恢复；冻结事件只记日志，绝不能在此期间写回启用列表
+            if (Intent.ACTION_PACKAGE_CHANGED.equals(action)
+                    && RepairPolicy.shouldRecoverOnPackageChange(pkgState)) {
+                mRecentlyUnfrozenAt.put(pkg, System.currentTimeMillis());
+                LogUtil.log(daemonService.this, "[包状态] 检测到解冻/重新启用: " + pkg + "，触发保活补回");
+                handlePackageUnfrozen(pkg);
+            }
         }
     };
 
@@ -323,6 +334,263 @@ public class daemonService extends Service {
     }
 
     // ════════════════════════════════════════════════════════════════
+    //  包可用性三态判定（普通模式）
+    // ════════════════════════════════════════════════════════════════
+    /**
+     * 读取包三态：未安装 / 冻结禁用 / 正常。
+     *
+     * <p>场景：冰箱类工具与 `pm disable-user` 冻结使用 COMPONENT_ENABLED_STATE_DISABLED_USER(3)。
+     * 冻结后应用会从 getInstalledAccessibilityServiceList() 和启用列表中消失，但 PackageManager
+     * 仍能查到包——旧代码因此把冻结当成"已安装"，在保活/崩溃修复路径反复操作。
+     * 这里给保活、崩溃修复、包广播和 UI 提供统一口径。
+     *
+     * <p>边界：getApplicationEnabledSetting 在包不存在时抛 IllegalArgumentException；
+     * 其它异常一律按"正常"处理，保持旧行为，避免因系统偶发异常停止保活。
+     */
+    private int getPackageState(String pkg) {
+        if (pkg == null || pkg.isEmpty() || packageManager == null) {
+            return RepairPolicy.PKG_STATE_UNINSTALLED;
+        }
+        try {
+            packageManager.getApplicationInfo(pkg, 0);
+        } catch (PackageManager.NameNotFoundException e) {
+            return RepairPolicy.PKG_STATE_UNINSTALLED;
+        } catch (Throwable t) {
+            return RepairPolicy.PKG_STATE_ENABLED;
+        }
+        try {
+            return RepairPolicy.classifyPackageState(
+                    packageManager.getApplicationEnabledSetting(pkg));
+        } catch (Throwable t) {
+            return RepairPolicy.PKG_STATE_ENABLED;
+        }
+    }
+
+    private String packageOfComponent(String component) {
+        int slash = component == null ? -1 : component.indexOf('/');
+        return slash > 0 ? component.substring(0, slash) : "";
+    }
+
+    /** 包是否在 daemon 锁定列表或全局白名单中（包广播只对受管包做日志/恢复，避免无关包刷屏）。 */
+    private boolean isManagedPackage(String pkg) {
+        if (pkg == null || pkg.isEmpty()) {
+            return false;
+        }
+        String daemonStr = sp.getString("daemon", "");
+        String whitelistStr = sp.getBoolean("whitelist_global_enable", false)
+                ? sp.getString("whitelist_services", "") : "";
+        return (":" + daemonStr + ":").contains(":" + pkg + "/")
+                || (":" + whitelistStr + ":").contains(":" + pkg + "/");
+    }
+
+    /**
+     * 冻结跳过日志降噪：同一组件 10 分钟内只写一条。
+     * 冻结期间其它服务变化仍会反复触发 doDaemon，如果每次都打印会重演日志刷屏；
+     * 冷却只作用于日志，不影响解冻广播触发的恢复。
+     */
+    /** 解冻保守期内禁止崩溃修复：刚解冻的服务尚未绑定属于正常过渡态，不是崩溃。 */
+    private boolean isInUnfrozenGuard(String pkg) {
+        Long at = mRecentlyUnfrozenAt.get(pkg);
+        return at != null && RepairPolicy.isInUnfrozenGuard(System.currentTimeMillis(), at);
+    }
+
+    private void logFrozenSkip(String source, String component, String pkg) {
+        long now = System.currentTimeMillis();
+        Long last = mFrozenSkipLogAt.get(component);
+        if (last != null && now - last < FROZEN_SKIP_LOG_WINDOW_MS) {
+            return;
+        }
+        mFrozenSkipLogAt.put(component, now);
+        LogUtil.log(this, "[保活] 跳过" + source + "：应用已冻结，保留锁待解冻恢复: " + pkg);
+    }
+
+    /** 解冻后等待 AMS 刷新已安装列表：2s 一次，最多 30 次（约 60s）。 */
+    private static final long UNFREEZE_LIST_POLL_MS = 2000L;
+    private static final int UNFREEZE_LIST_POLL_MAX = 30;
+
+    /**
+     * 解冻后的恢复入口（daemonExecutor 串行执行）。
+     *
+     * <p>前置假设与边界：实测 ColorOS 解冻后 AccessibilityManager.getInstalledAccessibilityServiceList()
+     * 会滞后于 PACKAGE_CHANGED 广播；在它刷新前直接写回启用列表会被 AMS 回滚，且不会触发绑定。
+     * 因此先每 2 秒轮询一次已安装列表：
+     * 1. 列表出现该包的服务后，再把锁定组件写回 ENABLED_ACCESSIBILITY_SERVICES；
+     * 2. 写入后 900ms 校验是否被回滚，最多补写 3 次；
+     * 3. 60 秒仍未出现时，改用一次"移除 → 500ms → 加回"强制重建连接（实测可清除残余 crashed
+     *    连接并触发 AMS 绑定）。
+     *
+     * <p>兜底：只补回 daemon 锁定列表中的组件；白名单服务受前台应用状态影响，不在这里强行开启。
+     * 全程不删锁：恢复失败时保留锁，等待后续包/设置事件再次触发。
+     */
+    private void handlePackageUnfrozen(String pkg) {
+        waitInstalledListThenRecover(pkg, 0);
+    }
+
+    private void waitInstalledListThenRecover(String pkg, int attempt) {
+        daemonExecutor.submit(() -> {
+            if (getPackageState(pkg) != RepairPolicy.PKG_STATE_ENABLED) {
+                return; // 期间又被冻结/卸载，放弃本轮恢复
+            }
+            refreshInstalledServiceList();
+            boolean listed = false;
+            for (String id : l) {
+                if (id.startsWith(pkg + "/")) {
+                    listed = true;
+                    break;
+                }
+            }
+            if (!listed) {
+                if (attempt == 0) {
+                    LogUtil.log(this, "[包状态] 解冻恢复等待系统刷新已安装列表: " + pkg);
+                }
+                if (attempt < UNFREEZE_LIST_POLL_MAX) {
+                    mHandler.postDelayed(() -> waitInstalledListThenRecover(pkg, attempt + 1),
+                            UNFREEZE_LIST_POLL_MS);
+                } else {
+                    LogUtil.log(this, "[包状态] 已安装列表等待超时，改用关开强制重建连接: " + pkg);
+                    forceToggleLockedComponents(pkg);
+                }
+                return;
+            }
+            writeRecoveryComponents(pkg, 0, true);
+        });
+    }
+
+    /** 已安装列表已就绪后：把锁定组件写回启用列表，并按需校验/关开重建连接。 */
+    private void writeRecoveryComponents(String pkg, int writeAttempt, boolean allowToggle) {
+        if (getPackageState(pkg) != RepairPolicy.PKG_STATE_ENABLED) {
+            return;
+        }
+        String setting = Settings.Secure.getString(getContentResolver(),
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        if (setting == null) setting = "";
+        StringBuilder desired = new StringBuilder(setting);
+        StringBuilder added = new StringBuilder();
+        boolean hasRecoverable = false;
+        String daemonStr = sp.getString("daemon", "");
+        for (String raw : daemonStr.split(":")) {
+            if (raw.isEmpty()) continue;
+            ComponentName cn = ComponentName.unflattenFromString(raw);
+            if (cn == null || !pkg.equals(cn.getPackageName())) continue;
+            String normalized = cn.flattenToString();
+            if (!isServiceComponentInstalled(normalized)) continue;
+            hasRecoverable = true;
+            if (containsServiceInSettingString(desired.toString(), cn)) continue;
+            if (desired.length() > 0) desired.append(":");
+            desired.append(normalized);
+            if (added.length() > 0) added.append(" ");
+            added.append(normalized);
+        }
+        if (added.length() > 0) {
+            // 先更新本地快照，避免本进程 observer 把这次写入当成外部变化再走一遍清理
+            tmpSettingValue = desired.toString();
+            Settings.Secure.putString(getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, desired.toString());
+            LogUtil.log(this, "[包状态] 解冻恢复：已补回 " + added
+                    + (writeAttempt > 0 ? "（重试" + writeAttempt + "）" : ""));
+        } else if (writeAttempt == 0) {
+            LogUtil.log(this, "[包状态] 解冻后无需补回（服务已在启用列表或没有锁定该包）: " + pkg);
+        }
+        refreshInstalledServiceList();
+        if (added.length() > 0 && allowToggle) {
+            // 实测解冻后仅写回启用列表不会触发绑定：AMS 仍保留冻结前的 crashed 连接。
+            // 已安装列表就绪后做一次“移除→500ms→加回”，强制 AMS 丢弃旧连接并重新绑定。
+            mHandler.postDelayed(() -> daemonExecutor.submit(() -> {
+                if (getPackageState(pkg) != RepairPolicy.PKG_STATE_ENABLED) return;
+                LogUtil.log(this, "[包状态] 解冻恢复：执行关开重建连接 " + pkg);
+                forceToggleLockedComponents(pkg);
+            }), 1200L);
+        } else if (hasRecoverable && writeAttempt + 1 < 3) {
+            // 校验写入是否被 AMS 的滞后已安装列表回滚；被回滚则再补一次
+            mHandler.postDelayed(() -> daemonExecutor.submit(() -> {
+                if (getPackageState(pkg) != RepairPolicy.PKG_STATE_ENABLED) return;
+                if (!isAnyLockedComponentEnabled(pkg)) {
+                    LogUtil.log(this, "[包状态] 解冻补回被系统回滚，重试: " + pkg);
+                    writeRecoveryComponents(pkg, writeAttempt + 1, false);
+                }
+            }), 900L);
+        }
+    }
+
+    /** 已安装列表长期不刷新时的兜底：移除锁定组件 → 500ms → 加回，强制 AMS 重建连接。 */
+    private void forceToggleLockedComponents(String pkg) {
+        if (getPackageState(pkg) != RepairPolicy.PKG_STATE_ENABLED) {
+            return;
+        }
+        String setting = Settings.Secure.getString(getContentResolver(),
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        if (setting == null) setting = "";
+        String without = setting;
+        for (String raw : sp.getString("daemon", "").split(":")) {
+            if (raw.isEmpty()) continue;
+            ComponentName cn = ComponentName.unflattenFromString(raw);
+            if (cn != null && pkg.equals(cn.getPackageName())) {
+                without = removeComponentFromSetting(without, cn.flattenToString());
+            }
+        }
+        if (!without.equals(setting)) {
+            tmpSettingValue = without;
+            Settings.Secure.putString(getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, without);
+            try { Thread.sleep(500); } catch (InterruptedException ignored) { }
+        }
+        writeRecoveryComponents(pkg, 0, false);
+    }
+
+    private String removeComponentFromSetting(String setting, String normalized) {
+        ComponentName target = ComponentName.unflattenFromString(normalized);
+        if (target == null || setting == null) return setting;
+        StringBuilder sb = new StringBuilder();
+        for (String entry : setting.split(":")) {
+            if (entry.isEmpty()) continue;
+            ComponentName cn = ComponentName.unflattenFromString(entry);
+            if (target.equals(cn)) continue;
+            if (sb.length() > 0) sb.append(":");
+            sb.append(entry);
+        }
+        return sb.toString();
+    }
+
+    /** 该包在 daemon 锁定列表中的组件是否仍有一个处于启用列表（用于判断补回是否被回滚）。 */
+    private boolean isAnyLockedComponentEnabled(String pkg) {
+        String setting = Settings.Secure.getString(getContentResolver(),
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        if (setting == null) return false;
+        String daemonStr = sp.getString("daemon", "");
+        for (String raw : daemonStr.split(":")) {
+            if (raw.isEmpty()) continue;
+            ComponentName cn = ComponentName.unflattenFromString(raw);
+            if (cn != null && pkg.equals(cn.getPackageName())
+                    && containsServiceInSettingString(setting, cn)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 组件是否真实存在于当前包（用于区分"AMS 已安装列表滞后"与"服务已被应用移除"）。 */
+    private boolean isServiceComponentInstalled(String normalized) {
+        ComponentName cn = ComponentName.unflattenFromString(normalized);
+        if (cn == null) return false;
+        try {
+            packageManager.getServiceInfo(cn, 0);
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private boolean containsServiceInSettingString(String setting, ComponentName target) {
+        if (setting == null || target == null) return false;
+        for (String entry : setting.split(":")) {
+            if (entry.isEmpty()) continue;
+            ComponentName cn = ComponentName.unflattenFromString(entry);
+            if (target.equals(cn)) return true;
+        }
+        return false;
+    }
+
+    // ════════════════════════════════════════════════════════════════
     //  doDaemon / doDaemonImpl（仅在 daemonExecutor 线程调用）
     // ════════════════════════════════════════════════════════════════
     /** 调用者必须在 daemonExecutor 线程中 */
@@ -400,8 +668,30 @@ public class daemonService extends Service {
             }
             String normalized = normalizeServiceId(serviceName);
             if (!isServiceInList(normalized, localL)) {
+                String pkg = packageOfComponent(normalized);
+                int pkgState = getPackageState(pkg);
+                if (pkgState == RepairPolicy.PKG_STATE_DISABLED) {
+                    // 冻结/禁用：绝不能删锁，也不能尝试写回启用列表。
+                    // 系统会拒绝冻结服务并再次触发启用列表变更，写回只会形成"写→事件→再写"循环；
+                    // 保留锁，等 ACTION_PACKAGE_CHANGED 解冻广播到达后重新执行 doDaemon 自动恢复。
+                    logFrozenSkip("保活", normalized, pkg);
+                    continue;
+                }
                 if (!localL.isEmpty()) {
-                    // 已安装列表已就绪且不含该服务，确认已卸载，清理并跳过保活
+                    if (pkgState == RepairPolicy.PKG_STATE_ENABLED
+                            && isServiceComponentInstalled(normalized)) {
+                        // 包已恢复正常且服务组件真实存在，但 AMS 的"已安装服务列表"仍滞后（解冻瞬间常见）。
+                        // 此时绝不能当作已卸载删锁：保留锁并留待下一次设置/包事件重新对账。
+                        if (mFrozenSkipLogAt.get(normalized) == null
+                                || System.currentTimeMillis() - mFrozenSkipLogAt.get(normalized)
+                                >= FROZEN_SKIP_LOG_WINDOW_MS) {
+                            mFrozenSkipLogAt.put(normalized, System.currentTimeMillis());
+                            LogUtil.log(daemonService.this,
+                                    "[保活] 已安装列表滞后，保留锁等待刷新: " + normalized);
+                        }
+                        continue;
+                    }
+                    // 已安装列表已就绪且不含该服务，确认已卸载（或服务已被应用移除），清理并跳过保活
                     if (daemonSet.contains(serviceName)) {
                         if (cleanedDaemon == null) cleanedDaemon = new StringBuilder();
                         else cleanedDaemon.append(":");
@@ -784,6 +1074,20 @@ public class daemonService extends Service {
             for (String cs : crashedServicesList) {
                 for (String tracked : trackedSet) {
                     if (serviceNameMatches(cs, tracked)) {
+                        String crashComponent = normalizeServiceId(cs);
+                        String crashPkg = packageOfComponent(crashComponent);
+                        if (getPackageState(crashPkg) == RepairPolicy.PKG_STATE_DISABLED) {
+                            // dumpsys 的 Crashed 标记可能在"崩溃后立刻冻结"的瞬间残留（AMS 解绑延迟）。
+                            // 冻结目标绝不能进入关开/强杀修复，否则会形成 8 秒冷却的写入循环。
+                            logFrozenSkip("崩溃修复", crashComponent, crashPkg);
+                            break;
+                        }
+                        if (isInUnfrozenGuard(crashPkg)) {
+                            // 解冻后 60s 内 dumpsys 仍可能残留 Crashed 假象，直接跳过修复
+                            LogUtil.log(daemonService.this,
+                                    "[包状态] 解冻保守期内跳过崩溃修复: " + crashComponent);
+                            break;
+                        }
                         // 把修复操作提交回 daemonExecutor 串行执行
                         if ("修复后复查".equals(source)) {
                             daemonExecutor.submit(() -> handleFixRetry(cs));
@@ -804,6 +1108,16 @@ public class daemonService extends Service {
 
     /** 在 daemonExecutor 线程中执行：处理首次检测到的崩溃 */
     private void handleFixDetected(String cs) {
+        String crashPkg = packageOfComponent(normalizeServiceId(cs));
+        if (getPackageState(crashPkg) == RepairPolicy.PKG_STATE_DISABLED) {
+            // 双保险：适配器/复查/手动路径都可能直接调用修复入口，冻结目标一律跳过
+            logFrozenSkip("崩溃修复", normalizeServiceId(cs), crashPkg);
+            return;
+        }
+        if (isInUnfrozenGuard(crashPkg)) {
+            LogUtil.log(this, "[包状态] 解冻保守期内跳过崩溃修复: " + normalizeServiceId(cs));
+            return;
+        }
         Long lastFix = mLastFixTime.get(cs);
         if (lastFix != null && System.currentTimeMillis() - lastFix < 8000) {
             return;
@@ -846,6 +1160,19 @@ public class daemonService extends Service {
     private void fixCrashedService(String serviceName, int retryCount) {
         if (sp.getBoolean("lsposed_mode", false)) {
             LogUtil.log(this, "[崩溃修复] LSPosed 模块模式，跳过应用层修复: " + serviceName);
+            mIsFixing = false;
+            return;
+        }
+        String guardPkg = packageOfComponent(normalizeServiceId(serviceName));
+        if (getPackageState(guardPkg) == RepairPolicy.PKG_STATE_DISABLED) {
+            // 冻结目标不修复：保留锁，等解冻广播触发保活补回
+            logFrozenSkip("崩溃修复", normalizeServiceId(serviceName), guardPkg);
+            mIsFixing = false;
+            return;
+        }
+        if (isInUnfrozenGuard(guardPkg)) {
+            // 解冻后保守期内不做关开/强杀，避免打断系统自然绑定
+            LogUtil.log(this, "[包状态] 解冻保守期内跳过崩溃修复: " + normalizeServiceId(serviceName));
             mIsFixing = false;
             return;
         }

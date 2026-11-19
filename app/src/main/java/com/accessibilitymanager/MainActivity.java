@@ -73,9 +73,13 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
+
+import com.accessibilitymanager.probe.RepairPolicy;
 
 import android.util.Log;
 import rikka.shizuku.Shizuku;
@@ -383,6 +387,10 @@ public class MainActivity extends Activity {
         }
 
         daemon = sp.getString("daemon", "");
+        // getInstalledAccessibilityServiceList() 会剔除被冻结的应用：把“锁定中但已冻结”的服务
+        // 补回列表并置灰显示，否则用户既看不到条目也无法解锁（解冻后也无法重新开启）。
+        l = new ArrayList<>(l == null ? Collections.<AccessibilityServiceInfo>emptyList() : l);
+        appendFrozenLockedServices(l);
         top = sp.getString("top", "");
         Sort();
 
@@ -650,8 +658,9 @@ public class MainActivity extends Activity {
                 if (!top1 && top2) return 1;
 
                 if (!top1 && !top2) {
-                    boolean enabled1 = isServiceEnabled(id1, currentSetting);
-                    boolean enabled2 = isServiceEnabled(id2, currentSetting);
+                    // 已启用或已锁定的服务归入"活跃"分组，保证冻结后锁定条目的位置不因状态变化而跳动
+                    boolean enabled1 = isServiceEnabled(id1, currentSetting) || containsService(daemon, id1);
+                    boolean enabled2 = isServiceEnabled(id2, currentSetting) || containsService(daemon, id2);
                     if (enabled1 && !enabled2) return -1;
                     if (!enabled1 && enabled2) return 1;
                 }
@@ -681,7 +690,8 @@ public class MainActivity extends Activity {
         mFirstNormalItemIndex = 0;
         for (int i = 0; i < tmp.size(); i++) {
             String id = tmp.get(i).getId();
-            if (containsService(top, id) || isServiceEnabled(id, currentSetting) || id.equals(ownServiceId)) {
+            if (containsService(top, id) || isServiceEnabled(id, currentSetting)
+                    || containsService(daemon, id) || id.equals(ownServiceId)) {
                 mFirstNormalItemIndex = i + 1;
             } else {
                 break;
@@ -712,6 +722,77 @@ public class MainActivity extends Activity {
         return false;
     }
 
+
+    /**
+     * 读取包三态：未安装 / 冻结禁用 / 正常。
+     * 冻结（DISABLED_USER=3）与禁用（2/4）都视为不可运行；读取异常按正常处理，保持旧行为。
+     */
+    private int getPackageState(String pkg) {
+        if (pkg == null || pkg.isEmpty()) return RepairPolicy.PKG_STATE_UNINSTALLED;
+        try {
+            pm.getApplicationInfo(pkg, 0);
+        } catch (PackageManager.NameNotFoundException e) {
+            return RepairPolicy.PKG_STATE_UNINSTALLED;
+        } catch (Throwable t) {
+            return RepairPolicy.PKG_STATE_ENABLED;
+        }
+        try {
+            return RepairPolicy.classifyPackageState(pm.getApplicationEnabledSetting(pkg));
+        } catch (Throwable t) {
+            return RepairPolicy.PKG_STATE_ENABLED;
+        }
+    }
+
+    /**
+     * 把“锁定中但被系统冻结/禁用”的服务补进界面列表。
+     *
+     * <p>场景：冻结后服务会从 getInstalledAccessibilityServiceList() 消失，已锁定条目在
+     * 管理器里不可见也无法解锁。这里为这类组件生成只读占位项，排序仍沿用原有 label/置顶规则，
+     * 条目回到它本来应该在的位置；未安装或“包正常但服务缺失”的条目不伪造，避免产生幽灵项。
+     */
+    private void appendFrozenLockedServices(List<AccessibilityServiceInfo> list) {
+        if (list == null || daemon == null || daemon.isEmpty()) return;
+        Set<String> existing = new HashSet<>();
+        for (AccessibilityServiceInfo info : list) {
+            existing.add(normalizeServiceId(info.getId()));
+        }
+        for (String entry : daemon.split(":")) {
+            if (entry.isEmpty()) continue;
+            ComponentName cn = ComponentName.unflattenFromString(entry);
+            if (cn == null) continue;
+            final String id = cn.flattenToString();
+            if (existing.contains(id)) continue;
+            if (getPackageState(cn.getPackageName()) != RepairPolicy.PKG_STATE_DISABLED) continue;
+            // 只用于展示与解锁；开关在绑定阶段会被禁用，避免对冻结服务发起无效写入
+            list.add(new AccessibilityServiceInfo() {
+                @Override
+                public String getId() {
+                    return id;
+                }
+
+                @Override
+                public String loadDescription(PackageManager packageManager) {
+                    return "应用已冻结，解冻后将自动恢复保活";
+                }
+            });
+            existing.add(id);
+        }
+    }
+
+    /** 重新拉取已安装无障碍服务并补入冻结锁定项；用于 onResume 感知解冻/冻结后的列表变化。 */
+    private void reloadInstalledServices() {
+        List<AccessibilityServiceInfo> fresh = ((AccessibilityManager) getSystemService(
+                Context.ACCESSIBILITY_SERVICE)).getInstalledAccessibilityServiceList();
+        l = new ArrayList<>(fresh == null ? Collections.<AccessibilityServiceInfo>emptyList() : fresh);
+        appendFrozenLockedServices(l);
+        top = sp.getString("top", "");
+        Sort();
+    }
+
+    private boolean isServiceFrozen(String normalizedServiceId) {
+        ComponentName cn = ComponentName.unflattenFromString(normalizedServiceId);
+        return cn != null && getPackageState(cn.getPackageName()) == RepairPolicy.PKG_STATE_DISABLED;
+    }
 
     private boolean containsService(String list, String serviceId) {
         if (list == null || list.isEmpty()) return false;
@@ -1148,7 +1229,22 @@ public class MainActivity extends Activity {
         settingValue = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         if (settingValue == null) settingValue = "";
         daemon = sp.getString("daemon", "");
-        if (!refreshCompactListModeIfNeeded() && mAdapter != null) {
+        boolean compactChanged = refreshCompactListModeIfNeeded();
+        if (!mIsSearching && mAdapter != null) {
+            // 冻结/解冻会改变 getInstalledAccessibilityServiceList() 的内容：
+            // 回到前台时重建列表，冻结锁定项出现并置灰，解冻后恢复为真实条目
+            reloadInstalledServices();
+            if (mIsFavoritesTab) {
+                List<AccessibilityServiceInfo> favList = new ArrayList<>();
+                for (AccessibilityServiceInfo info : tmp) {
+                    if (isServiceFavorite(normalizeServiceId(info.getId()))) favList.add(info);
+                }
+                mFavoritesList = favList;
+                updateAdapter(favList);
+            } else {
+                updateAdapter(tmp);
+            }
+        } else if (!compactChanged && mAdapter != null) {
             mAdapter.notifyDataSetChanged();
         }
         
@@ -2186,6 +2282,7 @@ public class MainActivity extends Activity {
             AccessibilityServiceInfo info = mList.get(position);
             String rawServiceName = info.getId();
             String serviceName = normalizeServiceId(rawServiceName);
+            boolean frozen = isServiceFrozen(serviceName);
             ComponentName serviceComponent = ComponentName.unflattenFromString(serviceName);
             String[] packageName = Pattern.compile("/").split(serviceName);
             Drawable icon = mIconCache.get(packageName[0]);
@@ -2221,7 +2318,8 @@ public class MainActivity extends Activity {
             holder.itemView.setOnClickListener(null);
             holder.itemView.setOnLongClickListener(null);
 
-            holder.sw.setEnabled(true);
+            // 冻结目标：开关禁用（置灰），但锁图标保持可见以允许手动解锁
+            holder.sw.setEnabled(!frozen);
             holder.ib.setImageResource(containsService(daemon, serviceName) ? R.drawable.lock1 : R.drawable.lock);
             holder.ib.setOnClickListener(view -> {
                 if (!isModeEstablished()) {
@@ -2232,7 +2330,16 @@ public class MainActivity extends Activity {
             });
 
             holder.sw.setChecked(isServiceEnabled(serviceName, settingValue));
-            holder.ib.setVisibility(resolveLockVisibility(holder.sw.isChecked(), isCompactListMode()));
+            if (frozen) {
+                // 应用已冻结：服务不可能处于启用列表，强制关闭并整体降透明度
+                holder.sw.setChecked(false);
+                holder.itemView.setAlpha(0.55f);
+                holder.ib.setVisibility(View.VISIBLE);
+                holder.texta.setText("应用已冻结，解冻后将自动恢复保活");
+            } else {
+                holder.itemView.setAlpha(1f);
+                holder.ib.setVisibility(resolveLockVisibility(holder.sw.isChecked(), isCompactListMode()));
+            }
             
             holder.sw.setOnClickListener(view -> {
                 if (!isModeEstablished()) {
@@ -2360,6 +2467,10 @@ public class MainActivity extends Activity {
 
 
             holder.cardView.setOnClickListener(view -> {
+                if (isServiceFrozen(serviceName)) {
+                    Toast.makeText(MainActivity.this, "应用已冻结，解冻后可查看并开启服务", Toast.LENGTH_SHORT).show();
+                    return;
+                }
                 com.google.android.material.dialog.MaterialAlertDialogBuilder builder = new com.google.android.material.dialog.MaterialAlertDialogBuilder(MainActivity.this);
                 int fb = info.feedbackType;
                 String feedback = "";
@@ -2523,6 +2634,11 @@ public class MainActivity extends Activity {
                     }
                     return true;
                 });
+            }
+
+            if (frozen) {
+                // 冻结条目只保留解锁按钮：长按置顶/收藏与详情弹窗均不响应
+                holder.cardView.setOnLongClickListener(null);
             }
         }
 
