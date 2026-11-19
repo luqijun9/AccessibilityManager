@@ -2045,10 +2045,12 @@ public class AutoRepairEntry extends XposedModule {
                 } catch (Throwable ignored) {
                 }
             }
-            scheduleReconcile("sync_services cmd", RECONCILE_CONFIG_DELAY_MS);
-            scheduleScan(SCAN_CONFIG_DELAY_MS, "sync_services cmd");
-            syncMachines("sync_services cmd");
             if (changed) {
+                // 只有锁定列表真正变化时才做补回/扫描/状态机同步；
+                // 管理器每次 onResume 都会重发同一份列表，未变化时重复执行会产生无意义日志与遍历。
+                scheduleReconcile("sync_services cmd", RECONCILE_CONFIG_DELAY_MS);
+                scheduleScan(SCAN_CONFIG_DELAY_MS, "sync_services cmd");
+                syncMachines("sync_services cmd");
                 event("配置", "模块已生效最新锁定列表: " + component);
             } else {
                 log("sync_services unchanged: " + component);
@@ -2061,6 +2063,10 @@ public class AutoRepairEntry extends XposedModule {
             int sep = component.indexOf('#');
             String modeStr = sep >= 0 ? component.substring(0, sep) : component;
             String disabled = sep >= 0 ? component.substring(sep + 1) : "";
+            String prevMode = sFixModeCache != null ? sFixModeCache : readConfig(KEY_FIX_MODE);
+            String prevDisabled = sFixDisabledCache != null
+                    ? sFixDisabledCache : readConfig(KEY_FIX_DISABLED);
+            boolean changed = !modeStr.equals(prevMode) || !disabled.equals(prevDisabled);
             sFixModeCache = modeStr;
             sFixDisabledCache = disabled;
             if (sContext != null) {
@@ -2070,12 +2076,19 @@ public class AutoRepairEntry extends XposedModule {
                 } catch (Throwable ignored) {
                 }
             }
-            event("配置", "模块已生效强杀配置: fixmode=" + modeStr);
+            if (changed) {
+                event("配置", "模块已生效强杀配置: fixmode=" + modeStr);
+            } else {
+                log("sync_fixmode unchanged: fixmode=" + modeStr);
+            }
             notifyCommandAck();
             return;
         }
 
         if ("sync_ignore_system".equals(action)) {
+            String prev = sIgnoreSystemCache != null
+                    ? sIgnoreSystemCache : readConfig(KEY_IGNORE_SYSTEM);
+            boolean changed = !component.equals(prev);
             sIgnoreSystemCache = component;
             if (sContext != null) {
                 try {
@@ -2083,7 +2096,11 @@ public class AutoRepairEntry extends XposedModule {
                 } catch (Throwable ignored) {
                 }
             }
-            event("配置", "模块已生效忽略系统应用配置: ignoreSystem=" + component);
+            if (changed) {
+                event("配置", "模块已生效忽略系统应用配置: ignoreSystem=" + component);
+            } else {
+                log("sync_ignore_system unchanged: ignoreSystem=" + component);
+            }
             notifyCommandAck();
             return;
         }

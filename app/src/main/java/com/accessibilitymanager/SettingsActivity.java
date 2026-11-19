@@ -339,7 +339,9 @@ public class SettingsActivity extends AppCompatActivity {
         switchWakeIdle.setChecked(sp.getBoolean("periodic_check_wake_idle", true));
         boolean ignoreSystem = sp.getBoolean("ignore_system_crash_trigger", true);
         switchIgnoreSystemCrash.setChecked(ignoreSystem);
-        if (lsposedMode) {
+        if (lsposedMode && ModuleConfig.isIgnoreSystem(this) != ignoreSystem) {
+            // 设置页每次 onCreate 都会走到这里；仅在模块当前值确实不同时才下发，
+            // 避免重复出现“模块已生效忽略系统应用配置”日志与无意义的回执广播。
             ModuleConfig.setIgnoreSystem(this, ignoreSystem);
         }
         intervalLabel.setText(sp.getInt("periodic_check_interval", 10) + "分钟");
