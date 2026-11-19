@@ -86,6 +86,14 @@ public class AutoRepairEntry extends XposedModule {
      * 用于真机观察“旧连接迟到事件”与“双连接是否真的存在”。默认 0，不影响正常保活。
      */
     private static final String KEY_DEBUG_PAUSE_UNBIND = "a11y_module_debug_pause_unbind";
+    /**
+     * 实验开关：跳过 AMS mCrashedServices 清理，仅保留 info.crashed 清理。
+     *
+     * <p>用途：验证“恢复后 dumpsys 仍显示 crashed”到底是 AMS 的短时延迟，
+     * 还是必须由模块显式清理的持久 set。默认 0；打开后只写诊断日志，不改 set。
+     */
+    private static final String KEY_DEBUG_SKIP_CRASHED_SET_CLEAR =
+            "a11y_module_debug_skip_crashed_set_clear";
     private static final String KEY_FIX_MODE = "a11y_module_fix_mode";
     private static final String KEY_FIX_DISABLED = "a11y_module_fix_disabled";
     private static final String KEY_IGNORE_SYSTEM = "a11y_module_ignore_system";
@@ -3563,6 +3571,11 @@ public class AutoRepairEntry extends XposedModule {
         return "1".equals(readSecure(KEY_DEBUG_PAUSE_UNBIND));
     }
 
+    /** 实验开关：跳过 mCrashedServices 清理，用于验证残留是否为 AMS 延迟。 */
+    private static boolean isDebugSkipCrashedSetClear() {
+        return "1".equals(readSecure(KEY_DEBUG_SKIP_CRASHED_SET_CLEAR));
+    }
+
     /**
      * 发现同组件两个 bound 连接后，先登记一条延迟确认，而不是立即 unbind。
      *
@@ -3829,7 +3842,12 @@ public class AutoRepairEntry extends XposedModule {
         } catch (Throwable t) {
             log("clear crashed flag failed: " + t);
         }
-        clearAmsCrashedSetIfCurrent(connection, component);
+        if (isDebugSkipCrashedSetClear()) {
+            log("skip AMS crashed set clear (debug switch): "
+                    + component.flattenToShortString());
+        } else {
+            clearAmsCrashedSetIfCurrent(connection, component);
+        }
     }
 
     /**
