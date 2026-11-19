@@ -200,6 +200,11 @@ public class daemonService extends Service {
                 return;
             }
             LogUtil.log(daemonService.this, msg);
+            if (sp.getBoolean("lsposed_mode", false)) {
+                // LSPosed 模式下由 system_server 内的模块负责恢复；管理器只保留日志，
+                // 避免模块 reconcile 与普通模式 doDaemon 同时写启用列表造成双写/回滚。
+                return;
+            }
             // 解冻（3 -> 0/1）才触发恢复；冻结事件只记日志，绝不能在此期间写回启用列表
             if (Intent.ACTION_PACKAGE_CHANGED.equals(action)
                     && RepairPolicy.shouldRecoverOnPackageChange(pkgState)) {

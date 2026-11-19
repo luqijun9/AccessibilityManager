@@ -1841,9 +1841,9 @@ public class AutoRepairEntry extends XposedModule {
                         sPackageUnfrozenAt.put(pkg, SystemClock.elapsedRealtime());
                         event("监听", "检测到解冻/重新启用: " + pkg + "，触发补回检查");
                         if (isModuleEnabled()) {
-                            // 锁仍在 KEY_SERVICES 中，reconcile 会把它写回启用列表并由 AMS 绑定
-                            scheduleReconcile("package_unfrozen", RECONCILE_CONFIG_DELAY_MS);
-                            scheduleScan(SCAN_CONFIG_DELAY_MS, "package_unfrozen");
+                            // 锁仍在 KEY_SERVICES 中。syncMachines 会让该服务状态机进入 RESTORING
+                            // 并调用 reconcile 补回；不再额外 scheduleReconcile/scheduleScan：
+                            // 扫描在解冻静默期内必然被跳过，批量 reconcile 也会与状态机路径重复写入。
                             syncMachines("package_unfrozen");
                         } else {
                             log("package unfrozen but module disabled: " + pkg);
@@ -2827,8 +2827,15 @@ public class AutoRepairEntry extends XposedModule {
             return;
         }
         if (isInUnfrozenSettle(component.getPackageName())) {
-            // 解冻静默期：AMS 可能尚未刷新已安装列表，关开修复会破坏刚补回的启用项
+            // 解冻静默期：AMS 可能尚未刷新已安装列表，关开修复会破坏刚补回的启用项。
+            // 不能裸 return 丢掉这次修复意图——结算静默期剩余时间后重新投递 SYNC，
+            // 确保静默期结束时的兜底修复一定会执行（解冻保守期内仍禁止强杀）。
             eventSkip("repair:unfrozen-settle:" + key, "修复", "解冻静默期内跳过修复: " + key);
+            Long at = sPackageUnfrozenAt.get(component.getPackageName());
+            long delay = at == null ? RepairPolicy.UNFROZEN_SETTLE_MS
+                    : Math.max(500L, at + RepairPolicy.UNFROZEN_SETTLE_MS
+                            - SystemClock.elapsedRealtime() + 200L);
+            scheduleMachineSync(component, delay, "unfrozen_settle_repair");
             return;
         }
         if (!isPackageInstalled(component.getPackageName())) {
@@ -2883,8 +2890,14 @@ public class AutoRepairEntry extends XposedModule {
                 continue;
             }
             if (isInUnfrozenSettle(pkg)) {
-                // 解冻静默期内入队的请求同样延后，避免与 AMS 的启用列表刷新互相覆盖
+                // 解冻静默期内入队的请求延后到静默期结束再评估，避免与 AMS 刷新互相覆盖，
+                // 同时保证静默期后仍有兜底修复机会（不能直接丢弃请求）。
                 eventSkip("repair:unfrozen-settle:" + pkg, "修复", "解冻静默期内跳过包级修复: " + pkg);
+                Long at = sPackageUnfrozenAt.get(pkg);
+                long delay = at == null ? RepairPolicy.UNFROZEN_SETTLE_MS
+                        : Math.max(500L, at + RepairPolicy.UNFROZEN_SETTLE_MS
+                                - SystemClock.elapsedRealtime() + 200L);
+                scheduleMachineSync(request.trigger, delay, "unfrozen_settle_queue");
                 continue;
             }
             if (request.allowKill && isInUnfrozenGuard(pkg)) {
