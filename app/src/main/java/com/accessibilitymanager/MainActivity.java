@@ -2786,6 +2786,8 @@ public class MainActivity extends Activity {
         if (checkPermission()) {
             createPermissionDialog();
         } else {
+            // 切回普通模式后立即恢复应用层保活；有锁定服务时才会真正启动。
+            StartForeGroundDaemon();
             if (onModeReady != null) {
                 onModeReady.run();
             }

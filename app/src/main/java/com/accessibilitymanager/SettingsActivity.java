@@ -1130,6 +1130,19 @@ public class SettingsActivity extends AppCompatActivity {
             }
             ModuleConfig.setEnabled(this, false);
             ModuleConfig.drainLogs(this);
+            // 切回普通模式后恢复应用层前台保活服务；若没有锁定服务则不启动。
+            if (!sp.getString("daemon", "").isEmpty()) {
+                try {
+                    Intent daemonIntent = new Intent(this, daemonService.class);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(daemonIntent);
+                    } else {
+                        startService(daemonIntent);
+                    }
+                } catch (Throwable t) {
+                    LogUtil.log(this, "[模块] 普通模式保活服务启动失败: " + t);
+                }
+            }
             LogUtil.log(this, "[模块] 关闭 LSPosed 模式, 恢复崩溃检测=" + restoreCrashFix);
             Toast.makeText(this, "已切回应用层崩溃检测", Toast.LENGTH_SHORT).show();
         }
