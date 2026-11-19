@@ -32,10 +32,8 @@ public final class RepairPolicy {
     static final long BOOT_WAVE_GRACE_MS = 30_000L;
     static final long PACKAGE_KILL_COOLDOWN_MS = 10_000L;
 
-    // ── 解冻恢复窗口 ──────────────────────────────────────────────────
-    /** 解冻后静默期：给 AMS 刷新已安装服务列表与冷启动应用进程留出时间，期间不做修复 */
-    static final long UNFROZEN_SETTLE_MS = 15_000L;
-    /** 解冻后保守期：禁止强杀与崩溃修复，避免把"刚解冻尚未绑定"误判为崩溃 */
+    // ── 普通模式解冻保护 ──────────────────────────────────────────────
+    /** 普通模式解冻后保守期：禁止强杀，避免把"刚解冻尚未绑定"误判为崩溃；模块模式不再使用 */
     static final long UNFROZEN_GUARD_MS = 60_000L;
 
     // ── 服务状态机时序 ────────────────────────────────────────────────
@@ -109,11 +107,6 @@ public final class RepairPolicy {
         }
     }
 
-    /** 目标不可保活/不可修复（已卸载或冻结禁用）；冻结时必须保留锁，卸载沿用原有清理逻辑。 */
-    public static boolean isPackageUnavailable(int state) {
-        return state == PKG_STATE_UNINSTALLED || state == PKG_STATE_DISABLED;
-    }
-
     /**
      * 包状态广播到达时是否值得触发一次恢复对账：
      * 只有“已安装且恢复正常启用状态”才代表解冻/重新启用，才需要补回启用列表。
@@ -122,12 +115,7 @@ public final class RepairPolicy {
         return state == PKG_STATE_ENABLED;
     }
 
-    /** 解冻后的静默期内：跳过扫描/绑定校验/关开修复，等待系统自然刷新与绑定。 */
-    public static boolean isInUnfrozenSettle(long now, long unfrozenAt) {
-        return unfrozenAt > 0L && now >= unfrozenAt && now - unfrozenAt < UNFROZEN_SETTLE_MS;
-    }
-
-    /** 解冻后的保守期内：禁止强杀与崩溃修复，避免把"刚解冻未绑定"当成崩溃处理。 */
+    /** 普通模式解冻后的保守期内禁止强杀；模块模式已删除解冻时间窗。 */
     public static boolean isInUnfrozenGuard(long now, long unfrozenAt) {
         return unfrozenAt > 0L && now >= unfrozenAt && now - unfrozenAt < UNFROZEN_GUARD_MS;
     }

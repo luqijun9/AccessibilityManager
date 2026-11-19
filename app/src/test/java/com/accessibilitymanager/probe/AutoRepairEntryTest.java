@@ -127,13 +127,6 @@ public class AutoRepairEntryTest {
     }
 
     @Test
-    public void isPackageUnavailable_onlySkipsUninstalledAndDisabled() {
-        assertTrue(RepairPolicy.isPackageUnavailable(RepairPolicy.PKG_STATE_UNINSTALLED));
-        assertTrue(RepairPolicy.isPackageUnavailable(RepairPolicy.PKG_STATE_DISABLED));
-        assertFalse(RepairPolicy.isPackageUnavailable(RepairPolicy.PKG_STATE_ENABLED));
-    }
-
-    @Test
     public void shouldRecoverOnPackageChange_onlyWhenPackageIsUsable() {
         // 解冻（3 -> 0/1）归一化为 ENABLED，应触发补回
         assertTrue(RepairPolicy.shouldRecoverOnPackageChange(RepairPolicy.PKG_STATE_ENABLED));
@@ -143,23 +136,17 @@ public class AutoRepairEntryTest {
     }
 
     @Test
-    public void unfrozenWindows_suppressRepairAndKillForBoundedTime() {
+    public void unfrozenGuard_suppressesKillOnlyForNormalMode() {
         long unfrozenAt = 10_000L;
-        // 静默期：0 ~ 15s 内不做扫描/修复
-        assertTrue(RepairPolicy.isInUnfrozenSettle(unfrozenAt + 1L, unfrozenAt));
-        assertTrue(RepairPolicy.isInUnfrozenSettle(
-                unfrozenAt + RepairPolicy.UNFROZEN_SETTLE_MS - 1L, unfrozenAt));
-        assertFalse(RepairPolicy.isInUnfrozenSettle(
-                unfrozenAt + RepairPolicy.UNFROZEN_SETTLE_MS, unfrozenAt));
-        // 保守期：0 ~ 60s 内禁止强杀与崩溃修复
+        // 普通模式保守期：0 ~ 60s 内禁止强杀；模块模式已删除 15s 静默期与解冻自动恢复
         assertTrue(RepairPolicy.isInUnfrozenGuard(unfrozenAt + 1L, unfrozenAt));
         assertTrue(RepairPolicy.isInUnfrozenGuard(
                 unfrozenAt + RepairPolicy.UNFROZEN_GUARD_MS - 1L, unfrozenAt));
         assertFalse(RepairPolicy.isInUnfrozenGuard(
                 unfrozenAt + RepairPolicy.UNFROZEN_GUARD_MS, unfrozenAt));
         // 时间未知/时钟回拨时不启用窗口，保持原行为
-        assertFalse(RepairPolicy.isInUnfrozenSettle(unfrozenAt, 0L));
         assertFalse(RepairPolicy.isInUnfrozenGuard(unfrozenAt - 1L, unfrozenAt));
+        assertFalse(RepairPolicy.isInUnfrozenGuard(unfrozenAt, 0L));
     }
 
     @Test

@@ -206,8 +206,6 @@ public class AutoRepairEntry extends XposedModule {
             new HeartbeatTracker(MAX_HEARTBEAT_ATTEMPTS);
     private static boolean sHeartbeatRetryPending;
     private static volatile BroadcastReceiver sCommandReceiver;
-    // 阶段一测试：包启用状态广播接收器（冻结/解冻探测，仅记录日志，不触发补回）
-    private static volatile BroadcastReceiver sPackageStateReceiver;
     private static int sContextRetryCount;
 
     // 事件缓冲
@@ -248,8 +246,6 @@ public class AutoRepairEntry extends XposedModule {
     private static final Map<String, Runnable> sPendingMachineSync = new HashMap<>();
     private static final Map<String, ConnectionDedupeTask> sPendingConnectionDedupe = new HashMap<>();
     private static final Set<String> sUserDisabledKeys = new LinkedHashSet<>();
-    // 解冻时刻（pkg -> elapsedRealtime）：用于解冻静默期/保守期，避免把 AMS 刷新滞后误判为崩溃
-    private static final Map<String, Long> sPackageUnfrozenAt = new HashMap<>();
     private static final Map<String, PackageRepairRequest> sPackageRepairRequests = new HashMap<>();
     private static final List<String> sPackageRepairQueue = new ArrayList<>();
     private static final List<String> sActiveRepairBatch = new ArrayList<>();
@@ -472,15 +468,6 @@ public class AutoRepairEntry extends XposedModule {
                 log("unregister receiver on hot reload failed: " + t);
             }
         }
-        BroadcastReceiver pkgReceiver = sPackageStateReceiver;
-        sPackageStateReceiver = null;
-        if (pkgReceiver != null && ctx != null) {
-            try {
-                ctx.unregisterReceiver(pkgReceiver);
-            } catch (Throwable t) {
-                log("unregister package receiver on hot reload failed: " + t);
-            }
-        }
     }
 
     private static void clearInMemoryStateForHotReload() {
@@ -513,7 +500,6 @@ public class AutoRepairEntry extends XposedModule {
         sPendingMachineSync.clear();
         sPendingConnectionDedupe.clear();
         sUserDisabledKeys.clear();
-        sPackageUnfrozenAt.clear();
         sPackageRepairRequests.clear();
         sPackageRepairQueue.clear();
         sActiveRepairBatch.clear();
@@ -1039,7 +1025,7 @@ public class AutoRepairEntry extends XposedModule {
 
             Handler handler = sHandler;
             if (context != null && (sContext == null || sObserver == null
-                    || sCommandReceiver == null || sPackageStateReceiver == null)) {
+                    || sCommandReceiver == null)) {
                 final boolean changed = sContext != context;
                 sContext = context;
                 if (handler != null) {
@@ -1049,7 +1035,6 @@ public class AutoRepairEntry extends XposedModule {
                         }
                         ensureObserver();
                         ensureCommandReceiver();
-                        ensurePackageReceiver();
                     });
                 }
             }
@@ -1198,7 +1183,6 @@ public class AutoRepairEntry extends XposedModule {
         writeHeartbeatOnce("observer_check");
         flushEvents();
         ensureCommandReceiver();
-        ensurePackageReceiver();
         if (sObserver != null) {
             return;
         }
@@ -1423,16 +1407,11 @@ public class AutoRepairEntry extends XposedModule {
                 // 已关闭的服务不属于异常崩溃，无需打印跳过日志
                 continue;
             }
-            if (isPackageFrozen(component.getPackageName())) {
-                // 冻结服务即使残留在启用列表里也不参与扫描修复：系统不会绑定它，
-                // 继续扫描只会把冻结目标推进 NEEDS_REPAIR，产生无意义关开/强杀。
-                eventSkip("scan:frozen:" + key, "扫描",
-                        "跳过冻结服务 (" + reason + "): " + key);
-                continue;
-            }
-            if (isInUnfrozenSettle(component.getPackageName())) {
-                eventSkip("scan:unfrozen-settle:" + key, "扫描",
-                        "跳过解冻静默期服务 (" + reason + "): " + key);
+            if (!isPackageUsable(component.getPackageName())) {
+                // 冻结/卸载包即使残留在启用列表里也不参与扫描修复：系统不会绑定它，
+                // 继续扫描只会把目标推进 NEEDS_REPAIR，产生无意义关开/强杀。
+                eventSkip("scan:unavailable:" + component.getPackageName(), "扫描",
+                        "跳过不可用包服务 (" + reason + "): " + key);
                 continue;
             }
             Object boundConnection = findBoundConnection(component);
@@ -1583,17 +1562,16 @@ public class AutoRepairEntry extends XposedModule {
             if (sUserDisabledKeys.contains(key)) {
                 continue;
             }
-            if (isPackageFrozen(component.getPackageName())) {
-                // 冻结/禁用：保留锁，跳过补回。冻结期间写回启用列表会被系统拒绝并再次触发
-                // 列表变更事件，形成"写→事件→再写"循环；等解冻广播到达后统一恢复。
-                eventSkip("reconcile:frozen:" + key, "保活",
-                        "跳过补回 (" + reason + ")：应用已冻结: " + key);
-                continue;
-            }
-            if (!isPackageInstalled(component.getPackageName())) {
-                // 卸载目标：保留锁但跳过写回；使用日志聚合避免持续刷屏
-                eventSkip("reconcile:uninstalled:" + key, "保活",
-                        "跳过补回 (" + reason + ")：应用已卸载: " + key);
+            int pkgState = getPackageState(component.getPackageName());
+            if (pkgState != RepairPolicy.PKG_STATE_ENABLED) {
+                // 冻结/卸载：保留锁，跳过补回。冻结期间写回启用列表会被系统拒绝并再次触发
+                // 列表变更事件，形成"写→事件→再写"循环；这里只做一次最小护栏，不再做解冻恢复。
+                // 聚合 key 用包名：同包多服务只留一条日志，避免冻结时刷屏。
+                eventSkip("reconcile:unavailable:" + component.getPackageName(), "保活",
+                        "跳过补回 (" + reason + ")："
+                                + (pkgState == RepairPolicy.PKG_STATE_DISABLED
+                                        ? "应用已冻结" : "应用未安装")
+                                + ": " + key);
                 continue;
             }
             desired = addComponent(desired, component);
@@ -1665,19 +1643,6 @@ public class AutoRepairEntry extends XposedModule {
         log("reconcile scheduled in " + delayMs + "ms (" + reason + ")");
     }
 
-    private static boolean isPackageInstalled(String pkg) {
-        Context context = sContext;
-        if (context == null) {
-            return false;
-        }
-        try {
-            context.getPackageManager().getApplicationInfo(pkg, 0);
-            return true;
-        } catch (Throwable t) {
-            return false;
-        }
-    }
-
     /**
      * 读取包三态：未安装 / 冻结禁用 / 正常。
      *
@@ -1712,21 +1677,16 @@ public class AutoRepairEntry extends XposedModule {
         }
     }
 
-    /** 冻结/禁用目标：保留锁但跳过一切补回与修复动作，等解冻广播恢复。 */
-    private static boolean isPackageFrozen(String pkg) {
-        return getPackageState(pkg) == RepairPolicy.PKG_STATE_DISABLED;
-    }
-
-    /** 解冻静默期内不做扫描/绑定校验/关开修复，给 AMS 刷新与系统自然绑定留时间。 */
-    private static boolean isInUnfrozenSettle(String pkg) {
-        Long at = sPackageUnfrozenAt.get(pkg);
-        return at != null && RepairPolicy.isInUnfrozenSettle(SystemClock.elapsedRealtime(), at);
-    }
-
-    /** 解冻保守期内禁止强杀与崩溃修复，避免把"刚解冻尚未绑定"误判为崩溃。 */
-    private static boolean isInUnfrozenGuard(String pkg) {
-        Long at = sPackageUnfrozenAt.get(pkg);
-        return at != null && RepairPolicy.isInUnfrozenGuard(SystemClock.elapsedRealtime(), at);
+    /**
+     * 包当前是否可保活/可修复。
+     *
+     * <p>只保留这一道最小护栏：冻结包与已卸载包仍然留在锁定列表里，
+     * 但模块不得再向启用列表写回、不得再发起关开/强杀；否则会形成
+     * “写回启用列表 → 系统拒绝/移除 → 启用列表变更 → 再写回”的循环。
+     * 这里不包含任何解冻时间窗或自动恢复逻辑。
+     */
+    private static boolean isPackageUsable(String pkg) {
+        return getPackageState(pkg) == RepairPolicy.PKG_STATE_ENABLED;
     }
 
     private static Context getSystemContext() {
@@ -1831,105 +1791,6 @@ public class AutoRepairEntry extends XposedModule {
         }
     }
 
-    /**
-     * 包启用状态广播：冻结/解冻感知（模块模式）。
-     *
-     * 场景与边界：
-     * 1. 冰箱类工具与 `pm disable-user/enable` 最终调用 PackageManager.setApplicationEnabledSetting，
-     *    系统随后发送 ACTION_PACKAGE_CHANGED（冻结后 getApplicationEnabledSetting=3，解冻后恢复 0/1）；
-     *    这是"解冻"唯一与事件一一对应的系统信号，用它触发 reconcileMissing/scan 自动恢复。
-     * 2. ACTION_PACKAGE_* 广播携带 data=package:xxx，动态接收器必须 addDataScheme("package")，
-     *    否则 IntentFilter 匹配失败、收不到任何事件（常见坑）。
-     * 3. system_server 内同样动态注册；非受管包只写 logcat，避免系统内其它应用的安装/更新
-     *    刷爆持久事件缓冲；受管包冻结事件使用 eventSkip 聚合，解冻事件触发补回。
-     */
-    private static void ensurePackageReceiver() {
-        if (sPackageStateReceiver != null) {
-            return;
-        }
-        Context ctx = sContext != null ? sContext : getSystemContext();
-        if (ctx == null) {
-            return;
-        }
-        try {
-            BroadcastReceiver receiver = new BroadcastReceiver() {
-                @Override
-                public void onReceive(Context context, Intent intent) {
-                    if (intent == null) {
-                        return;
-                    }
-                    String action = intent.getAction();
-                    if (!Intent.ACTION_PACKAGE_CHANGED.equals(action)
-                            && !Intent.ACTION_PACKAGE_ADDED.equals(action)
-                            && !Intent.ACTION_PACKAGE_REMOVED.equals(action)) {
-                        return;
-                    }
-                    String pkg = intent.getData() != null
-                            ? intent.getData().getSchemeSpecificPart() : null;
-                    boolean replacing = intent.getBooleanExtra(Intent.EXTRA_REPLACING, false);
-                    String[] changedComponents = intent.getStringArrayExtra(Intent.EXTRA_CHANGED_COMPONENT_NAME_LIST);
-                    int pkgState = getPackageState(pkg);
-                    String stateText = pkgState == RepairPolicy.PKG_STATE_DISABLED ? "冻结/禁用"
-                            : (pkgState == RepairPolicy.PKG_STATE_UNINSTALLED ? "未安装" : "正常");
-                    boolean managed = isManagedPackage(pkg);
-                    String summary = "包状态广播 " + action + ": pkg=" + pkg
-                            + " state=" + stateText
-                            + (changedComponents != null
-                                    ? " changed=" + java.util.Arrays.toString(changedComponents) : "")
-                            + (replacing ? " replacing=true" : "");
-                    log("[监听] " + (managed ? "受管包 " : "忽略 ") + summary);
-                    if (!managed) {
-                        return;
-                    }
-                    if (pkgState == RepairPolicy.PKG_STATE_DISABLED) {
-                        // 冻结事件只聚合记录，不做补回；解冻事件才触发恢复
-                        eventSkip("pkg:frozen:" + pkg, "监听", "检测到应用冻结: " + pkg);
-                        return;
-                    }
-                    if (Intent.ACTION_PACKAGE_CHANGED.equals(action)
-                            && RepairPolicy.shouldRecoverOnPackageChange(pkgState)) {
-                        // 记录解冻时刻：15s 内不做扫描/修复，60s 内禁止强杀与崩溃修复
-                        sPackageUnfrozenAt.put(pkg, SystemClock.elapsedRealtime());
-                        event("监听", "检测到解冻/重新启用: " + pkg + "，触发补回检查");
-                        if (isModuleEnabled()) {
-                            // 锁仍在 KEY_SERVICES 中。syncMachines 会让该服务状态机进入 RESTORING
-                            // 并调用 reconcile 补回；不再额外 scheduleReconcile/scheduleScan：
-                            // 扫描在解冻静默期内必然被跳过，批量 reconcile 也会与状态机路径重复写入。
-                            syncMachines("package_unfrozen");
-                        } else {
-                            log("package unfrozen but module disabled: " + pkg);
-                        }
-                    }
-                }
-            };
-            IntentFilter filter = new IntentFilter();
-            filter.addAction(Intent.ACTION_PACKAGE_CHANGED);
-            filter.addAction(Intent.ACTION_PACKAGE_ADDED);
-            filter.addAction(Intent.ACTION_PACKAGE_REMOVED);
-            filter.addDataScheme("package");
-            Handler handler = sHandler;
-            if (Build.VERSION.SDK_INT >= 33) {
-                ctx.registerReceiver(receiver, filter, null, handler, Context.RECEIVER_EXPORTED);
-            } else {
-                ctx.registerReceiver(receiver, filter, null, handler);
-            }
-            sPackageStateReceiver = receiver;
-            log("[监听] 包状态广播接收器已注册");
-        } catch (Throwable t) {
-            event("失败", "注册包状态广播接收器异常: " + t);
-        }
-    }
-
-    /** 包名是否属于当前受管列表（非受管包的包广播只写 logcat，不进入管理器主日志，避免无关应用刷屏） */
-    private static boolean isManagedPackage(String pkg) {
-        if (pkg == null || pkg.isEmpty()) {
-            return false;
-        }
-        String managed = sManagedServicesCache != null
-                ? sManagedServicesCache : readConfig(KEY_SERVICES);
-        return managed != null && managed.contains(pkg + "/");
-    }
-
     private static void scheduleReceiverInit() {
         if (sContext == null) {
             sContext = getSystemContext();
@@ -1937,9 +1798,8 @@ public class AutoRepairEntry extends XposedModule {
         if (sContext != null) {
             ensureCommandReceiver();
             ensureObserver();
-            ensurePackageReceiver();
         }
-        if ((sCommandReceiver == null || sObserver == null || sPackageStateReceiver == null)
+        if ((sCommandReceiver == null || sObserver == null)
                 && sContextRetryCount < MAX_INIT_RETRY) {
             sContextRetryCount++;
             if (sHandler != null) {
@@ -2611,6 +2471,13 @@ public class AutoRepairEntry extends XposedModule {
             event("失败", "缺少系统 Context，忽略: " + key);
             return;
         }
+        if (!isPackageUsable(component.getPackageName())) {
+            // 冻结/卸载包不进入状态机：系统不会绑定它，排 settle 只会产生无意义定时器和日志。
+            // eventSkip 按包名聚合，同包多服务 10 分钟内最多一条持久事件。
+            eventSkip("died:unavailable:" + component.getPackageName(), "检测",
+                    "跳过不可用包的断开: " + key);
+            return;
+        }
 
         // 旧连接退役时 AMS 可能已经有新连接：先清掉 crashed 标记，再交给状态机。
         // 只有确认没有新连接时才做去重，避免把“新连接已恢复”的信号误丢掉。
@@ -2702,7 +2569,8 @@ public class AutoRepairEntry extends XposedModule {
         snapshot.now = now;
         snapshot.moduleEnabled = isModuleEnabled();
         snapshot.managed = isManaged(component)
-                && !shouldIgnoreSystemApp(component.getPackageName());
+                && !shouldIgnoreSystemApp(component.getPackageName())
+                && isPackageUsable(component.getPackageName());
         snapshot.userDisabled = sUserDisabledKeys.contains(component.flattenToString());
 
         String enabled = readEnabled();
@@ -2859,10 +2727,6 @@ public class AutoRepairEntry extends XposedModule {
         if (!isManaged(component) || sUserDisabledKeys.contains(key)) {
             return;
         }
-        if (isPackageFrozen(component.getPackageName())) {
-            eventSkip("restore:frozen:" + key, "保活", "跳过冻结目标补回: " + key);
-            return;
-        }
         reconcileMissing("fsm_restore:" + (reason == null ? "" : reason));
         String enabled = readEnabled();
         if (enabled != null && containsComponent(enabled, component)) {
@@ -2889,29 +2753,6 @@ public class AutoRepairEntry extends XposedModule {
             log("skip repair request (not managed/user disabled): " + key);
             return;
         }
-        if (isPackageFrozen(component.getPackageName())) {
-            // 冻结目标不关开、不强杀：保留锁，解冻广播触发的 reconcile 会自动恢复
-            eventSkip("repair:frozen:" + key, "修复", "跳过冻结目标修复: " + key);
-            return;
-        }
-        if (isInUnfrozenSettle(component.getPackageName())) {
-            // 解冻静默期：AMS 可能尚未刷新已安装列表，关开修复会破坏刚补回的启用项。
-            // 不能裸 return 丢掉这次修复意图——结算静默期剩余时间后重新投递 SYNC，
-            // 确保静默期结束时的兜底修复一定会执行（解冻保守期内仍禁止强杀）。
-            eventSkip("repair:unfrozen-settle:" + key, "修复", "解冻静默期内跳过修复: " + key);
-            Long at = sPackageUnfrozenAt.get(component.getPackageName());
-            // 静默期剩余时间 + 200ms 边界缓冲，至少 500ms，避免定时器正好落在窗口边界被再次判定为“静默期内”。
-            long delay = at == null ? RepairPolicy.UNFROZEN_SETTLE_MS
-                    : Math.max(500L, at + RepairPolicy.UNFROZEN_SETTLE_MS
-                            - SystemClock.elapsedRealtime() + 200L);
-            scheduleMachineSync(component, delay, "unfrozen_settle_repair");
-            return;
-        }
-        if (!isPackageInstalled(component.getPackageName())) {
-            // 应用已卸载时不要再关开/强杀一个不存在的包，等管理器同步锁定列表
-            log("skip repair request (package not installed): " + key);
-            return;
-        }
         if (isDryRun()) {
             event("修复", "演练模式：将修复 " + key + "（不实际执行）",
                     "action=fsm_dry_run reason=" + reason);
@@ -2920,10 +2761,6 @@ public class AutoRepairEntry extends XposedModule {
 
         String pkg = component.getPackageName();
         boolean effectiveAllowKill = allowKill;
-        if (effectiveAllowKill && isInUnfrozenGuard(pkg)) {
-            effectiveAllowKill = false;
-            eventSkip("repair:unfrozen-nokill:" + key, "修复", "解冻保守期内禁止强杀: " + key);
-        }
         PackageRepairRequest request = sPackageRepairRequests.get(pkg);
         if (request == null) {
             request = new PackageRepairRequest(pkg, component, effectiveAllowKill, reason,
@@ -2953,26 +2790,11 @@ public class AutoRepairEntry extends XposedModule {
                 log("package repair skipped (module disabled): " + pkg);
                 continue;
             }
-            if (isPackageFrozen(pkg)) {
-                // 修复请求可能在冻结前入队；真正执行前再判一次，避免冻结瞬间发起关开/强杀
-                eventSkip("repair:frozen:" + pkg, "修复", "跳过冻结包级修复: " + pkg);
+            if (!isPackageUsable(pkg)) {
+                // 冻结/卸载包在入队后可能已经不可用；这里直接丢弃请求，不重试、不改写。
+                eventSkip("repair:unavailable:" + pkg, "修复",
+                        "跳过不可用包级修复: " + pkg);
                 continue;
-            }
-            if (isInUnfrozenSettle(pkg)) {
-                // 解冻静默期内入队的请求延后到静默期结束再评估，避免与 AMS 刷新互相覆盖，
-                // 同时保证静默期后仍有兜底修复机会（不能直接丢弃请求）。
-                eventSkip("repair:unfrozen-settle:" + pkg, "修复", "解冻静默期内跳过包级修复: " + pkg);
-                Long at = sPackageUnfrozenAt.get(pkg);
-                // 与单服务路径一致：静默期剩余时间 + 200ms 边界缓冲，至少 500ms。
-                long delay = at == null ? RepairPolicy.UNFROZEN_SETTLE_MS
-                        : Math.max(500L, at + RepairPolicy.UNFROZEN_SETTLE_MS
-                                - SystemClock.elapsedRealtime() + 200L);
-                scheduleMachineSync(request.trigger, delay, "unfrozen_settle_queue");
-                continue;
-            }
-            if (request.allowKill && isInUnfrozenGuard(pkg)) {
-                request.allowKill = false;
-                eventSkip("repair:unfrozen-nokill:" + pkg, "修复", "解冻保守期内禁止强杀: " + pkg);
             }
             String managed = readConfig(KEY_SERVICES);
             String enabled = readEnabled();
@@ -3118,6 +2940,14 @@ public class AutoRepairEntry extends XposedModule {
         if (!isModuleEnabled()) {
             event("失败", "包级修复中止：模块已停用: " + sRepairTransactionPackage);
             failActivePackageRepair("module_disabled");
+            return;
+        }
+        if (sRepairTransactionPackage == null
+                || !isPackageUsable(sRepairTransactionPackage)) {
+            // 事务执行期间包被冻结/卸载：绝不能把服务写回启用列表，否则会触发
+            // “写回 → 系统拒绝/移除 → 变更事件 → 再写回”的循环。
+            event("失败", "包级修复中止：包不可用: " + sRepairTransactionPackage);
+            failActivePackageRepair("package_unavailable");
             return;
         }
 
