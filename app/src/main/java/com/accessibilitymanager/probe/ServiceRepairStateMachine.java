@@ -544,6 +544,18 @@ final class ServiceRepairStateMachine {
         if (from == State.UNMANAGED || from == State.DISABLED || from == State.SUSPENDED) {
             return noop(from);
         }
+        if (from == State.VERIFYING || from == State.BOUND) {
+            // 修复写入完成后进入 VERIFYING 阶段若立即收到重绑失败（INITIALIZED(false)），
+            // 说明新连接未能成功建立；若不累加 fastFailCount，状态机会直接切回 SUSPECT
+            // 并以 0ms 退避在 3.5s 后再次关开，在兼容异常或连续重绑失败时形成高频关开风暴。
+            long lifetime;
+            if (boundAt > 0L) {
+                lifetime = Math.max(0L, snapshot.now - boundAt);
+            } else {
+                lifetime = from == State.VERIFYING ? 0L : -1L;
+            }
+            fastFailCount = RepairPolicy.nextFastFailCount(fastFailCount, lifetime);
+        }
         boundAt = 0L;
         if (snapshot.bootGraceActive) {
             return change(from, State.SUSPECT, "init_failed_boot_grace",
@@ -635,6 +647,16 @@ final class ServiceRepairStateMachine {
                 return recoveryTransition(from, snapshot, "stability_ok");
             }
             return evaluateUnbound(snapshot, from, "stability_unbound");
+        }
+        if (event.getTimerType() == TimerType.VERIFY
+                && !snapshot.bound
+                && snapshot.bindCheckAvailable
+                && snapshot.inEnabledList
+                && !snapshot.bootGraceActive) {
+            // 关开修复后的 VERIFY 定时器到点仍未绑定，且期间未触发 binderDied 或 INITIALIZED(false)：
+            // 按快速失败累计计数，避免在无断开回调的 ROM 上每 2.5s 无退避重复关开；
+            // 注意 fastFailCount=0->1 时 repairBackoffMs(1)==0L，首次校验失败仍会立即重修，第 2 次起逐步退避。
+            fastFailCount = RepairPolicy.nextFastFailCount(fastFailCount, 0L);
         }
         return evaluateUnbound(snapshot, from, "timer_" + event.getTimerType());
     }

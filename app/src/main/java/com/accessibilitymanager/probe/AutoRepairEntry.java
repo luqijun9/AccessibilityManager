@@ -239,6 +239,9 @@ public class AutoRepairEntry extends XposedModule {
     private static final AtomicLong sConnEventSeq = new AtomicLong();
     private static boolean sBoundCheckAvailable;
     private static boolean sBoundCheckErrorLogged;
+    private static volatile String sLastBindProbeStrategy;
+    private static volatile String sLastBindProbeSchema;
+    private static volatile boolean sBindProbeLogged;
 
     // 重构后的单服务状态机与包级修复协调器（全部只在 sHandler 线程读写，不需要全局保护锁）
     private static final Map<String, ServiceRepairStateMachine> sMachines = new HashMap<>();
@@ -479,6 +482,11 @@ public class AutoRepairEntry extends XposedModule {
         sPostBootCheckRunnable = null;
         sLastObservedEnabled = null;
         sToastCache = null;
+        sBoundCheckAvailable = false;
+        sBoundCheckErrorLogged = false;
+        sLastBindProbeStrategy = null;
+        sLastBindProbeSchema = null;
+        sBindProbeLogged = false;
         if (sHandler != null) {
             for (Runnable runnable : sMachineTimers.values()) {
                 if (runnable != null) {
@@ -1019,7 +1027,11 @@ public class AutoRepairEntry extends XposedModule {
                     crashed = (Boolean) crashedVal;
                 }
             }
-            boolean hasInterface = getFieldValue(connection, "mServiceInterface") != null;
+            ConnectionBindProbe.Result bindProbe = probeConnection(connection);
+            boolean hasInterface = bindProbe.isBound();
+            boolean bindProbeAvailable = bindProbe.isAvailable();
+            String probeStrategy = bindProbe.getStrategy();
+            String probeStatus = bindProbe.getStatus().name();
             Object ctxObj = getFieldValue(connection, "mContext");
             Context context = ctxObj instanceof Context ? (Context) ctxObj : null;
 
@@ -1051,6 +1063,7 @@ public class AutoRepairEntry extends XposedModule {
                         logConnectionEvent(died ? "died" : "init", component, connection,
                                 sConnections.get(connKeyForDiag),
                                 findAmsCurrentConnection(component), finalCrashed, hasInterface,
+                                probeStrategy, probeStatus,
                                 pauseUnbind, hookSeq, hookAt, handleAt);
                     }
                     long now = handleAt;
@@ -1103,7 +1116,8 @@ public class AutoRepairEntry extends XposedModule {
                                     + " old=" + connId(existing) + " new=" + connId(connection));
                         }
                         sConnections.put(connKey, connection);
-                        onInitializeService(component, finalCrashed, hasInterface, connection);
+                        onInitializeService(component, finalCrashed, hasInterface,
+                                bindProbeAvailable, probeStrategy, connection);
                     } else {
                         Object existing = sConnections.get(connKey);
                         if (existing == null || existing == connection || !isConnectionBound(existing)) {
@@ -2232,8 +2246,22 @@ public class AutoRepairEntry extends XposedModule {
                     .append("  启用列表: ").append(enabled == null ? "不存在"
                             : (enabled.isEmpty() ? "空" : enabled))
                     .append('\n');
+            if (sLastBindProbeStrategy == null && !sConnections.isEmpty()) {
+                for (Object conn : sConnections.values()) {
+                    if (conn != null) {
+                        probeConnection(conn);
+                        break;
+                    }
+                }
+            }
             sb.append("绑定状态可读: ").append(hasConnectionState())
                     .append("  已记录连接: ").append(sConnections.size()).append('\n');
+            sb.append("绑定探测方式: ")
+                    .append(sLastBindProbeStrategy == null ? "未触发" : sLastBindProbeStrategy)
+                    .append('\n');
+            if (sLastBindProbeSchema != null && !sLastBindProbeSchema.isEmpty()) {
+                sb.append("连接类关键成员: ").append(sLastBindProbeSchema).append('\n');
+            }
             sb.append("模块启用: ").append(isModuleEnabled())
                     .append("  演练模式: ").append(isDryRun())
                     .append("  强杀模式: ").append("1".equals(readConfig(KEY_FIX_MODE)))
@@ -2504,7 +2532,8 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static void onInitializeService(ComponentName component, boolean crashed,
-            boolean hasInterface, Object connection) {
+            boolean hasInterface, boolean bindProbeAvailable, String probeStrategy,
+            Object connection) {
         String key = component.flattenToString();
         long now = SystemClock.elapsedRealtime();
         Long lastInit = sLastInit.get(key);
@@ -2518,17 +2547,28 @@ public class AutoRepairEntry extends XposedModule {
         if (!managed) {
             eventNonManaged(key, success
                     ? "未锁定服务连接(忽略)"
-                    : "未锁定服务重绑失败(忽略) crashed=" + crashed + ", iface=" + hasInterface);
+                    : "未锁定服务重绑失败(忽略) crashed=" + crashed + ", iface=" + hasInterface
+                            + ", probe=" + probeStrategy);
+            return;
+        }
+        if (!bindProbeAvailable && !crashed) {
+            // 真实场景：Android 升级或 OEM 魔改导致连接类上所有已知客户端/Binder 字段都无法识别，
+            // 此时无法确认 initializeService 是否真正绑定成功。若仍投递 INITIALIZED(false)，
+            // 状态机会在 3s 后反复触发关开死循环；因此必须挂起并记录警告，只保留明确 crashed=true 路径。
+            eventSkip("init:probe-unknown:" + key, "警告",
+                    "initializeService 绑定状态不可读，跳过重绑失败判定: " + key
+                            + " | probe=" + probeStrategy);
             return;
         }
 
         if (success) {
             log("[服务] initializeService 成功: " + key
-                    + " conn=" + connId(connection));
+                    + " conn=" + connId(connection) + " probe=" + probeStrategy);
         } else {
             event("检测", "重绑失败: " + key,
                     "hook=initializeService conn=" + connId(connection)
-                            + " crashed=" + crashed + " iface=" + hasInterface);
+                            + " crashed=" + crashed + " iface=" + hasInterface
+                            + " probe=" + probeStrategy);
         }
         handleServiceEvent(component,
                 ServiceRepairStateMachine.Event.initialized(success));
@@ -3341,8 +3381,8 @@ public class AutoRepairEntry extends XposedModule {
      */
     private static void logConnectionEvent(String kind, ComponentName component,
             Object connection, Object existing, Object amsCurrent, boolean crashed,
-            boolean hasInterface, boolean pauseUnbind, long hookSeq, long hookAt,
-            long handleAt) {
+            boolean hasInterface, String probeStrategy, String probeStatus,
+            boolean pauseUnbind, long hookSeq, long hookAt, long handleAt) {
         StringBuilder sb = new StringBuilder("conn ");
         sb.append(kind)
                 .append(" hookSeq=").append(hookSeq)
@@ -3356,6 +3396,8 @@ public class AutoRepairEntry extends XposedModule {
                 .append(" incomingBound=").append(isConnectionBound(connection))
                 .append(" amsCurrent=").append(connId(amsCurrent))
                 .append(" iface=").append(hasInterface)
+                .append(" probe=").append(probeStrategy)
+                .append(" bindStatus=").append(probeStatus)
                 .append(" crashed=").append(crashed)
                 .append(" pauseUnbind=").append(pauseUnbind);
         log(sb.toString());
@@ -3377,11 +3419,24 @@ public class AutoRepairEntry extends XposedModule {
             if (userState == null) {
                 continue;
             }
-            Object map = getFieldValue(userState, "mComponentNameToServiceMap");
-            if (map instanceof Map) {
-                Object current = ((Map<?, ?>) map).get(target);
-                if (current != null) {
-                    return current;
+            Object lock = getFieldValue(connection, "mLock");
+            if (lock != null) {
+                synchronized (lock) {
+                    Object map = getFieldValue(userState, "mComponentNameToServiceMap");
+                    if (map instanceof Map) {
+                        Object current = ((Map<?, ?>) map).get(target);
+                        if (current != null) {
+                            return current;
+                        }
+                    }
+                }
+            } else {
+                Object map = getFieldValue(userState, "mComponentNameToServiceMap");
+                if (map instanceof Map) {
+                    Object current = ((Map<?, ?>) map).get(target);
+                    if (current != null) {
+                        return current;
+                    }
                 }
             }
         }
@@ -3564,12 +3619,42 @@ public class AutoRepairEntry extends XposedModule {
         }
     }
 
+    /**
+     * 探测单个连接对象的绑定状态并记录诊断信息。
+     *
+     * <p>边界：当探测到非默认字段（如 Android 17 的 {@code mClient}/{@code mClientBinder}）
+     * 或所有字段均不可识别（{@code UNKNOWN}）时，只输出一次结构签名到事件日志，方便定位新系统变更而不刷屏。
+     */
+    private static ConnectionBindProbe.Result probeConnection(Object connection) {
+        ConnectionBindProbe.Result result = ConnectionBindProbe.probe(connection);
+        if (connection != null) {
+            sLastBindProbeStrategy = result.getStrategy();
+            if (!result.getSchemaSummary().isEmpty()) {
+                sLastBindProbeSchema = result.getSchemaSummary();
+            }
+            String className = connection.getClass().getName();
+            if (result.isUnknown()) {
+                eventSkip("probe:unknown:" + className, "失败",
+                        "无法识别连接绑定字段，已暂停自动修复判断 | class=" + className
+                                + " schema=" + result.getSchemaSummary());
+            } else if (!sBindProbeLogged && !"field:mServiceInterface".equals(result.getStrategy())) {
+                sBindProbeLogged = true;
+                event("配置", "连接绑定探测已适配: " + result.getStrategy(),
+                        "class=" + className + " schema=" + result.getSchemaSummary());
+            }
+        }
+        return result;
+    }
+
     private static Object findBoundConnection(ComponentName target) {
         sBoundCheckAvailable = false;
         Object known = sConnections.get(target.flattenToString());
         if (known != null) {
-            sBoundCheckAvailable = true;
-            if (isConnectionBound(known)) {
+            ConnectionBindProbe.Result knownProbe = probeConnection(known);
+            if (knownProbe.isAvailable()) {
+                sBoundCheckAvailable = true;
+            }
+            if (knownProbe.isBound()) {
                 return known;
             }
         }
@@ -3579,26 +3664,80 @@ public class AutoRepairEntry extends XposedModule {
                 continue;
             }
             try {
-                Object boundServices = getFieldValue(userState, "mBoundServices");
-                if (boundServices instanceof Iterable) {
-                    sBoundCheckAvailable = true;
-                    for (Object item : (Iterable<?>) boundServices) {
+                // 在极短的 mLock 临界区内只拷贝 mBoundServices 快照与 map 候选对象，随后立即释放锁，
+                // 避免与 system_server 主线程并发修改 mBoundServices 产生 ConcurrentModificationException。
+                List<Object> boundSnapshot = null;
+                Object mappedItem = null;
+                boolean sawBoundServices = false;
+                boolean sawMap = false;
+
+                Object lock = getFieldValue(connection, "mLock");
+                if (lock != null) {
+                    synchronized (lock) {
+                        Object boundServices = getFieldValue(userState, "mBoundServices");
+                        if (boundServices instanceof Iterable) {
+                            sawBoundServices = true;
+                            boundSnapshot = new ArrayList<>();
+                            for (Object item : (Iterable<?>) boundServices) {
+                                boundSnapshot.add(item);
+                            }
+                        }
+                        Object map = getFieldValue(userState, "mComponentNameToServiceMap");
+                        if (map instanceof Map) {
+                            sawMap = true;
+                            mappedItem = ((Map<?, ?>) map).get(target);
+                        }
+                    }
+                } else {
+                    Object boundServices = getFieldValue(userState, "mBoundServices");
+                    if (boundServices instanceof Iterable) {
+                        sawBoundServices = true;
+                        boundSnapshot = new ArrayList<>();
+                        for (Object item : (Iterable<?>) boundServices) {
+                            boundSnapshot.add(item);
+                        }
+                    }
+                    Object map = getFieldValue(userState, "mComponentNameToServiceMap");
+                    if (map instanceof Map) {
+                        sawMap = true;
+                        mappedItem = ((Map<?, ?>) map).get(target);
+                    }
+                }
+
+                boolean matchedItem = false;
+                if (boundSnapshot != null) {
+                    for (Object item : boundSnapshot) {
                         if (item == null) {
                             continue;
                         }
                         ComponentName name = getComponentName(item);
-                        if (target.equals(name) && isConnectionBound(item)) {
-                            return item;
+                        if (target.equals(name)) {
+                            matchedItem = true;
+                            ConnectionBindProbe.Result itemProbe = probeConnection(item);
+                            if (itemProbe.isAvailable()) {
+                                sBoundCheckAvailable = true;
+                            }
+                            if (itemProbe.isBound()) {
+                                return item;
+                            }
                         }
                     }
                 }
-                Object map = getFieldValue(userState, "mComponentNameToServiceMap");
-                if (map instanceof Map) {
-                    sBoundCheckAvailable = true;
-                    Object item = ((Map<?, ?>) map).get(target);
-                    if (item != null && isConnectionBound(item)) {
-                        return item;
+                if (mappedItem != null) {
+                    matchedItem = true;
+                    ConnectionBindProbe.Result mapProbe = probeConnection(mappedItem);
+                    if (mapProbe.isAvailable()) {
+                        sBoundCheckAvailable = true;
                     }
+                    if (mapProbe.isBound()) {
+                        return mappedItem;
+                    }
+                }
+                // 仅当连接类自身可探测且系统列表已读取时，才把“未找到绑定对象”视为可信的未绑定状态；
+                // 若探测策略未知，保留 sBoundCheckAvailable=false 以暂停自动修复，避免误杀。
+                if (!matchedItem && (sawBoundServices || sawMap)
+                        && ConnectionBindProbe.isClassSupported(connection.getClass())) {
+                    sBoundCheckAvailable = true;
                 }
             } catch (Throwable t) {
                 if (!sBoundCheckErrorLogged) {
@@ -3613,14 +3752,7 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     private static boolean isConnectionBound(Object connection) {
-        if (connection == null) {
-            return false;
-        }
-        try {
-            return getFieldValue(connection, "mServiceInterface") != null;
-        } catch (Throwable t) {
-            return false;
-        }
+        return connection != null && probeConnection(connection).isBound();
     }
 
     private static Object getUserState(Object connection) {

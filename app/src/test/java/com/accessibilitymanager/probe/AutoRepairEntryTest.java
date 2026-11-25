@@ -571,4 +571,136 @@ public class AutoRepairEntryTest {
                 .isEmpty());
         assertTrue(RepairPolicy.planPackageBatch(managed, enabled, null, triggerB).isEmpty());
     }
+
+    private interface IAccessibilityServiceClient {
+    }
+
+    private static class FakeLegacyBaseConnection {
+        Object mService;
+        Object mServiceInterface;
+
+        boolean isConnectedLocked() {
+            return mService != null;
+        }
+    }
+
+    private static final class FakeLegacyConnection extends FakeLegacyBaseConnection {
+    }
+
+    private static class FakeAndroid17BaseConnection {
+        Object mClientBinder;
+        Object mClient;
+
+        boolean isConnectedLocked() {
+            return mClientBinder != null;
+        }
+    }
+
+    private static final class FakeAndroid17Connection extends FakeAndroid17BaseConnection {
+    }
+
+    private static final class FakeTypeFallbackConnection {
+        IAccessibilityServiceClient mRenamedRemoteProxy;
+    }
+
+    private static final class FakeBinderOnlyConnection {
+        Object mClientBinder;
+    }
+
+    private static final class FakeMethodOnlyConnection {
+        private final boolean connected;
+
+        FakeMethodOnlyConnection(boolean connected) {
+            this.connected = connected;
+        }
+
+        boolean isConnectedLocked() {
+            return connected;
+        }
+    }
+
+    private static final class FakeHybridRomConnection {
+        Object mServiceInterface;
+        Object mClient;
+    }
+
+    private static final class FakeUnknownConnection {
+        Object mOpaqueToken = new Object();
+        int mConnectionId = 42;
+    }
+
+    @Test
+    public void connectionBindProbe_supportsLegacyAndAndroid17AndTypeFallbackAndUnknown() {
+        // 1. Android 10~16 连接类：mServiceInterface 非空为 BOUND，置空为 UNBOUND
+        FakeLegacyConnection legacy = new FakeLegacyConnection();
+        legacy.mServiceInterface = new Object();
+        legacy.mService = new Object();
+        ConnectionBindProbe.Result legacyBound = ConnectionBindProbe.probe(legacy);
+        assertEquals(ConnectionBindProbe.Status.BOUND, legacyBound.getStatus());
+        assertEquals("field:mServiceInterface", legacyBound.getStrategy());
+        assertTrue(legacyBound.isAvailable());
+
+        legacy.mServiceInterface = null;
+        legacy.mService = null;
+        ConnectionBindProbe.Result legacyUnbound = ConnectionBindProbe.probe(legacy);
+        assertEquals(ConnectionBindProbe.Status.UNBOUND, legacyUnbound.getStatus());
+        assertTrue(legacyUnbound.isAvailable());
+
+        // 2. Android 17 连接类：无 mServiceInterface，改为 mClient / mClientBinder + isConnectedLocked()
+        FakeAndroid17Connection a17 = new FakeAndroid17Connection();
+        a17.mClient = new Object();
+        a17.mClientBinder = new Object();
+        ConnectionBindProbe.Result a17Bound = ConnectionBindProbe.probe(a17);
+        assertEquals(ConnectionBindProbe.Status.BOUND, a17Bound.getStatus());
+        assertEquals("field:mClient", a17Bound.getStrategy());
+        assertTrue(a17Bound.getSchemaSummary().contains("mClient"));
+        assertTrue(a17Bound.getSchemaSummary().contains("mClientBinder"));
+
+        a17.mClient = null;
+        a17.mClientBinder = null;
+        assertEquals(ConnectionBindProbe.Status.UNBOUND, ConnectionBindProbe.probe(a17).getStatus());
+
+        // 3. 类型兜底（字段名被未来版本改名，但类型仍为 IAccessibilityServiceClient）
+        FakeTypeFallbackConnection typeFallback = new FakeTypeFallbackConnection();
+        typeFallback.mRenamedRemoteProxy = new IAccessibilityServiceClient() {
+        };
+        ConnectionBindProbe.Result typeResult = ConnectionBindProbe.probe(typeFallback);
+        assertEquals(ConnectionBindProbe.Status.BOUND, typeResult.getStatus());
+        assertEquals("type:mRenamedRemoteProxy", typeResult.getStrategy());
+
+        // 4. 仅保留 mClientBinder 或仅保留 isConnectedLocked()
+        FakeBinderOnlyConnection binderOnly = new FakeBinderOnlyConnection();
+        binderOnly.mClientBinder = new Object();
+        ConnectionBindProbe.Result binderResult = ConnectionBindProbe.probe(binderOnly);
+        assertEquals(ConnectionBindProbe.Status.BOUND, binderResult.getStatus());
+        assertEquals("field:mClientBinder", binderResult.getStrategy());
+        binderOnly.mClientBinder = null;
+        assertEquals(ConnectionBindProbe.Status.UNBOUND,
+                ConnectionBindProbe.probe(binderOnly).getStatus());
+
+        ConnectionBindProbe.Result methodBound =
+                ConnectionBindProbe.probe(new FakeMethodOnlyConnection(true));
+        assertEquals(ConnectionBindProbe.Status.BOUND, methodBound.getStatus());
+        assertEquals("method:isConnectedLocked", methodBound.getStrategy());
+        assertEquals(ConnectionBindProbe.Status.UNBOUND,
+                ConnectionBindProbe.probe(new FakeMethodOnlyConnection(false)).getStatus());
+
+        // 5. 魔改 ROM 同时保留了为 null 的 mServiceInterface 与有效的 mClient
+        FakeHybridRomConnection hybrid = new FakeHybridRomConnection();
+        hybrid.mServiceInterface = null;
+        hybrid.mClient = new Object();
+        ConnectionBindProbe.Result hybridResult = ConnectionBindProbe.probe(hybrid);
+        assertEquals(ConnectionBindProbe.Status.BOUND, hybridResult.getStatus());
+        assertEquals("field:mClient", hybridResult.getStrategy());
+
+        // 6. 完全无法识别的未来连接类：绝不能伪装成 UNBOUND，必须返回 UNKNOWN 暂停误修
+        FakeUnknownConnection unknown = new FakeUnknownConnection();
+        ConnectionBindProbe.Result unknownResult = ConnectionBindProbe.probe(unknown);
+        assertEquals(ConnectionBindProbe.Status.UNKNOWN, unknownResult.getStatus());
+        assertFalse(unknownResult.isBound());
+        assertFalse(unknownResult.isAvailable());
+        assertFalse(ConnectionBindProbe.isClassSupported(FakeUnknownConnection.class));
+        assertTrue(ConnectionBindProbe.isClassSupported(FakeAndroid17Connection.class));
+        assertEquals("none", unknownResult.getStrategy());
+    }
 }

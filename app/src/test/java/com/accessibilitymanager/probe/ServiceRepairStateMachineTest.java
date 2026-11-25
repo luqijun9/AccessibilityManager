@@ -679,14 +679,15 @@ public class ServiceRepairStateMachineTest {
         initBound(a, 1_000L);
         initBound(b, 1_000L);
 
+        // 健康连接运行超过 30s 后首次崩溃（fastFailCount=0），VERIFY 超时后应直接进入 NEEDS_REPAIR
         ServiceRepairStateMachine.Transition aDeath = a.handle(
                 ServiceRepairStateMachine.Event.binderDied(false),
-                snapshot(2_000L));
+                snapshot(35_000L));
         ServiceRepairStateMachine.Transition bDeath = b.handle(
                 ServiceRepairStateMachine.Event.binderDied(false),
-                snapshot(2_000L));
+                snapshot(35_000L));
 
-        ServiceRepairStateMachine.Snapshot settle = snapshot(5_000L);
+        ServiceRepairStateMachine.Snapshot settle = snapshot(38_000L);
         assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR,
                 a.handle(ServiceRepairStateMachine.Event.timer(
                         ServiceRepairStateMachine.TimerType.SETTLE,
@@ -701,22 +702,22 @@ public class ServiceRepairStateMachineTest {
         ServiceRepairStateMachine.Transition bStarted = b.handle(
                 ServiceRepairStateMachine.Event.packageRepairStarted(), settle);
         ServiceRepairStateMachine.Transition aApplied = a.handle(
-                ServiceRepairStateMachine.Event.packageRepairApplied(), snapshot(5_500L));
+                ServiceRepairStateMachine.Event.packageRepairApplied(), snapshot(38_500L));
         ServiceRepairStateMachine.Transition bApplied = b.handle(
-                ServiceRepairStateMachine.Event.packageRepairApplied(), snapshot(5_500L));
+                ServiceRepairStateMachine.Event.packageRepairApplied(), snapshot(38_500L));
         assertEquals(ServiceRepairStateMachine.State.REPAIRING, aStarted.getTo());
         assertEquals(ServiceRepairStateMachine.State.REPAIRING, bStarted.getTo());
         assertEquals(ServiceRepairStateMachine.State.VERIFYING, aApplied.getTo());
         assertEquals(ServiceRepairStateMachine.State.VERIFYING, bApplied.getTo());
 
-        ServiceRepairStateMachine.Snapshot aBound = snapshot(7_500L);
+        ServiceRepairStateMachine.Snapshot aBound = snapshot(40_500L);
         aBound.bound = true;
         assertEquals(ServiceRepairStateMachine.State.BOUND,
                 a.handle(ServiceRepairStateMachine.Event.timer(
                         ServiceRepairStateMachine.TimerType.VERIFY,
                         aApplied.getGeneration()), aBound).getTo());
 
-        ServiceRepairStateMachine.Snapshot bUnbound = snapshot(7_500L);
+        ServiceRepairStateMachine.Snapshot bUnbound = snapshot(40_500L);
         bUnbound.bound = false;
         ServiceRepairStateMachine.Transition bRetry = b.handle(
                 ServiceRepairStateMachine.Event.timer(
@@ -724,6 +725,105 @@ public class ServiceRepairStateMachineTest {
                         bApplied.getGeneration()), bUnbound);
         assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR, bRetry.getTo());
         assertNotNull(bRetry.findEffect(ServiceRepairStateMachine.ActionType.REQUEST_REPAIR));
+    }
+
+    @Test
+    public void initializedFailed_duringVerifying_countsFastFailAndTriggersBackoff() {
+        // 回放本次 Android 17 日志：VERIFYING 阶段紧接着收到 INITIALIZED(false)，
+        // 连续两次后必须计入 fastFailCount 并进入退避，同时禁止强杀，不能形成 3.5s 无限开关。
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        long t = 1_000L;
+        ServiceRepairStateMachine.Transition initSync = machine.handle(
+                ServiceRepairStateMachine.Event.sync(), snapshot(t));
+        assertEquals(ServiceRepairStateMachine.State.SUSPECT, initSync.getTo());
+
+        // 第 1 轮关开修复
+        t += 3_000L;
+        assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR,
+                machine.handle(ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.SETTLE,
+                        initSync.getGeneration()), snapshot(t)).getTo());
+        machine.handle(ServiceRepairStateMachine.Event.packageRepairStarted(), snapshot(t));
+        t += 500L;
+        machine.handle(ServiceRepairStateMachine.Event.packageRepairApplied(), snapshot(t));
+        assertEquals(ServiceRepairStateMachine.State.VERIFYING, machine.getState());
+
+        t += 10L;
+        ServiceRepairStateMachine.Transition fail1 = machine.handle(
+                ServiceRepairStateMachine.Event.initialized(false), snapshot(t));
+        assertEquals(ServiceRepairStateMachine.State.SUSPECT, fail1.getTo());
+        assertEquals(1, machine.getFastFailCount());
+
+        // 第 2 轮关开修复
+        t += 3_000L;
+        assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR,
+                machine.handle(ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.SETTLE,
+                        fail1.getGeneration()), snapshot(t)).getTo());
+        machine.handle(ServiceRepairStateMachine.Event.packageRepairStarted(), snapshot(t));
+        t += 500L;
+        machine.handle(ServiceRepairStateMachine.Event.packageRepairApplied(), snapshot(t));
+
+        t += 10L;
+        ServiceRepairStateMachine.Transition fail2 = machine.handle(
+                ServiceRepairStateMachine.Event.initialized(false), snapshot(t));
+        assertEquals(2, machine.getFastFailCount());
+
+        t += 3_000L;
+        ServiceRepairStateMachine.Transition backoff = machine.handle(
+                ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.SETTLE,
+                        fail2.getGeneration()), snapshot(t));
+        assertEquals(ServiceRepairStateMachine.State.BACKOFF, backoff.getTo());
+        assertEquals(RepairPolicy.repairBackoffMs(2),
+                backoff.findTimer(ServiceRepairStateMachine.TimerType.BACKOFF).getDelayMs());
+
+        ServiceRepairStateMachine.Transition retry = machine.handle(
+                ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.BACKOFF,
+                        backoff.getGeneration()), snapshot(t + 3_000L));
+        assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR, retry.getTo());
+        assertFalse(retry.findEffect(ServiceRepairStateMachine.ActionType.REQUEST_REPAIR)
+                .isAllowKill());
+    }
+
+    @Test
+    public void verifyTimer_repeatedUnbound_countsFastFailAndTriggersBackoff() {
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        long t = 1_000L;
+        ServiceRepairStateMachine.Transition sync = machine.handle(
+                ServiceRepairStateMachine.Event.sync(), snapshot(t));
+
+        // 第 1 次 VERIFY 超时未绑定：fastFailCount=1，仍可立即重修
+        t += 3_000L;
+        machine.handle(ServiceRepairStateMachine.Event.timer(
+                ServiceRepairStateMachine.TimerType.SETTLE, sync.getGeneration()), snapshot(t));
+        machine.handle(ServiceRepairStateMachine.Event.packageRepairStarted(), snapshot(t));
+        t += 500L;
+        ServiceRepairStateMachine.Transition applied1 = machine.handle(
+                ServiceRepairStateMachine.Event.packageRepairApplied(), snapshot(t));
+        t += 2_000L;
+        ServiceRepairStateMachine.Transition verifyFail1 = machine.handle(
+                ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.VERIFY, applied1.getGeneration()),
+                snapshot(t));
+        assertEquals(1, machine.getFastFailCount());
+        assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR, verifyFail1.getTo());
+
+        // 第 2 次 VERIFY 超时未绑定：fastFailCount=2，必须进入 BACKOFF
+        machine.handle(ServiceRepairStateMachine.Event.packageRepairStarted(), snapshot(t));
+        t += 500L;
+        ServiceRepairStateMachine.Transition applied2 = machine.handle(
+                ServiceRepairStateMachine.Event.packageRepairApplied(), snapshot(t));
+        t += 2_000L;
+        ServiceRepairStateMachine.Transition verifyFail2 = machine.handle(
+                ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.VERIFY, applied2.getGeneration()),
+                snapshot(t));
+        assertEquals(2, machine.getFastFailCount());
+        assertEquals(ServiceRepairStateMachine.State.BACKOFF, verifyFail2.getTo());
+        assertEquals(RepairPolicy.repairBackoffMs(2),
+                verifyFail2.findTimer(ServiceRepairStateMachine.TimerType.BACKOFF).getDelayMs());
     }
 
     @Test
