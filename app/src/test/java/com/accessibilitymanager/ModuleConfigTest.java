@@ -36,5 +36,29 @@ public class ModuleConfigTest {
         assertTrue(ModuleConfig.hasUnconsumedGapInSecure("s1|15|1000|msg", "s1", 10L));
         assertTrue(ModuleConfig.hasUnconsumedGapInSecure("s2|1|1000|msg", "s1", 10L));
     }
+
+    @Test
+    public void shouldDrainForSecureKey_onlyAllowsEventsOrParentUri() {
+        assertTrue(ModuleConfig.shouldDrainForSecureKey(null));
+        assertTrue(ModuleConfig.shouldDrainForSecureKey(""));
+        assertTrue(ModuleConfig.shouldDrainForSecureKey("secure"));
+        assertTrue(ModuleConfig.shouldDrainForSecureKey(ModuleConfig.KEY_EVENTS));
+
+        assertFalse("cmd_ack 变更不得触发日志拉取，避免自激广播刷屏",
+                ModuleConfig.shouldDrainForSecureKey(ModuleConfig.KEY_CMD_ACK));
+        assertFalse(ModuleConfig.shouldDrainForSecureKey(ModuleConfig.KEY_SERVICES));
+        assertFalse(ModuleConfig.shouldDrainForSecureKey("enabled_accessibility_services"));
+    }
+
+    @Test
+    public void shouldPullLogsViaBinder_skipsUnnecessaryBroadcastOnObserverWhenNoGap() {
+        // 观察器路径：KEY_EVENTS 可读且无缺口时，不需要再发 pull_logs 广播
+        assertFalse(ModuleConfig.shouldPullLogsViaBinder(false, false, "s1|10|1000|msg"));
+        // 观察器路径：出现 session/seq 缺口或读不到 KEY_EVENTS 时，必须走 Binder 分批补拉
+        assertTrue(ModuleConfig.shouldPullLogsViaBinder(false, true, "s1|15|1000|msg"));
+        assertTrue(ModuleConfig.shouldPullLogsViaBinder(false, false, null));
+        // 显式调用 drainLogs（如打开界面/日志页）时允许 Binder 拉取全量尾段
+        assertTrue(ModuleConfig.shouldPullLogsViaBinder(true, false, "s1|10|1000|msg"));
+    }
 }
 

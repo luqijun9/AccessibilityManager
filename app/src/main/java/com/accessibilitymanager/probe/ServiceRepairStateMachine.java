@@ -68,7 +68,9 @@ final class ServiceRepairStateMachine {
         /** 开机/解锁启动潮冷却，期间不修复 */
         BOOT_GRACE,
         /** 绑定状态不可读时的重试 */
-        BIND_RETRY
+        BIND_RETRY,
+        /** AMS 正在绑定中（mBindingServices 包含该组件）的有界宽限等待 */
+        BINDING_GRACE
     }
 
     /** 状态机向外部执行层发出的动作；执行层负责真正的 Settings 写入、强杀、日志/Toast。 */
@@ -245,6 +247,7 @@ final class ServiceRepairStateMachine {
         boolean userDisabled;
         boolean bootGraceActive;
         long bootGraceRemainingMs;
+        boolean bindingInProgress;
         long now;
     }
 
@@ -361,6 +364,7 @@ final class ServiceRepairStateMachine {
     private long boundAt;
     private int fastFailCount;
     private int bindRetryAttempts;
+    private int bindingGraceAttempts;
     private long lastDeathAt;
 
     State getState() {
@@ -519,6 +523,7 @@ final class ServiceRepairStateMachine {
             boundAt = 0L;
         }
         lastDeathAt = snapshot.now;
+        bindingGraceAttempts = 0;
         if (snapshot.bootGraceActive) {
             return change(from, State.SUSPECT, "died_boot_grace",
                     Effect.timer(TimerType.BOOT_GRACE, bootGraceDelay(snapshot), "died"));
@@ -535,6 +540,7 @@ final class ServiceRepairStateMachine {
             }
             boundAt = snapshot.now;
             bindRetryAttempts = 0;
+            bindingGraceAttempts = 0;
             boolean recovered = from == State.SUSPECT || from == State.VERIFYING
                     || from == State.RESTORING || from == State.BACKOFF
                     || from == State.DISABLED || from == State.QUEUED
@@ -618,6 +624,7 @@ final class ServiceRepairStateMachine {
         if (!snapshot.managed || snapshot.userDisabled || !snapshot.moduleEnabled) {
             return stay(from, Effect.removeFromBatch());
         }
+        bindingGraceAttempts = 0;
         return change(from, State.REPAIRING, "package_repair_started");
     }
 
@@ -657,15 +664,39 @@ final class ServiceRepairStateMachine {
             }
             return evaluateUnbound(snapshot, from, "stability_unbound");
         }
-        if (event.getTimerType() == TimerType.VERIFY
-                && !snapshot.bound
-                && snapshot.bindCheckAvailable
-                && snapshot.inEnabledList
-                && !snapshot.bootGraceActive) {
-            // 关开修复后的 VERIFY 定时器到点仍未绑定，且期间未触发 binderDied 或 INITIALIZED(false)：
-            // 按快速失败累计计数，避免在无断开回调的 ROM 上每 2.5s 无退避重复关开；
-            // 注意 fastFailCount=0->1 时 repairBackoffMs(1)==0L，首次校验失败仍会立即重修，第 2 次起逐步退避。
-            fastFailCount = RepairPolicy.nextFastFailCount(fastFailCount, 0L);
+        if (event.getTimerType() == TimerType.SETTLE
+                || event.getTimerType() == TimerType.VERIFY
+                || event.getTimerType() == TimerType.BINDING_GRACE) {
+            if (!snapshot.bound
+                    && snapshot.bindCheckAvailable
+                    && snapshot.inEnabledList
+                    && !snapshot.bootGraceActive) {
+                // 1. 解决场景（ColorOS 日志 20:25/20:55 实证）：AMS 已发起 bindLocked（处于 mBindingServices）
+                //    但目标应用冷启动尚未完成 onServiceConnected；此时若立刻关开修复会打断正在进行的正常绑定。
+                // 2. 前置条件与边界：仅在确认“未绑定 + 探测可读 + 仍在启用列表 + 非开机保护期”且
+                //    bindingInProgress==true 时宽限，最多宽限 FSM_MAX_BINDING_GRACE_ATTEMPTS(2) 次（每次 2s），
+                //    且保留原有 VERIFYING/SUSPECT 阶段语义，暂不累加 fastFailCount。
+                // 3. 兜底策略：若 2 次宽限后仍卡在绑定中或系统撤出 mBindingServices，立即清零宽限计数；
+                //    若源自 VERIFY 流程则计入 fastFailCount 并进入正常退避/修复决策，绝不无限等待。
+                if (snapshot.bindingInProgress
+                        && bindingGraceAttempts < RepairPolicy.FSM_MAX_BINDING_GRACE_ATTEMPTS) {
+                    bindingGraceAttempts++;
+                    State targetState = from == State.VERIFYING ? State.VERIFYING : State.SUSPECT;
+                    return change(from, targetState, "binding_grace_" + bindingGraceAttempts,
+                            Effect.timer(TimerType.BINDING_GRACE,
+                                    RepairPolicy.FSM_BINDING_GRACE_MS, "binding_in_progress"));
+                }
+                bindingGraceAttempts = 0;
+                if (event.getTimerType() == TimerType.VERIFY
+                        || (event.getTimerType() == TimerType.BINDING_GRACE && from == State.VERIFYING)) {
+                    // 关开修复后的 VERIFY（或宽限耗尽的 VERIFY）到点仍未绑定，且期间未触发 binderDied 或 INITIALIZED(false)：
+                    // 按快速失败累计计数，避免在无断开回调的 ROM 上每 2.5s 无退避重复关开；
+                    // 注意 fastFailCount=0->1 时 repairBackoffMs(1)==0L，首次校验失败仍会立即重修，第 2 次起逐步退避。
+                    fastFailCount = RepairPolicy.nextFastFailCount(fastFailCount, 0L);
+                }
+            } else {
+                bindingGraceAttempts = 0;
+            }
         }
         return evaluateUnbound(snapshot, from, "timer_" + event.getTimerType());
     }
@@ -715,6 +746,7 @@ final class ServiceRepairStateMachine {
     private Transition recoveryTransition(State from, Snapshot snapshot, String reason) {
         boundAt = snapshot.now;
         bindRetryAttempts = 0;
+        bindingGraceAttempts = 0;
         return change(from, State.BOUND, reason,
                 Effect.clearCrashedMarker(),
                 Effect.notifyRecovered(),
@@ -725,8 +757,10 @@ final class ServiceRepairStateMachine {
         if (from == State.SUSPENDED) {
             return noop(from);
         }
+        bindingGraceAttempts = 0;
         List<Effect> effects = new ArrayList<>();
-        if (from == State.QUEUED || from == State.REPAIRING) {
+        // 排队等待修复的成员实际停留在 NEEDS_REPAIR（QUEUED 为历史保留态），停用时一并移除队列
+        if (from == State.NEEDS_REPAIR || from == State.QUEUED || from == State.REPAIRING) {
             effects.add(Effect.removeFromBatch());
         }
         return change(from, State.SUSPENDED, "module_disabled", effects);
@@ -736,8 +770,9 @@ final class ServiceRepairStateMachine {
         if (from == State.DISABLED) {
             return noop(from);
         }
+        bindingGraceAttempts = 0;
         List<Effect> effects = new ArrayList<>();
-        if (from == State.QUEUED || from == State.REPAIRING) {
+        if (from == State.NEEDS_REPAIR || from == State.QUEUED || from == State.REPAIRING) {
             effects.add(Effect.removeFromBatch());
         }
         return change(from, State.DISABLED, "user_disabled", effects);
@@ -747,8 +782,9 @@ final class ServiceRepairStateMachine {
         if (from == State.UNMANAGED) {
             return noop(from);
         }
+        bindingGraceAttempts = 0;
         List<Effect> effects = new ArrayList<>();
-        if (from == State.QUEUED || from == State.REPAIRING) {
+        if (from == State.NEEDS_REPAIR || from == State.QUEUED || from == State.REPAIRING) {
             effects.add(Effect.removeFromBatch());
         }
         return change(from, State.UNMANAGED, "unmanaged", effects);

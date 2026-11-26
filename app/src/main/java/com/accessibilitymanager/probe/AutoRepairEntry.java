@@ -29,6 +29,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
@@ -68,6 +69,7 @@ public class AutoRepairEntry extends XposedModule {
     private static final String STATE_HOT_RELOAD_COUNT = "hot_reload_count";
     private static final String STATE_CONTEXT = "context";
     private static final String STATE_CLASS_LOADER = "class_loader";
+    private static final String STATE_USER_DISABLED_KEYS = "user_disabled_keys";
 
     // 配置项（Settings.Secure，由管理器写入）
     private static final String KEY_ENABLE = "a11y_module_enable";
@@ -234,7 +236,7 @@ public class AutoRepairEntry extends XposedModule {
 
     // 状态缓存（仅在 sHandler 线程读写）
     private static final Map<String, Long> sLastDied = new HashMap<>();
-    private static final Map<String, Long> sLastInit = new HashMap<>();
+    private static final Map<String, InitEventRecord> sLastInit = new HashMap<>();
     private static final Map<String, Object> sConnections = new HashMap<>();
     private static final AtomicLong sConnEventSeq = new AtomicLong();
     private static boolean sBoundCheckAvailable;
@@ -258,10 +260,18 @@ public class AutoRepairEntry extends XposedModule {
     private static long sRepairTransactionGeneration;
     private static SettingsWriter sSettingsWriter;
 
-    /** 包级修复请求：同一包只保留一条，allowKill 取所有请求的“与”，任一成员拒绝强杀就不强杀。 */
+    /**
+     * 包级修复请求：同一包只保留一条，维护所有待修 trigger 集合，allowKill 取所有请求的“与”。
+     *
+     * <p>1. 解决场景：同包多服务（如双服务同时崩溃）先后进入 NEEDS_REPAIR 排队时，
+     *    若只记录首个 trigger，一旦该 trigger 在排队期间自愈或被用户关闭而丢弃整包请求，
+     *    同包另一个仍在 NEEDS_REPAIR 的成员会彻底失去定时器而永久卡死。
+     * <p>2. 前置条件与边界：每次新增成员加入 triggers 集合；移除单成员时只从 triggers 删除，
+     *    仅当 triggers 清空时才整包移出修复队列。
+     */
     private static final class PackageRepairRequest {
         final String pkg;
-        final ComponentName trigger;
+        final Set<ComponentName> triggers = new LinkedHashSet<>();
         final String reason;
         final long requestedAt;
         boolean allowKill;
@@ -269,10 +279,25 @@ public class AutoRepairEntry extends XposedModule {
         PackageRepairRequest(String pkg, ComponentName trigger, boolean allowKill,
                 String reason, long requestedAt) {
             this.pkg = pkg;
-            this.trigger = trigger;
+            if (trigger != null) {
+                this.triggers.add(trigger);
+            }
             this.allowKill = allowKill;
             this.reason = reason;
             this.requestedAt = requestedAt;
+        }
+    }
+
+    /** 记录最近一次 initializeService 的连接对象与成败结果，供成败/换连接区分去重。 */
+    private static final class InitEventRecord {
+        final long at;
+        final boolean success;
+        final Object connection;
+
+        InitEventRecord(long at, boolean success, Object connection) {
+            this.at = at;
+            this.success = success;
+            this.connection = connection;
         }
     }
 
@@ -312,6 +337,9 @@ public class AutoRepairEntry extends XposedModule {
     private static volatile String sDebugCache;
     private static volatile String sToastCache;
     private static String sLastObservedEnabled;
+    private static int sLastAccessibilityEnabled = -1;
+    private static String sLastDebugKillPkg;
+    private static long sLastDebugKillAt;
     // 启用列表读取为 null 时的原因：非 null 表示读取异常，null 表示设置项不存在（全新设备或被 ROM 清空）
     private static volatile Throwable sLastEnabledReadError;
 
@@ -385,6 +413,7 @@ public class AutoRepairEntry extends XposedModule {
             state.put(STATE_FIRST_CONNECT_AT, sFirstServiceConnectAt);
             state.put(STATE_LAST_PKG_KILL_AT, new HashMap<>(sLastPackageKillAt));
             state.put(STATE_HOT_RELOAD_COUNT, sHotReloadCount);
+            state.put(STATE_USER_DISABLED_KEYS, new ArrayList<>(sUserDisabledKeys));
             if (sContext != null) {
                 state.put(STATE_CONTEXT, sContext);
             }
@@ -481,6 +510,9 @@ public class AutoRepairEntry extends XposedModule {
         sHeartbeatRetryPending = false;
         sPostBootCheckRunnable = null;
         sLastObservedEnabled = null;
+        sLastAccessibilityEnabled = -1;
+        sLastDebugKillPkg = null;
+        sLastDebugKillAt = 0L;
         sToastCache = null;
         sBoundCheckAvailable = false;
         sBoundCheckErrorLogged = false;
@@ -564,6 +596,15 @@ public class AutoRepairEntry extends XposedModule {
                 for (Map.Entry<?, ?> entry : ((Map<?, ?>) lastPkgKill).entrySet()) {
                     if (entry.getKey() instanceof String && entry.getValue() instanceof Long) {
                         sLastPackageKillAt.put((String) entry.getKey(), (Long) entry.getValue());
+                    }
+                }
+            }
+            Object userDisabled = state.get(STATE_USER_DISABLED_KEYS);
+            if (userDisabled instanceof List) {
+                sUserDisabledKeys.clear();
+                for (Object item : (List<?>) userDisabled) {
+                    if (item instanceof String && !((String) item).isEmpty()) {
+                        sUserDisabledKeys.add((String) item);
                     }
                 }
             }
@@ -1092,7 +1133,9 @@ public class AutoRepairEntry extends XposedModule {
                             }
                             return;
                         }
-                        if (!ignoreSystem && existing != null && existing != connection
+                        boolean allowDedupe = RepairPolicy.shouldAttemptConnectionDedupe(
+                                isModuleEnabled(), isDryRun(), ignoreSystem, isManaged(component));
+                        if (allowDedupe && existing != null && existing != connection
                                 && existingBound) {
                             if (pauseUnbind) {
                                 // 实验路径：只记录，不解绑。用于观察“旧连接迟到 init”是否真的
@@ -1230,7 +1273,13 @@ public class AutoRepairEntry extends XposedModule {
                         return;
                     }
                     if (KEY_DRY_RUN.equals(key)) {
-                        sDryRunCache = readSecure(KEY_DRY_RUN);
+                        String prev = sDryRunCache;
+                        String next = readSecure(KEY_DRY_RUN);
+                        sDryRunCache = next;
+                        // 从演练模式切回正常模式时重新评估一次，避免此前在演练中跳过修复的服务停在 NEEDS_REPAIR
+                        if ("1".equals(prev) && !"1".equals(next) && isModuleEnabled()) {
+                            syncMachines("dry_run_off");
+                        }
                         return;
                     }
                     if (KEY_DEBUG.equals(key)) {
@@ -1242,7 +1291,13 @@ public class AutoRepairEntry extends XposedModule {
                         return;
                     }
                     if (KEY_ENABLE.equals(key)) {
-                        sModuleEnabledCache = readSecure(KEY_ENABLE);
+                        String prev = sModuleEnabledCache;
+                        String next = readSecure(KEY_ENABLE);
+                        sModuleEnabledCache = next;
+                        if (prev != null && prev.equals(next)) {
+                            log("KEY_ENABLE observer unchanged, skip redundant sync: " + next);
+                            return;
+                        }
                         if (isModuleEnabled()) {
                             scheduleReconcile("enable", RECONCILE_CONFIG_DELAY_MS);
                         }
@@ -1483,10 +1538,15 @@ public class AutoRepairEntry extends XposedModule {
             sLastObservedEnabled = current;
         }
         // 先把“启用列表变化”投递给每个服务的状态机，让它们决定 RESTORING/BOUND；
-        // reconcileMissing 仍作为批量补回兜底，两者都只在 sHandler 线程执行。
+        // 若某服务不在 sMachines 中（首次缺失）且非模块刚刚自写的回加，再由 reconcileMissing 兜底补回。
         notifyMachinesEnabledListChanged();
         if (isModuleEnabled()) {
-            reconcileMissing("enabled change");
+            String latestEnabled = readEnabled();
+            boolean handledBySelfWrite = latestEnabled != null && sSettingsWriter != null
+                    && sSettingsWriter.isLastWrittenValue(latestEnabled);
+            if (!handledBySelfWrite) {
+                reconcileMissing("enabled change");
+            }
         } else if (isDebugEnabled()) {
             // 模块停用时不再执行批量补回，避免普通模式下每次系统无障碍设置变化都刷“模块已停用”
             log("enabled change ignored (module disabled)");
@@ -1500,6 +1560,16 @@ public class AutoRepairEntry extends XposedModule {
         try {
             int enabled = Settings.Secure.getInt(
                     sContext.getContentResolver(), SETTING_ACCESSIBILITY_ENABLED, -1);
+            // 1. 解决场景（ColorOS 实时事件日志实证）：AMS 每次绑定/解绑服务都可能重写 accessibility_enabled=1，
+            //    导致短时间内连刷多条“无障碍总开关变更: accessibility_enabled=1”与全量 syncMachines。
+            // 2. 前置条件与边界：仅当总开关上一次已观测为 1 且本次仍为 1 时提前返回；
+            //    若首次观测、从非 1 变 1、或被关闭（!= 1）则照常记录并触发恢复。
+            // 3. 兜底策略：具体服务的绑定/缺失仍由 initializeService/binderDied 与 enabled_accessibility_services 监听独立追踪。
+            if (enabled == 1 && sLastAccessibilityEnabled == 1) {
+                log("accessibility_enabled unchanged (1), skip redundant sync");
+                return;
+            }
+            sLastAccessibilityEnabled = enabled;
             event("监听", "无障碍总开关变更: accessibility_enabled=" + enabled,
                     getPowerStateSummary());
             if (enabled != 1 && isModuleEnabled()) {
@@ -1898,41 +1968,52 @@ public class AutoRepairEntry extends XposedModule {
 
         if ("enable_module".equals(action)) {
             boolean enable = "1".equals(component);
-            sModuleEnabledCache = enable ? "1" : "0";
-            if (sContext != null) {
+            String newVal = enable ? "1" : "0";
+            String prev = sModuleEnabledCache != null ? sModuleEnabledCache : readConfig(KEY_ENABLE);
+            boolean changed = !newVal.equals(prev);
+            sModuleEnabledCache = newVal;
+            if (sContext != null && (changed || !newVal.equals(readSecure(KEY_ENABLE)))) {
                 try {
-                    Settings.Secure.putString(sContext.getContentResolver(), KEY_ENABLE, sModuleEnabledCache);
+                    Settings.Secure.putString(sContext.getContentResolver(), KEY_ENABLE, newVal);
                 } catch (Throwable ignored) {
                 }
             }
-            if (enable) {
-                scheduleReconcile("enable_module", RECONCILE_CONFIG_DELAY_MS);
-                event("配置", "模块已启用 (广播指令)");
-            } else {
-                event("配置", "模块已停用 (广播指令)");
+            if (changed) {
+                if (enable) {
+                    scheduleReconcile("enable_module", RECONCILE_CONFIG_DELAY_MS);
+                    event("配置", "模块已启用 (广播指令)");
+                } else {
+                    event("配置", "模块已停用 (广播指令)");
+                }
+                syncMachines("enable_module cmd");
             }
-            syncMachines("enable_module cmd");
             notifyCommandAck();
             return;
         }
 
         if ("dry_run".equals(action)) {
-            sDryRunCache = "1".equals(component) ? "1" : "0";
-            if (sContext != null) {
+            String newVal = "1".equals(component) ? "1" : "0";
+            String prev = sDryRunCache != null ? sDryRunCache : readConfig(KEY_DRY_RUN);
+            sDryRunCache = newVal;
+            if (sContext != null && !newVal.equals(readSecure(KEY_DRY_RUN))) {
                 try {
-                    Settings.Secure.putString(sContext.getContentResolver(), KEY_DRY_RUN, sDryRunCache);
+                    Settings.Secure.putString(sContext.getContentResolver(), KEY_DRY_RUN, newVal);
                 } catch (Throwable ignored) {
                 }
+            }
+            if ("1".equals(prev) && !"1".equals(newVal) && isModuleEnabled()) {
+                syncMachines("dry_run_cmd_off");
             }
             notifyCommandAck();
             return;
         }
 
         if ("debug".equals(action)) {
-            sDebugCache = "1".equals(component) ? "1" : "0";
-            if (sContext != null) {
+            String newVal = "1".equals(component) ? "1" : "0";
+            sDebugCache = newVal;
+            if (sContext != null && !newVal.equals(readSecure(KEY_DEBUG))) {
                 try {
-                    Settings.Secure.putString(sContext.getContentResolver(), KEY_DEBUG, sDebugCache);
+                    Settings.Secure.putString(sContext.getContentResolver(), KEY_DEBUG, newVal);
                 } catch (Throwable ignored) {
                 }
             }
@@ -1941,10 +2022,11 @@ public class AutoRepairEntry extends XposedModule {
         }
 
         if ("toast".equals(action)) {
-            sToastCache = "1".equals(component) ? "1" : "0";
-            if (sContext != null) {
+            String newVal = "1".equals(component) ? "1" : "0";
+            sToastCache = newVal;
+            if (sContext != null && !newVal.equals(readSecure(KEY_TOAST))) {
                 try {
-                    Settings.Secure.putString(sContext.getContentResolver(), KEY_TOAST, sToastCache);
+                    Settings.Secure.putString(sContext.getContentResolver(), KEY_TOAST, newVal);
                 } catch (Throwable ignored) {
                 }
             }
@@ -2040,6 +2122,8 @@ public class AutoRepairEntry extends XposedModule {
         if ("debug_kill".equals(action)) {
             int slash = component.indexOf('/');
             String pkg = slash > 0 ? component.substring(0, slash) : component;
+            sLastDebugKillPkg = pkg;
+            sLastDebugKillAt = SystemClock.elapsedRealtime();
             String killMeta = killAppProcesses(pkg);
             event("调试", "已触发进程强杀: " + component,
                     "action=debug_kill pkg=" + pkg + " " + killMeta);
@@ -2381,6 +2465,15 @@ public class AutoRepairEntry extends XposedModule {
         if (pkg.isEmpty()) {
             return;
         }
+        long now = SystemClock.elapsedRealtime();
+        // 1. 解决场景：管理器拥有 WRITE_SECURE_SETTINGS 时若同时发广播与写 KEY_DEBUG_KILL，
+        //    广播会立刻强杀一次，500ms 后 ContentObserver 回调又强杀第二次，导致“连环双杀”干扰测试。
+        // 2. 前置条件与边界：仅在 2000ms 内同一包名已通过广播强杀过时跳过本次 Observer 兜底强杀。
+        // 3. 兜底策略：无权限或广播未送达时，Observer 仍可在 500ms 后独立触发强杀。
+        if (pkg.equals(sLastDebugKillPkg) && now - sLastDebugKillAt >= 0L && now - sLastDebugKillAt < 2000L) {
+            log("debug kill skipped (already executed via broadcast): " + pkg);
+            return;
+        }
 
         final int uid;
         try {
@@ -2552,13 +2645,15 @@ public class AutoRepairEntry extends XposedModule {
             Object connection) {
         String key = component.flattenToString();
         long now = SystemClock.elapsedRealtime();
-        Long lastInit = sLastInit.get(key);
-        if (lastInit != null && now - lastInit < DEDUPE_MS) {
+        boolean success = !crashed && hasInterface;
+        InitEventRecord lastInit = sLastInit.get(key);
+        if (lastInit != null && RepairPolicy.shouldDedupeInit(
+                lastInit.at, lastInit.success, lastInit.connection == connection,
+                now, success, DEDUPE_MS)) {
             return;
         }
-        sLastInit.put(key, now);
+        sLastInit.put(key, new InitEventRecord(now, success, connection));
         boolean managed = isManaged(component);
-        boolean success = !crashed && hasInterface;
 
         if (!managed) {
             eventNonManaged(key, success
@@ -2638,6 +2733,7 @@ public class AutoRepairEntry extends XposedModule {
         Object bound = findBoundConnection(component);
         snapshot.bound = bound != null;
         snapshot.bindCheckAvailable = sBoundCheckAvailable && !enabledReadFailed;
+        snapshot.bindingInProgress = !snapshot.bound && isServiceBinding(component);
 
         long remainingBoot = getRemainingBootGraceMs(now, sFirstServiceConnectAt);
         snapshot.bootGraceActive = remainingBoot > 0L;
@@ -2826,6 +2922,7 @@ public class AutoRepairEntry extends XposedModule {
                 sPackageRepairQueue.add(pkg);
             }
         } else {
+            request.triggers.add(component);
             // 同包任一成员要求“不加强杀”时，整包事务都不加强杀
             request.allowKill = request.allowKill && effectiveAllowKill;
         }
@@ -2842,14 +2939,19 @@ public class AutoRepairEntry extends XposedModule {
             if (request == null) {
                 continue;
             }
+            if (request.triggers.isEmpty()) {
+                continue;
+            }
             if (!isModuleEnabled()) {
                 log("package repair skipped (module disabled): " + pkg);
+                syncTriggerMachines(request.triggers);
                 continue;
             }
             if (!isPackageUsable(pkg)) {
-                // 冻结/卸载包在入队后可能已经不可用；这里直接丢弃请求，不重试、不改写。
+                // 冻结/卸载包在入队后可能已经不可用；同步状态机离开 NEEDS_REPAIR，防止永久卡在队列态。
                 eventSkip("repair:unavailable:" + pkg, "修复",
                         "跳过不可用包级修复: " + pkg);
+                syncTriggerMachines(request.triggers);
                 continue;
             }
             String managed = readConfig(KEY_SERVICES);
@@ -2857,29 +2959,41 @@ public class AutoRepairEntry extends XposedModule {
             if (managed == null || enabled == null) {
                 event("失败", "包级修复读取配置失败: " + pkg,
                         "action=fsm_repair_read_fail");
-                // Settings 读取失败通常是 ContentService 短暂不可用；3s 后重新投递 SYNC 而不是立即重试，
-                // 避免在系统繁忙时形成忙循环。
-                scheduleMachineSync(request.trigger, 3000L, "repair_read_failed");
+                // Settings 读取失败通常是 ContentService 短暂不可用；3s 后为所有等待成员重新投递 SYNC，
+                // 避免在系统繁忙时形成忙循环或漏掉同包其他等待成员。
+                for (ComponentName t : request.triggers) {
+                    scheduleMachineSync(t, 3000L, "repair_read_failed");
+                }
                 continue;
             }
-            ComponentKey trigger = ComponentKey.parse(request.trigger.flattenToString());
+
+            // 先过滤出排队期间尚未自愈的 trigger；已自愈的单独 SYNC 回 BOUND，
+            // 未自愈的兄弟成员必须保留下来继续驱动本包修复，不能因为首个 trigger 自愈就丢掉整包。
+            List<ComponentName> unboundTriggers = new ArrayList<>();
+            for (ComponentName t : request.triggers) {
+                if (findBoundConnection(t) != null) {
+                    log("package repair trigger already bound: " + t.flattenToShortString());
+                    handleServiceEvent(t, ServiceRepairStateMachine.Event.sync());
+                } else {
+                    unboundTriggers.add(t);
+                }
+            }
+            if (unboundTriggers.isEmpty()) {
+                log("package repair skipped, all triggers already bound: " + pkg);
+                continue;
+            }
+
+            ComponentName primaryTrigger = unboundTriggers.get(0);
+            ComponentKey trigger = ComponentKey.parse(primaryTrigger.flattenToString());
             List<ComponentKey> candidates = RepairPolicy.planPackageBatch(
                     managed, enabled, pkg, trigger);
             if (candidates.isEmpty()) {
                 log("package repair batch empty, re-evaluate: " + pkg);
-                handleServiceEvent(request.trigger, ServiceRepairStateMachine.Event.sync());
-                continue;
-            }
-            // 触发服务可能在排队/读取配置期间已经自愈。此时不能因为队列里还有旧请求
-            // 就去关开一个已经健康的服务，更不能在强杀模式下把整包进程再杀一次。
-            if (findBoundConnection(request.trigger) != null) {
-                log("package repair skipped, trigger already bound: "
-                        + request.trigger.flattenToShortString());
-                handleServiceEvent(request.trigger, ServiceRepairStateMachine.Event.sync());
+                syncTriggerMachines(unboundTriggers);
                 continue;
             }
 
-            boolean allowKill = computePackageKillAllowed(request);
+            boolean allowKill = computePackageKillAllowed(request, primaryTrigger);
             Set<ComponentKey> unbound = allowKill
                     ? Collections.<ComponentKey>emptySet()
                     : findUnboundMembers(candidates);
@@ -2888,7 +3002,7 @@ public class AutoRepairEntry extends XposedModule {
                     candidates, allowKill, unbound);
             if (batch.isEmpty()) {
                 log("package repair batch empty after trim, re-evaluate: " + pkg);
-                handleServiceEvent(request.trigger, ServiceRepairStateMachine.Event.sync());
+                syncTriggerMachines(unboundTriggers);
                 continue;
             }
             if (!allowKill && batch.size() < candidates.size()) {
@@ -2903,6 +3017,17 @@ public class AutoRepairEntry extends XposedModule {
         }
     }
 
+    private static void syncTriggerMachines(Collection<ComponentName> triggers) {
+        if (triggers == null) {
+            return;
+        }
+        for (ComponentName t : triggers) {
+            if (t != null) {
+                handleServiceEvent(t, ServiceRepairStateMachine.Event.sync());
+            }
+        }
+    }
+
     /**
      * 计算本次包级修复是否允许强杀。
      *
@@ -2910,8 +3035,9 @@ public class AutoRepairEntry extends XposedModule {
      * 强杀模式开关、同包冷却、禁用列表和系统/自身包排除。这个计算必须在规划批次之前完成，
      * 因为“是否强杀”直接决定要不要把同包健康服务一起关开。
      */
-    private static boolean computePackageKillAllowed(PackageRepairRequest request) {
-        if (request == null || !request.allowKill) {
+    private static boolean computePackageKillAllowed(PackageRepairRequest request,
+            ComponentName primaryTrigger) {
+        if (request == null || !request.allowKill || primaryTrigger == null) {
             return false;
         }
         boolean fixMode = sFixModeCache != null
@@ -2922,7 +3048,7 @@ public class AutoRepairEntry extends XposedModule {
         Long lastKill = sLastPackageKillAt.get(request.pkg);
         return RepairPolicy.shouldKillPackage(
                 request.pkg, contextPkg, fixMode, disabled,
-                request.trigger.flattenToString(), lastKill,
+                primaryTrigger.flattenToString(), lastKill,
                 SystemClock.elapsedRealtime(), getFastFailCountForPackage(request.pkg));
     }
 
@@ -3070,12 +3196,15 @@ public class AutoRepairEntry extends XposedModule {
         if (component == null) {
             return;
         }
-        String key = component.flattenToString();
         String pkg = component.getPackageName();
         PackageRepairRequest request = sPackageRepairRequests.get(pkg);
-        if (request != null && request.trigger.flattenToString().equals(key)) {
-            sPackageRepairRequests.remove(pkg);
-            sPackageRepairQueue.remove(pkg);
+        if (request != null) {
+            request.triggers.remove(component);
+            // 仅当同包所有待修 trigger 均被移出后才整包撤出队列，避免误删兄弟服务请求
+            if (request.triggers.isEmpty()) {
+                sPackageRepairRequests.remove(pkg);
+                sPackageRepairQueue.remove(pkg);
+            }
         }
         // 活动批次不在这里改：重新开启时会按 managed/userDisabled 过滤
     }
@@ -3530,6 +3659,15 @@ public class AutoRepairEntry extends XposedModule {
             finishConnectionDedupe(task);
             return;
         }
+        // 延迟 500ms 确认期间模块可能已停用、切换为演练或将服务移出锁定列表，执行解绑前必须复核门控
+        if (!RepairPolicy.shouldAttemptConnectionDedupe(
+                isModuleEnabled(),
+                isDryRun(),
+                shouldIgnoreSystemApp(task.component.getPackageName()),
+                isManaged(task.component))) {
+            finishConnectionDedupe(task);
+            return;
+        }
         if (isDebugPauseUnbind()) {
             event("调试", "重复连接确认已暂停: " + task.component.flattenToShortString()
                             + " old=" + connId(task.existing) + " new=" + connId(task.incoming),
@@ -3796,6 +3934,52 @@ public class AutoRepairEntry extends XposedModule {
 
     private static boolean isConnectionBound(Object connection) {
         return connection != null && probeConnection(connection).isBound();
+    }
+
+    /**
+     * 检查目标组件当前是否正处于 AMS {@code mBindingServices}（已发起 {@code bindLocked}、等待回调中）。
+     *
+     * <p>1. 解决场景（ColorOS 日志 20:25/20:55 实证）：AMS 发起绑定后，应用冷启动 + onServiceConnected
+     *    可能需要 2~4 秒；通过 {@code mBindingServices} 识别正在绑定中的服务，避免误打断健康绑定。
+     * <p>2. 前置条件与边界：读取 {@code AccessibilityUserState.mBindingServices} 时持有连接 {@code mLock}，
+     *    与系统主线程保持一致，避免 {@code ConcurrentModificationException}。
+     * <p>3. 兜底策略：若读取失败或任一字段缺失，保守返回 {@code false}，不影响既有修复流程。
+     */
+    static boolean isComponentInBindingServices(Object userState, Object lock, Object target) {
+        if (userState == null || target == null) {
+            return false;
+        }
+        try {
+            if (lock != null) {
+                synchronized (lock) {
+                    Object bindingServices = getFieldValue(userState, "mBindingServices");
+                    return bindingServices instanceof Collection
+                            && ((Collection<?>) bindingServices).contains(target);
+                }
+            }
+            Object bindingServices = getFieldValue(userState, "mBindingServices");
+            return bindingServices instanceof Collection
+                    && ((Collection<?>) bindingServices).contains(target);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static boolean isServiceBinding(ComponentName target) {
+        if (target == null) {
+            return false;
+        }
+        for (Object connection : sConnections.values()) {
+            Object userState = getUserState(connection);
+            if (userState == null) {
+                continue;
+            }
+            Object lock = getFieldValue(connection, "mLock");
+            if (isComponentInBindingServices(userState, lock, target)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Object getUserState(Object connection) {
@@ -4221,5 +4405,15 @@ public class AutoRepairEntry extends XposedModule {
 
     static int getHotReloadCountForTesting() {
         return sHotReloadCount;
+    }
+
+    static void putUserDisabledKeyForTesting(String key) {
+        if (key != null && !key.isEmpty()) {
+            sUserDisabledKeys.add(key);
+        }
+    }
+
+    static Set<String> getUserDisabledKeysForTesting() {
+        return new LinkedHashSet<>(sUserDisabledKeys);
     }
 }

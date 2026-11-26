@@ -12,8 +12,10 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.After;
 import org.junit.Before;
@@ -750,5 +752,125 @@ public class AutoRepairEntryTest {
         noLockConn.mClient = new Object();
         assertEquals(ConnectionBindProbe.Status.BOUND,
                 AutoRepairEntry.probeWithConnectionLock(noLockConn).getStatus());
+    }
+
+    @Test
+    public void shouldAttemptConnectionDedupe_requiresModuleEnabledNonDryRunNonSystemManaged() {
+        assertTrue(RepairPolicy.shouldAttemptConnectionDedupe(true, false, false, true));
+        assertFalse("模块停用时不得解绑任何服务的重复连接",
+                RepairPolicy.shouldAttemptConnectionDedupe(false, false, false, true));
+        assertFalse("演练模式下不得主动解绑连接",
+                RepairPolicy.shouldAttemptConnectionDedupe(true, true, false, true));
+        assertFalse("开启忽略系统应用时不得解绑系统服务",
+                RepairPolicy.shouldAttemptConnectionDedupe(true, false, true, true));
+        assertFalse("未在锁定列表中的第三方服务不得主动解绑",
+                RepairPolicy.shouldAttemptConnectionDedupe(true, false, false, false));
+    }
+
+    @Test
+    public void shouldDedupeInit_neverSwallowsSuccessAfterFailureOrDifferentConnection() {
+        // 1. 同一连接、同一结果、在 1.5s 窗口内：应去重
+        assertTrue(RepairPolicy.shouldDedupeInit(1_000L, false, true, 1_500L, false, 1_500L));
+        assertTrue(RepairPolicy.shouldDedupeInit(1_000L, true, true, 1_500L, true, 1_500L));
+
+        // 2. 失败后 300ms 同一连接或新连接初始化成功：绝不能吞掉成功事件
+        assertFalse(RepairPolicy.shouldDedupeInit(1_000L, false, true, 1_300L, true, 1_500L));
+        assertFalse(RepairPolicy.shouldDedupeInit(1_000L, false, false, 1_300L, true, 1_500L));
+
+        // 3. 不同连接对象先后回调：不去重
+        assertFalse(RepairPolicy.shouldDedupeInit(1_000L, false, false, 1_300L, false, 1_500L));
+
+        // 4. 超过去重窗口：放行
+        assertFalse(RepairPolicy.shouldDedupeInit(1_000L, true, true, 2_500L, true, 1_500L));
+    }
+
+    @Test
+    public void hotReload_preservesUserDisabledKeys() {
+        AutoRepairEntry oldGen = new AutoRepairEntry();
+        String disabledSvc = "com.foo/com.foo.DisabledService";
+        AutoRepairEntry.putUserDisabledKeyForTesting(disabledSvc);
+
+        final Object[] savedStateBox = new Object[1];
+        assertTrue(oldGen.onHotReloading(new XposedModuleInterface.HotReloadingParam() {
+            @Override
+            public Bundle getExtras() {
+                return null;
+            }
+
+            @Override
+            public void setSavedInstanceState(Object outState) {
+                savedStateBox[0] = outState;
+            }
+        }));
+        assertTrue("onHotReloading 后旧代用户关闭标记应清空",
+                AutoRepairEntry.getUserDisabledKeysForTesting().isEmpty());
+
+        AutoRepairEntry newGen = new AutoRepairEntry();
+        newGen.onHotReloaded(new XposedModuleInterface.HotReloadedParam() {
+            @Override
+            public boolean isSystemServer() {
+                return true;
+            }
+
+            @Override
+            public String getProcessName() {
+                return "system_server";
+            }
+
+            @Override
+            public Bundle getExtras() {
+                return null;
+            }
+
+            @Override
+            public Object getSavedInstanceState() {
+                return savedStateBox[0];
+            }
+
+            @Override
+            public List<XposedInterface.HookHandle> getOldHookHandles() {
+                return Collections.emptyList();
+            }
+        });
+
+        assertTrue("热重载后应保留用户明确关闭的服务意图，避免误复活",
+                AutoRepairEntry.getUserDisabledKeysForTesting().contains(disabledSvc));
+    }
+
+    private static final class LockTrackingBindingSet extends HashSet<Object> {
+        private final Object expectedLock;
+        boolean lockHeldOnContains;
+
+        LockTrackingBindingSet(Object expectedLock) {
+            this.expectedLock = expectedLock;
+        }
+
+        @Override
+        public boolean contains(Object o) {
+            lockHeldOnContains = Thread.holdsLock(expectedLock);
+            return super.contains(o);
+        }
+    }
+
+    private static final class FakeUserStateWithBinding {
+        final Set<Object> mBindingServices;
+
+        FakeUserStateWithBinding(Set<Object> bindingServices) {
+            this.mBindingServices = bindingServices;
+        }
+    }
+
+    @Test
+    public void isComponentInBindingServices_checksBindingSetUnderMLock() {
+        Object lock = new Object();
+        Object token = new Object();
+        LockTrackingBindingSet bindingSet = new LockTrackingBindingSet(lock);
+        bindingSet.add(token);
+        FakeUserStateWithBinding userState = new FakeUserStateWithBinding(bindingSet);
+
+        assertTrue(AutoRepairEntry.isComponentInBindingServices(userState, lock, token));
+        assertTrue("读取 mBindingServices 时必须持有连接 mLock", bindingSet.lockHeldOnContains);
+        assertFalse(AutoRepairEntry.isComponentInBindingServices(userState, lock, new Object()));
+        assertFalse(AutoRepairEntry.isComponentInBindingServices(null, lock, token));
     }
 }

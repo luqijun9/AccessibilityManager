@@ -2742,6 +2742,11 @@ public class MainActivity extends Activity {
                 ModuleConfig.setEnabled(MainActivity.this, true);
                 ModuleConfig.setDryRun(MainActivity.this, false);
                 syncModuleServicesIfNeeded("选择LSPosed模式");
+                ModuleConfig.setFixMode(MainActivity.this, sp.getBoolean("fixmode", false),
+                        sp.getString("fixmode_disabled_services", ""));
+                ModuleConfig.setIgnoreSystem(MainActivity.this,
+                        sp.getBoolean("ignore_system_crash_trigger", true));
+                TimerReceiver.cancel(MainActivity.this, "LSPosed 模块模式");
                 ModuleConfig.startLogSync(MainActivity.this);
                 Toast.makeText(MainActivity.this, "已开启 LSPosed 模块模式 (系统级被动实时监听)", Toast.LENGTH_SHORT).show();
                 if (onModeReady != null) {
@@ -2779,6 +2784,7 @@ public class MainActivity extends Activity {
                 .putBoolean("fixmode", currentFixMode)
                 .putBoolean("mode_chosen", true)
                 .apply();
+        ModuleConfig.setEnabled(this, false);
         if (restoreCrashFix && sp.getBoolean("periodic_check", false)) {
             TimerReceiver.scheduleNext(this);
         }
@@ -3023,8 +3029,8 @@ public class MainActivity extends Activity {
         if (!ModuleConfig.isRemoteModuleEnabled(this)) {
             ModuleConfig.setEnabled(this, true);
         }
-        ModuleConfig.setDryRun(this, false);
-        ModuleConfig.setToastEnabled(this, sp.getBoolean("toast", true));
+        ModuleConfig.syncDryRunIfChanged(this, false);
+        ModuleConfig.syncToastIfChanged(this, sp.getBoolean("toast", true));
         ModuleConfig.syncManagedServices(this,
                 sp.getString("daemon", ""),
                 sp.getString("whitelist_services", ""),

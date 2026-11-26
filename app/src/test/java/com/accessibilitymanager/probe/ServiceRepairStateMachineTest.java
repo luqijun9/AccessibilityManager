@@ -895,4 +895,108 @@ public class ServiceRepairStateMachineTest {
         assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR, stabilityUnbound.getTo());
         assertNotNull(stabilityUnbound.findEffect(ServiceRepairStateMachine.ActionType.REQUEST_REPAIR));
     }
+
+    @Test
+    public void settle_whileBindingInProgress_grantsBoundedGraceAndRecoversWithoutRepair() {
+        // 回放 ColorOS 日志 20:25/20:55：binderDied 后 AMS 已在 1.7s 内重新发起 bindLocked
+        // （mBindingServices 包含该服务），但冷启动未完成；3s SETTLE 到点时必须先宽限等待，
+        // 避免打断健康绑定并引发伪“重绑失败”。
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        initBound(machine, 1_000L);
+        ServiceRepairStateMachine.Transition died = machine.handle(
+                ServiceRepairStateMachine.Event.binderDied(false),
+                snapshot(2_000L));
+
+        ServiceRepairStateMachine.Snapshot bindingSnapshot = snapshot(5_000L);
+        bindingSnapshot.bindingInProgress = true;
+        ServiceRepairStateMachine.Transition grace1 = machine.handle(
+                ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.SETTLE,
+                        died.getGeneration()),
+                bindingSnapshot);
+
+        assertEquals(ServiceRepairStateMachine.State.SUSPECT, grace1.getTo());
+        assertFalse(grace1.hasEffect(ServiceRepairStateMachine.ActionType.REQUEST_REPAIR));
+        ServiceRepairStateMachine.Effect graceTimer1 = grace1.findTimer(
+                ServiceRepairStateMachine.TimerType.BINDING_GRACE);
+        assertNotNull(graceTimer1);
+        assertEquals(RepairPolicy.FSM_BINDING_GRACE_MS, graceTimer1.getDelayMs());
+
+        // 宽限期内冷启动完成，服务成功绑定：直接恢复为 BOUND，无需任何关开修复
+        ServiceRepairStateMachine.Snapshot boundSnapshot = snapshot(5_800L);
+        boundSnapshot.bound = true;
+        ServiceRepairStateMachine.Transition recovered = machine.handle(
+                ServiceRepairStateMachine.Event.initialized(true), boundSnapshot);
+        assertEquals(ServiceRepairStateMachine.State.BOUND, recovered.getTo());
+        assertTrue(recovered.hasEffect(ServiceRepairStateMachine.ActionType.NOTIFY_RECOVERED));
+    }
+
+    @Test
+    public void verify_whileBindingInProgress_extendsGraceThenCountsFastFailWhenStuck() {
+        // 若应用始终卡在绑定中，最多宽限 FSM_MAX_BINDING_GRACE_ATTEMPTS(2) 次，
+        // 超出上限后必须计入 fastFailCount 并推进正常修复/退避，不得无限等待。
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        long t = 1_000L;
+        ServiceRepairStateMachine.Transition sync = machine.handle(
+                ServiceRepairStateMachine.Event.sync(), snapshot(t));
+        t += 3_000L;
+        machine.handle(ServiceRepairStateMachine.Event.timer(
+                ServiceRepairStateMachine.TimerType.SETTLE, sync.getGeneration()), snapshot(t));
+        machine.handle(ServiceRepairStateMachine.Event.packageRepairStarted(), snapshot(t));
+        t += 500L;
+        ServiceRepairStateMachine.Transition applied = machine.handle(
+                ServiceRepairStateMachine.Event.packageRepairApplied(), snapshot(t));
+        assertEquals(ServiceRepairStateMachine.State.VERIFYING, applied.getTo());
+
+        ServiceRepairStateMachine.Snapshot stuckBinding = snapshot(t + 2_000L);
+        stuckBinding.bindingInProgress = true;
+        ServiceRepairStateMachine.Transition g1 = machine.handle(
+                ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.VERIFY, applied.getGeneration()),
+                stuckBinding);
+        assertEquals(ServiceRepairStateMachine.State.VERIFYING, g1.getTo());
+        assertEquals(0, machine.getFastFailCount());
+        assertNotNull(g1.findTimer(ServiceRepairStateMachine.TimerType.BINDING_GRACE));
+
+        stuckBinding.now += 2_000L;
+        ServiceRepairStateMachine.Transition g2 = machine.handle(
+                ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.BINDING_GRACE, g1.getGeneration()),
+                stuckBinding);
+        assertEquals(ServiceRepairStateMachine.State.VERIFYING, g2.getTo());
+        assertEquals(0, machine.getFastFailCount());
+        assertNotNull(g2.findTimer(ServiceRepairStateMachine.TimerType.BINDING_GRACE));
+
+        // 第 3 次到点宽限耗尽：累计快速失败并推进 NEEDS_REPAIR（首次失败不退避）
+        stuckBinding.now += 2_000L;
+        ServiceRepairStateMachine.Transition exhausted = machine.handle(
+                ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.BINDING_GRACE, g2.getGeneration()),
+                stuckBinding);
+        assertEquals(1, machine.getFastFailCount());
+        assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR, exhausted.getTo());
+        assertNotNull(exhausted.findEffect(ServiceRepairStateMachine.ActionType.REQUEST_REPAIR));
+    }
+
+    @Test
+    public void needsRepair_onUnmanagedOrModuleDisabled_emitsRemoveFromBatch() {
+        ServiceRepairStateMachine m1 = new ServiceRepairStateMachine();
+        driveToNeedsRepair(m1, 1_000L);
+        assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR, m1.getState());
+        ServiceRepairStateMachine.Snapshot unmanaged = snapshot(5_000L);
+        unmanaged.managed = false;
+        ServiceRepairStateMachine.Transition t1 = m1.handle(
+                ServiceRepairStateMachine.Event.managedChanged(), unmanaged);
+        assertEquals(ServiceRepairStateMachine.State.UNMANAGED, t1.getTo());
+        assertTrue(t1.hasEffect(ServiceRepairStateMachine.ActionType.REMOVE_FROM_BATCH));
+
+        ServiceRepairStateMachine m2 = new ServiceRepairStateMachine();
+        driveToNeedsRepair(m2, 1_000L);
+        ServiceRepairStateMachine.Snapshot disabled = snapshot(5_000L);
+        disabled.moduleEnabled = false;
+        ServiceRepairStateMachine.Transition t2 = m2.handle(
+                ServiceRepairStateMachine.Event.moduleDisabled(), disabled);
+        assertEquals(ServiceRepairStateMachine.State.SUSPENDED, t2.getTo());
+        assertTrue(t2.hasEffect(ServiceRepairStateMachine.ActionType.REMOVE_FROM_BATCH));
+    }
 }

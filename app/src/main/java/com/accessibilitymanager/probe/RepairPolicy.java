@@ -47,6 +47,16 @@ public final class RepairPolicy {
     static final long FSM_BIND_RETRY_MS = 5_000L;
     /** 绑定状态不可读时最多重试 3 次，之后等服务/配置事件重新触发，避免定时器空转 */
     static final int FSM_MAX_BIND_RETRY_ATTEMPTS = 3;
+    /**
+     * AMS 正在绑定中（组件仍在 mBindingServices）的有界宽限等待。
+     *
+     * <p>真实场景（ColorOS 日志实证）：冷启动/重启拉起服务时，AMS 先在 1.5~2s 发起 bindLocked
+     * 并将组件加入 mBindingServices，应用冷启动 + onServiceConnected 完成可能需要 2~4s；
+     * 若此时 SETTLE(3s) 或 VERIFY(2s) 定时器到点直接发起关开修复，会把健康绑定中途打断并造成“重绑失败”。
+     */
+    static final long FSM_BINDING_GRACE_MS = 2_000L;
+    /** 单轮绑定最多宽限 2 次（合计额外 4s），超时仍未完成绑定再进入退避/关开修复，避免无限等待卡死。 */
+    static final int FSM_MAX_BINDING_GRACE_ATTEMPTS = 2;
 
     // ── 旧连接重复检测 ────────────────────────────────────────────────
     /**
@@ -401,6 +411,37 @@ public final class RepairPolicy {
             return ConnectionDedupeAction.WAIT;
         }
         return ConnectionDedupeAction.GIVE_UP;
+    }
+
+    /**
+     * 判定是否允许执行“同名服务重复连接去重/主动解绑旧连接”。
+     *
+     * <p>1. 解决场景：仅检查“忽略系统应用”会让未在锁定列表中的第三方服务、模块停用期间
+     * 或演练模式下的服务也被模块主动调用 unbindLocked()，越权干预非托管服务。
+     * <p>2. 前置条件与边界：必须同时满足模块已启用、非演练模式、非忽略系统应用且服务在锁定列表中。
+     * <p>3. 兜底策略：不满足门控时仅记录普通连接事件，由系统 AMS 自行维护其连接生命周期。
+     */
+    static boolean shouldAttemptConnectionDedupe(boolean moduleEnabled, boolean dryRun,
+            boolean ignoreSystem, boolean managed) {
+        return moduleEnabled && !dryRun && !ignoreSystem && managed;
+    }
+
+    /**
+     * 判断本次 initializeService 事件是否应按重复事件去重丢弃。
+     *
+     * <p>1. 解决场景：同一服务短时间内可能出现“旧连接 initializeService(false) 失败后，
+     * 新连接 300ms 内 initializeService(true) 成功”的时序交错；若仅按 component 去重 1.5s，
+     * 会把紧随其后的成功回调吞掉，导致状态机白等 2~3 秒甚至误触发关开。
+     * <p>2. 前置条件与边界：仅在窗口内、同一连接对象且成败结果相同时才去重；任何失败→成功切换
+     * 或不同连接对象的 initializeService 都不去重。
+     * <p>3. 兜底策略：超过 {@code windowMs} 或时间回拨时一律放行，避免漏掉新连接初始化。
+     */
+    static boolean shouldDedupeInit(long lastAt, boolean lastSuccess, boolean sameConnection,
+            long now, boolean currentSuccess, long windowMs) {
+        if (lastAt <= 0L || now < lastAt || now - lastAt >= windowMs) {
+            return false;
+        }
+        return sameConnection && lastSuccess == currentSuccess;
     }
 
     /**

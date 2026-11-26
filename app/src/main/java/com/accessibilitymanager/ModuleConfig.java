@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.database.ContentObserver;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -142,9 +143,28 @@ public final class ModuleConfig {
         return sendServiceCommandPayload(context, "dry_run:" + (dryRun ? "1" : "0"));
     }
 
+    public static boolean isRemoteDryRun(Context context) {
+        return "1".equals(get(context, KEY_DRY_RUN));
+    }
+
+    public static void syncDryRunIfChanged(Context context, boolean dryRun) {
+        if (context == null) {
+            return;
+        }
+        String desired = dryRun ? "1" : "0";
+        if (desired.equals(get(context, KEY_DRY_RUN)) && isModuleLoaded(context)) {
+            return;
+        }
+        setDryRun(context, dryRun);
+    }
+
     public static boolean triggerScan(Context context) {
-        put(context, KEY_SCAN, String.valueOf(System.currentTimeMillis()));
-        return sendServiceCommandPayload(context, "scan");
+        boolean sent = sendServiceCommandPayload(context, "scan");
+        if (!sent || !isModuleLoaded(context)) {
+            // 仅在广播未发送或模块心跳未就绪时才写 Settings 兜底，避免双通道触发两次扫描
+            put(context, KEY_SCAN, String.valueOf(System.currentTimeMillis()));
+        }
+        return sent;
     }
 
     public static boolean setDebugEnabled(Context context, boolean enabled) {
@@ -155,6 +175,17 @@ public final class ModuleConfig {
     public static boolean setToastEnabled(Context context, boolean enabled) {
         put(context, KEY_TOAST, enabled ? "1" : "0");
         return sendServiceCommandPayload(context, "toast:" + (enabled ? "1" : "0"));
+    }
+
+    public static void syncToastIfChanged(Context context, boolean enabled) {
+        if (context == null) {
+            return;
+        }
+        String desired = enabled ? "1" : "0";
+        if (desired.equals(get(context, KEY_TOAST)) && isModuleLoaded(context)) {
+            return;
+        }
+        setToastEnabled(context, enabled);
     }
 
     /** 让模块代为开启/关闭无障碍服务（方案 A：广播直达 system_server，无需 WRITE_SECURE_SETTINGS） */
@@ -194,9 +225,13 @@ public final class ModuleConfig {
         if (component == null || component.isEmpty()) {
             return false;
         }
-        put(context, KEY_DEBUG_KILL,
-                component + "#" + System.currentTimeMillis());
-        return sendServiceCommandPayload(context, "debug_kill:" + component);
+        boolean sent = sendServiceCommandPayload(context, "debug_kill:" + component);
+        if (!sent || !isModuleLoaded(context)) {
+            // 仅在广播未发送或模块未加载时才写 KEY_DEBUG_KILL 兜底，避免双通道触发“连环双杀”
+            put(context, KEY_DEBUG_KILL,
+                    component + "#" + System.currentTimeMillis());
+        }
+        return sent;
     }
 
     /** 请求模块采集 system_server 诊断快照；阻塞等待，禁止在主线程调用 */
@@ -282,6 +317,9 @@ public final class ModuleConfig {
         String existing = getManagedServices(context);
         boolean changed = !desired.equals(sLastSyncedServices) && !desired.equals(existing);
         sLastSyncedServices = desired;
+        if (!changed && desired.equals(existing) && isModuleLoaded(context)) {
+            return;
+        }
         if (changed) {
             String reasonSuffix = (reason != null && !reason.isEmpty()) ? " (" + reason + ")" : "";
             LogUtil.log(context, "[模块] 下发锁定同步指令" + reasonSuffix + (desired.isEmpty() ? "" : ": " + desired));
@@ -332,9 +370,18 @@ public final class ModuleConfig {
             ContentObserver observer = new ContentObserver(new Handler(Looper.getMainLooper())) {
                 @Override
                 public void onChange(boolean selfChange) {
+                    onChange(selfChange, null);
+                }
+
+                @Override
+                public void onChange(boolean selfChange, Uri uri) {
+                    String keySegment = uri == null ? null : uri.getLastPathSegment();
+                    if (!shouldDrainForSecureKey(keySegment)) {
+                        return;
+                    }
                     Context ctx = sLogContext;
                     if (ctx != null) {
-                        drainLogs(ctx);
+                        drainLogsInternal(ctx, false);
                     }
                 }
             };
@@ -392,8 +439,35 @@ public final class ModuleConfig {
         return false;
     }
 
-    /** 把模块缓冲中尚未写入管理器日志的事件补上（无缺口直读 + Binder 分批拉取并清理模块内存） */
+    /**
+     * 过滤 Settings.Secure 全树监听回调的 URI 尾段，避免无关系统设置（如 a11y_module_cmd_ack）
+     * 反复触发日志拉取。仅当尾段为空、父节点 "secure" 或事件键 {@link #KEY_EVENTS} 时才放行。
+     */
+    static boolean shouldDrainForSecureKey(String keySegment) {
+        if (keySegment == null || keySegment.isEmpty()) {
+            return true;
+        }
+        return "secure".equals(keySegment) || KEY_EVENTS.equals(keySegment);
+    }
+
+    /**
+     * 判断本次是否需要向 system_server 发送 {@code pull_logs} Binder 拉取广播。
+     *
+     * <p>真实日志实证：ColorOS 诊断快照中 76%（131/172）、小米日志中 52%（523/1000）的底层轨迹
+     * 均为无效 pull_logs/ack_logs。当观察器触发且 {@code KEY_EVENTS} 连续无缺口时，本地已消费完最新事件，
+     * 无需再向 system_server 发广播空转。
+     */
+    static boolean shouldPullLogsViaBinder(boolean allowWhenNoGap, boolean hasGap,
+            String rawSecure) {
+        return hasGap || rawSecure == null || allowWhenNoGap;
+    }
+
+    /** 把模块缓冲中尚未写入管理器日志的事件补上（无缺口直读 + 按需 Binder 分批拉取） */
     public static void drainLogs(Context context) {
+        drainLogsInternal(context, true);
+    }
+
+    private static void drainLogsInternal(Context context, boolean allowBinderWhenNoGap) {
         if (context == null) {
             return;
         }
@@ -421,7 +495,9 @@ public final class ModuleConfig {
                 LogUtil.log(app, "[模块] 日志解析失败: " + t);
             }
         }
-        pullLogsViaBinder(app, clientSession, clientLastSeq, hasGap ? raw : null);
+        if (shouldPullLogsViaBinder(allowBinderWhenNoGap, hasGap, raw)) {
+            pullLogsViaBinder(app, clientSession, clientLastSeq, hasGap ? raw : null);
+        }
     }
 
     private static long[] consumeEventLinesLocked(Context app, List<String> lines) {
