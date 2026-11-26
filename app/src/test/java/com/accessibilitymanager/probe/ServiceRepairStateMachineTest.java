@@ -856,4 +856,43 @@ public class ServiceRepairStateMachineTest {
         assertTrue(t.hasEffect(ServiceRepairStateMachine.ActionType.NOTIFY_RECOVERED));
         assertNotNull(t.findTimer(ServiceRepairStateMachine.TimerType.STABILITY));
     }
+
+    @Test
+    public void sync_whenAlreadyBound_staysBoundWithoutCancellingStabilityTimer() {
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        initBound(machine, 1_000L);
+        ServiceRepairStateMachine.Transition died = machine.handle(
+                ServiceRepairStateMachine.Event.binderDied(false),
+                snapshot(2_000L));
+        ServiceRepairStateMachine.Snapshot recovered = snapshot(2_100L);
+        recovered.bound = true;
+        ServiceRepairStateMachine.Transition recoveredT = machine.handle(
+                ServiceRepairStateMachine.Event.initialized(true), recovered);
+        assertEquals(ServiceRepairStateMachine.State.BOUND, recoveredT.getTo());
+        ServiceRepairStateMachine.Effect stabilityTimer = recoveredT.findTimer(
+                ServiceRepairStateMachine.TimerType.STABILITY);
+        assertNotNull(stabilityTimer);
+        long stabilityGen = stabilityTimer.getGeneration();
+
+        // 管理器 onResume 触发 SYNC：当前已在 BOUND 且 bound=true，必须原地 stay，不能取消 STABILITY 定时器
+        ServiceRepairStateMachine.Snapshot syncSnapshot = snapshot(3_000L);
+        syncSnapshot.bound = true;
+        ServiceRepairStateMachine.Transition syncT = machine.handle(
+                ServiceRepairStateMachine.Event.sync(), syncSnapshot);
+        assertEquals(ServiceRepairStateMachine.State.BOUND, syncT.getTo());
+        assertEquals(stabilityGen, syncT.getGeneration());
+        assertFalse(syncT.hasEffect(ServiceRepairStateMachine.ActionType.CANCEL_TIMERS));
+        assertTrue(syncT.hasEffect(ServiceRepairStateMachine.ActionType.CLEAR_CRASHED_MARKER));
+
+        // 验证原 generation 的 STABILITY 定时器到期仍有效（若中途再次掉线能正常触发二次修复）
+        ServiceRepairStateMachine.Snapshot unstable = snapshot(7_200L);
+        unstable.bound = false;
+        ServiceRepairStateMachine.Transition stabilityUnbound = machine.handle(
+                ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.STABILITY,
+                        stabilityGen),
+                unstable);
+        assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR, stabilityUnbound.getTo());
+        assertNotNull(stabilityUnbound.findEffect(ServiceRepairStateMachine.ActionType.REQUEST_REPAIR));
+    }
 }

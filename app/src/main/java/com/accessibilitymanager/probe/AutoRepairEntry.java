@@ -1248,7 +1248,18 @@ public class AutoRepairEntry extends XposedModule {
                         }
                         syncMachines("module_enabled_setting");
                     } else if (KEY_SERVICES.equals(key)) {
-                        sManagedServicesCache = readSecure(KEY_SERVICES);
+                        // 1. 解决场景：管理器每次 onResume 会下发 sync_services 或写入 KEY_SERVICES；
+                        //    当锁定列表实际未变化时，若仍触发 reconcileMissing + syncMachines，会对全部锁定服务投递 SYNC。
+                        // 2. 前置条件与边界：仅当缓存 sManagedServicesCache 已初始化且与最新读取值完全一致时提前跳过；
+                        //    若缓存为空（冷启动/热重载首读）或内容确实变化，则正常执行补回与状态机同步。
+                        // 3. 兜底策略：若此时有异常断开事件，Hook（binderDied/initializeService）及开机/解锁扫描仍会独立驱动状态机。
+                        String prev = sManagedServicesCache;
+                        String next = readSecure(KEY_SERVICES);
+                        sManagedServicesCache = next;
+                        if (prev != null && prev.equals(next)) {
+                            log("KEY_SERVICES observer unchanged, skip redundant sync: " + next);
+                            return;
+                        }
                         // 锁定列表变化只做补回 + 状态机同步；全量扫描保留给开机/手动/定时兜底，
                         // 避免每次配置写入都重复遍历启用列表并与补回路径互相打架。
                         scheduleReconcile("services", RECONCILE_CONFIG_DELAY_MS);
@@ -1956,7 +1967,12 @@ public class AutoRepairEntry extends XposedModule {
                 }
             }
             sUserDisabledKeys.retainAll(managedKeys);
-            if (sContext != null) {
+            // 1. 解决场景：管理器每次 onResume 都会重发 sync_services 广播。若锁定列表未变化仍无条件写
+            //    Settings.Secure.putString，会额外唤醒系统 ContentObserver(KEY_SERVICES) 并再次遍历状态机。
+            // 2. 前置条件与边界：列表已变化时必写；列表未变化时，仅当底层 Settings 实际值与指令不一致
+            //    （例如上次写入因 ContentService 繁忙失败）才补写，否则跳过写入避免无谓回调。
+            // 3. 兜底策略：即使本次跳过写入，内存中 sManagedServicesCache 与 sUserDisabledKeys 已保持最新。
+            if (sContext != null && (changed || !component.equals(readSecure(KEY_SERVICES)))) {
                 try {
                     Settings.Secure.putString(sContext.getContentResolver(), KEY_SERVICES, component);
                 } catch (Throwable ignored) {
@@ -3620,13 +3636,40 @@ public class AutoRepairEntry extends XposedModule {
     }
 
     /**
+     * 在连接自身的 {@code mLock} 同步保护下探测绑定状态。
+     *
+     * <p>1. 解决的真实场景与 OEM/AOSP 行为：Android 17（如 HyperOS 4 / SDK 37）的
+     * {@code AbstractAccessibilityServiceConnection} 中，{@code mClient} 与 {@code mClientBinder}
+     * 均为非 {@code volatile} 字段，且仅在 {@code synchronized (this.mLock)} 内由
+     * {@code onServiceConnected}/{@code resetLocked} 读写，{@code isConnectedLocked()} 同样要求持锁调用；
+     * 在独立模块线程无锁读取存在可见性窗口，可能读到半更新的瞬态。
+     * <p>2. 前置假设与边界：若反射取不到 {@code mLock}（例如测试替身或未来 ROM 改名），退化为无锁直接探测；
+     * 仅将纯反射探测包裹在 {@code mLock} 内，严禁在持锁期间调用 {@code event()}/{@code eventSkip()}，
+     * 防止与 {@code sEventLock} 或系统主线程发生锁顺序反转。
+     * <p>3. 兜底策略：即便极端情况下探测返回 {@code UNKNOWN}，外层仍会通过 {@code sBoundCheckAvailable=false}
+     * 暂停自动修复并输出诊断摘要，不会误关开正常服务。
+     */
+    static ConnectionBindProbe.Result probeWithConnectionLock(Object connection) {
+        if (connection == null) {
+            return ConnectionBindProbe.probe(null);
+        }
+        Object lock = getFieldValue(connection, "mLock");
+        if (lock != null) {
+            synchronized (lock) {
+                return ConnectionBindProbe.probe(connection);
+            }
+        }
+        return ConnectionBindProbe.probe(connection);
+    }
+
+    /**
      * 探测单个连接对象的绑定状态并记录诊断信息。
      *
      * <p>边界：当探测到非默认字段（如 Android 17 的 {@code mClient}/{@code mClientBinder}）
      * 或所有字段均不可识别（{@code UNKNOWN}）时，只输出一次结构签名到事件日志，方便定位新系统变更而不刷屏。
      */
     private static ConnectionBindProbe.Result probeConnection(Object connection) {
-        ConnectionBindProbe.Result result = ConnectionBindProbe.probe(connection);
+        ConnectionBindProbe.Result result = probeWithConnectionLock(connection);
         if (connection != null) {
             sLastBindProbeStrategy = result.getStrategy();
             if (!result.getSchemaSummary().isEmpty()) {

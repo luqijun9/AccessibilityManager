@@ -703,4 +703,52 @@ public class AutoRepairEntryTest {
         assertTrue(ConnectionBindProbe.isClassSupported(FakeAndroid17Connection.class));
         assertEquals("none", unknownResult.getStrategy());
     }
+
+    private static class FakeLockCheckedAndroid17BaseConnection {
+        final Object mLock = new Object();
+        Object mClient;
+        Object mClientBinder;
+        boolean observedLockHeld;
+
+        boolean isConnectedLocked() {
+            observedLockHeld = Thread.holdsLock(mLock);
+            if (!observedLockHeld) {
+                throw new IllegalStateException("mLock not held during isConnectedLocked()");
+            }
+            return mClientBinder != null;
+        }
+    }
+
+    private static final class FakeLockCheckedAndroid17Connection
+            extends FakeLockCheckedAndroid17BaseConnection {
+    }
+
+    @Test
+    public void probeWithConnectionLock_acquiresMLockWhenProbingAndroid17Connection() {
+        FakeLockCheckedAndroid17Connection conn = new FakeLockCheckedAndroid17Connection();
+        // 未绑定路径会一路探测到 isConnectedLocked()，借此校验 mLock 确实全程处于持有状态
+        ConnectionBindProbe.Result unbound = AutoRepairEntry.probeWithConnectionLock(conn);
+        assertEquals(ConnectionBindProbe.Status.UNBOUND, unbound.getStatus());
+        assertTrue("探测 Android 17 连接状态时必须持有 mLock", conn.observedLockHeld);
+
+        // 模拟仅通过 mClientBinder / isConnectedLocked 判定为已连接（mClient 尚未赋值或已置空）
+        conn.observedLockHeld = false;
+        conn.mClientBinder = new Object();
+        ConnectionBindProbe.Result boundByBinder = AutoRepairEntry.probeWithConnectionLock(conn);
+        assertEquals(ConnectionBindProbe.Status.BOUND, boundByBinder.getStatus());
+        assertEquals("field:mClientBinder", boundByBinder.getStrategy());
+
+        conn.mClient = new Object();
+        ConnectionBindProbe.Result boundByClient = AutoRepairEntry.probeWithConnectionLock(conn);
+        assertEquals(ConnectionBindProbe.Status.BOUND, boundByClient.getStatus());
+        assertEquals("field:mClient", boundByClient.getStrategy());
+
+        // 空连接与无 mLock 连接也应安全降级，不抛异常
+        assertEquals(ConnectionBindProbe.Status.UNBOUND,
+                AutoRepairEntry.probeWithConnectionLock(null).getStatus());
+        FakeAndroid17Connection noLockConn = new FakeAndroid17Connection();
+        noLockConn.mClient = new Object();
+        assertEquals(ConnectionBindProbe.Status.BOUND,
+                AutoRepairEntry.probeWithConnectionLock(noLockConn).getStatus());
+    }
 }

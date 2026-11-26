@@ -459,6 +459,15 @@ final class ServiceRepairStateMachine {
                     Effect.requestRestore("sync"));
         }
         if (snapshot.bound) {
+            // 1. 解决场景：管理器每次 onResume/配置对账都会发送 SYNC，若服务刚恢复并处于 BOUND 阶段，
+            //    此时仍可能挂着 5 秒 STABILITY 稳定性复查定时器（用于捕捉 ColorOS/HyperOS 二次查杀）。
+            // 2. 前置条件与边界：仅当状态已为 BOUND 且快照确认 bound==true 时，保持当前状态与 generation 不变，
+            //    避免 change() 递增 generation 并下发 CANCEL_TIMERS 把尚在倒计时的 STABILITY 定时器提前取消。
+            // 3. 兜底策略：若期间发生二次崩溃，binderDied / INITIALIZED(false) 会照常将状态切回 SUSPECT 并重新排期；
+            //    若原 STABILITY 到期时连接仍健康，则顺手清理 crashed 标记；若状态原本不是 BOUND，仍走 change() 切入 BOUND。
+            if (from == State.BOUND) {
+                return stay(from, Effect.clearCrashedMarker());
+            }
             return change(from, State.BOUND, "sync_bound",
                     Effect.clearCrashedMarker());
         }
