@@ -1,6 +1,7 @@
 package com.accessibilitymanager.probe;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -231,12 +232,91 @@ public final class RepairPolicy {
                 || pkg.startsWith("com.accessibilitymanager.");
     }
 
+    /**
+     * 判断目标组件是否处于“免强杀名单”中，自动兼容 short（pkg/.Cls）与 long（pkg/pkg.Cls）两种写法。
+     */
+    static boolean isComponentDisabledForKill(String disabledList, String componentKey) {
+        if (disabledList == null || disabledList.isEmpty()
+                || componentKey == null || componentKey.isEmpty()) {
+            return false;
+        }
+        ComponentKey target = ComponentKey.parse(componentKey);
+        if (target == null) {
+            return disabledList.contains(componentKey);
+        }
+        return isAnyComponentDisabledForKill(disabledList, java.util.Collections.singletonList(target));
+    }
+
+    /**
+     * 判断待修批次成员中是否存在任一位于“免强杀名单”的服务。
+     *
+     * <p>1. 解决场景：同包多服务中若成员 A 在免强杀名单、成员 B 触发崩溃，仅校验 primaryTrigger
+     *    或使用未规范化的 String.contains 会漏检 A 或因 short/long 形式不同而误强杀整包。
+     * <p>2. 前置条件与边界：disabledList 支持冒号 `:` 或逗号 `,` 分隔；优先按 {@link ComponentKey}
+     *    规范形式比对，无法解析的脏 token 退化为按原始字符串比对。
+     * <p>3. 兜底策略：任一成员命中即返回 true，整包修复自动降级为仅关开未绑定成员，不强杀进程。
+     */
+    static boolean isAnyComponentDisabledForKill(String disabledList,
+            Collection<ComponentKey> components) {
+        if (disabledList == null || disabledList.isEmpty()
+                || components == null || components.isEmpty()) {
+            return false;
+        }
+        Set<ComponentKey> disabledKeys = new LinkedHashSet<>();
+        Set<String> rawDisabledTokens = new LinkedHashSet<>();
+        for (String raw : disabledList.split("[:,]")) {
+            String trimmed = raw == null ? "" : raw.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            ComponentKey parsed = ComponentKey.parse(trimmed);
+            if (parsed != null) {
+                disabledKeys.add(parsed);
+            } else {
+                rawDisabledTokens.add(trimmed);
+            }
+        }
+        for (ComponentKey component : components) {
+            if (component == null) {
+                continue;
+            }
+            if (disabledKeys.contains(component)
+                    || rawDisabledTokens.contains(component.flatten())
+                    || rawDisabledTokens.contains(component.flattenShort())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     static boolean shouldKillPackage(String pkg, String contextPkg, boolean fixMode,
             String disabledList, String componentKey, Long lastPkgKillAt, long now) {
         if (!fixMode) {
             return false;
         }
-        if (disabledList != null && disabledList.contains(componentKey)) {
+        if (isComponentDisabledForKill(disabledList, componentKey)) {
+            return false;
+        }
+        if (isSelfOrSystemPackage(pkg, contextPkg)) {
+            return false;
+        }
+        if (lastPkgKillAt != null && now - lastPkgKillAt >= 0
+                && now - lastPkgKillAt < PACKAGE_KILL_COOLDOWN_MS) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 组合“快速失败 + 整批免强杀校验 + 原有强杀条件”的完整判定，供包级协调器使用。
+     */
+    static boolean shouldKillPackage(String pkg, String contextPkg, boolean fixMode,
+            String disabledList, Collection<ComponentKey> batchCandidates, Long lastPkgKillAt,
+            long now, int fastFailCount) {
+        if (!shouldUseKillForFastFail(fastFailCount) || !fixMode) {
+            return false;
+        }
+        if (isAnyComponentDisabledForKill(disabledList, batchCandidates)) {
             return false;
         }
         if (isSelfOrSystemPackage(pkg, contextPkg)) {
@@ -271,9 +351,23 @@ public final class RepairPolicy {
         return safeCurrent;
     }
 
-    /** 连接存活达到健康阈值时，状态机可在 stability 复查通过后清空快速失败计数。 */
+    /** 连接存活达到健康阈值时，状态机可在 stability/healthy_reset 复查通过后清空快速失败计数。 */
     static boolean shouldResetFastFail(long connectionLifetimeMs) {
         return connectionLifetimeMs >= HEALTHY_CONNECTION_MS;
+    }
+
+    /**
+     * 计算距离满足 {@link #HEALTHY_CONNECTION_MS}（30s）健康清零的剩余等待毫秒数。
+     *
+     * <p>1. 解决场景：STABILITY 复查固定在恢复后 5s 触发，而健康清零门槛为 30s；
+     *    若不安排二次 HEALTHY_RESET 定时器，fastFailCount 在 5s 复查时永远清不掉。
+     * <p>2. 前置条件与边界：当存活已满 30s 返回 0L；否则至少返回 1000ms，防止边界 0ms 定时器忙转。
+     */
+    static long remainingHealthyResetMs(long connectionLifetimeMs) {
+        if (connectionLifetimeMs >= HEALTHY_CONNECTION_MS) {
+            return 0L;
+        }
+        return Math.max(1_000L, HEALTHY_CONNECTION_MS - Math.max(0L, connectionLifetimeMs));
     }
 
     /** 按快速失败计数返回下一次修复前的额外退避时间；0 表示 settle/verify 后立即修复。 */

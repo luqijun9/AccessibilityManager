@@ -8,10 +8,13 @@ import static org.junit.Assert.assertTrue;
 
 import android.os.Bundle;
 
+import java.lang.ref.WeakReference;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -872,5 +875,151 @@ public class AutoRepairEntryTest {
         assertTrue("读取 mBindingServices 时必须持有连接 mLock", bindingSet.lockHeldOnContains);
         assertFalse(AutoRepairEntry.isComponentInBindingServices(userState, lock, new Object()));
         assertFalse(AutoRepairEntry.isComponentInBindingServices(null, lock, token));
+    }
+
+    @Test
+    public void shouldKillPackage_checksAllBatchCandidatesAndNormalizesShortLongForms() {
+        String pkg = "com.arlosoft.macrodroid";
+        ComponentKey svcA = ComponentKey.parse(pkg + "/.ServiceA");
+        ComponentKey svcB = ComponentKey.parse(pkg + "/com.arlosoft.macrodroid.ServiceB");
+        List<ComponentKey> batch = Arrays.asList(svcA, svcB);
+
+        // 免强杀名单里用长形式写了 A，B 触发整包修复时也必须禁止强杀整包
+        String disabledLong = pkg + "/com.arlosoft.macrodroid.ServiceA";
+        assertFalse("同包任一成员在免强杀名单（长形式）时不得强杀",
+                RepairPolicy.shouldKillPackage(
+                        pkg, "android", true, disabledLong, batch, null, 100_000L, 0));
+
+        // 单参数旧重载同样应兼容 short/long 规范匹配
+        assertFalse("单组件校验也应兼容 short/long 互认",
+                RepairPolicy.shouldKillPackage(
+                        pkg, "android", true, disabledLong, pkg + "/.ServiceA", null, 100_000L));
+
+        // 都不在名单内时允许强杀
+        assertTrue(RepairPolicy.shouldKillPackage(
+                pkg, "android", true, "com.other/.OtherService", batch, null, 100_000L, 0));
+    }
+
+    private static final class FakeConnWithUserState {
+        final WeakReference<Object> mUserStateWeakReference;
+
+        FakeConnWithUserState(Object userState) {
+            this.mUserStateWeakReference = new WeakReference<>(userState);
+        }
+    }
+
+    @Test
+    public void collectUniqueUserStates_deduplicatesSharedUserStateAcrossConnections() {
+        Object user0State = new Object();
+        Object user10State = new Object();
+
+        List<Object> connections = Arrays.asList(
+                new FakeConnWithUserState(user0State),
+                new FakeConnWithUserState(user0State),
+                new FakeConnWithUserState(user0State),
+                new FakeConnWithUserState(user0State),
+                new FakeConnWithUserState(user0State),
+                new FakeConnWithUserState(user10State));
+        List<WeakReference<Object>> extras = Arrays.asList(
+                new WeakReference<>(user0State),
+                new WeakReference<>(null),
+                new WeakReference<>(user10State));
+
+        List<Object> unique = AmsInspector.collectUniqueUserStates(connections, extras);
+        assertEquals("同用户的多个连接必须按对象身份去重", 2, unique.size());
+        assertSame(user0State, unique.get(0));
+        assertSame(user10State, unique.get(1));
+    }
+
+    private static final class FakeAmsUserState {
+        final List<Object> mBoundServices = new ArrayList<>();
+        final Map<Object, Object> mComponentNameToServiceMap = new HashMap<>();
+    }
+
+    private static final class FakeAmsConnection {
+        final Object mLock = new Object();
+        final Object key;
+        Object mClient;
+
+        FakeAmsConnection(Object key, boolean bound) {
+            this.key = key;
+            this.mClient = bound ? new Object() : null;
+        }
+    }
+
+    @Test
+    public void amsInspector_lookupPrefersAmsTruthOverStaleLocalCache() {
+        Object targetKey = "com.foo/.ServiceA";
+        FakeAmsConnection staleLocalBound = new FakeAmsConnection(targetKey, true);
+        FakeAmsUserState emptyUserState = new FakeAmsUserState();
+        List<AmsInspector.UserStateEntry> entries = Collections.singletonList(
+                new AmsInspector.UserStateEntry(
+                        emptyUserState, new Object(), FakeAmsConnection.class));
+
+        // 即使本地缓存仍持有带 mClient 的脏连接，但 AMS UserState 内既无 mBoundServices 也无 map 映射，
+        // 必须以 AMS 真值为准返回未绑定（null）且 checkAvailable=true。
+        AmsInspector.BoundLookupResult miss = AmsInspector.lookupBoundInEntries(
+                targetKey, staleLocalBound, entries, c -> ((FakeAmsConnection) c).key);
+        assertEquals(null, miss.connection);
+        assertTrue(miss.checkAvailable);
+
+        // 当 AMS map/mBoundServices 中确实有有效连接时，返回 AMS 连接
+        FakeAmsConnection amsConn = new FakeAmsConnection(targetKey, true);
+        emptyUserState.mBoundServices.add(amsConn);
+        emptyUserState.mComponentNameToServiceMap.put(targetKey, amsConn);
+        AmsInspector.BoundLookupResult hit = AmsInspector.lookupBoundInEntries(
+                targetKey, staleLocalBound, entries, c -> ((FakeAmsConnection) c).key);
+        assertSame(amsConn, hit.connection);
+        assertTrue(hit.checkAvailable);
+
+        // 若无任何 UserState 可读（entries 为空），退化使用本地缓存兜底
+        AmsInspector.BoundLookupResult fallback = AmsInspector.lookupBoundInEntries(
+                targetKey, staleLocalBound, Collections.emptyList(),
+                c -> ((FakeAmsConnection) c).key);
+        assertSame(staleLocalBound, fallback.connection);
+        assertTrue(fallback.checkAvailable);
+    }
+
+    @Test
+    public void eventLogBuffer_coalescesFlushesAndPreservesLines() {
+        List<Runnable> scheduled = new ArrayList<>();
+        int[] flushCount = { 0 };
+        EventLogBuffer.FlushDebouncer debouncer = new EventLogBuffer.FlushDebouncer(
+                EventLogBuffer.EVENT_FLUSH_DEBOUNCE_MS,
+                new EventLogBuffer.DebounceScheduler() {
+                    @Override
+                    public void postDelayed(Runnable task, long delayMs) {
+                        assertEquals(EventLogBuffer.EVENT_FLUSH_DEBOUNCE_MS, delayMs);
+                        scheduled.add(task);
+                    }
+
+                    @Override
+                    public void removeCallbacks(Runnable task) {
+                        scheduled.remove(task);
+                    }
+                },
+                () -> flushCount[0]++);
+
+        // 连续 4 次写入请求在 300ms 窗口内合并为 1 次调度
+        debouncer.requestFlush();
+        debouncer.requestFlush();
+        debouncer.requestFlush();
+        debouncer.requestFlush();
+        assertTrue(debouncer.isPending());
+        assertEquals(1, scheduled.size());
+        assertEquals(0, flushCount[0]);
+
+        // 到点触发一次真实落盘
+        scheduled.remove(0).run();
+        assertFalse(debouncer.isPending());
+        assertEquals(1, flushCount[0]);
+
+        // 再次请求后调用 flushNow 立即落盘并取消待执行回调
+        debouncer.requestFlush();
+        assertEquals(1, scheduled.size());
+        debouncer.flushNow();
+        assertFalse(debouncer.isPending());
+        assertEquals(0, scheduled.size());
+        assertEquals(2, flushCount[0]);
     }
 }

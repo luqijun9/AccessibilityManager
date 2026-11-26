@@ -999,4 +999,180 @@ public class ServiceRepairStateMachineTest {
         assertEquals(ServiceRepairStateMachine.State.SUSPENDED, t2.getTo());
         assertTrue(t2.hasEffect(ServiceRepairStateMachine.ActionType.REMOVE_FROM_BATCH));
     }
+
+    @Test
+    public void stabilityTimer_withFastFail_schedulesHealthyResetAndClearsFastFailAt30s() {
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        initBound(machine, 1_000L);
+
+        // 1. 短命崩溃一次，fastFailCount=1
+        machine.handle(ServiceRepairStateMachine.Event.binderDied(false), snapshot(2_000L));
+        assertEquals(1, machine.getFastFailCount());
+
+        // 2. 在 2_500L 重新恢复绑定，安排 5s STABILITY 定时器
+        ServiceRepairStateMachine.Snapshot recovered = snapshot(2_500L);
+        recovered.bound = true;
+        ServiceRepairStateMachine.Transition init = machine.handle(
+                ServiceRepairStateMachine.Event.initialized(true), recovered);
+        ServiceRepairStateMachine.Effect stability = init.findTimer(
+                ServiceRepairStateMachine.TimerType.STABILITY);
+        assertNotNull(stability);
+
+        // 3. 5s 到点时连接仍健康但未满 30s：必须补排 HEALTHY_RESET（~25s）而不是停滞不前
+        ServiceRepairStateMachine.Snapshot at7500 = snapshot(7_500L);
+        at7500.bound = true;
+        ServiceRepairStateMachine.Transition stabilityDone = machine.handle(
+                ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.STABILITY,
+                        stability.getGeneration()),
+                at7500);
+        assertEquals(ServiceRepairStateMachine.State.BOUND, stabilityDone.getTo());
+        assertEquals(1, machine.getFastFailCount());
+        ServiceRepairStateMachine.Effect healthyReset = stabilityDone.findTimer(
+                ServiceRepairStateMachine.TimerType.HEALTHY_RESET);
+        assertNotNull("5s 稳定性通过且 fastFailCount>0 时必须安排 HEALTHY_RESET", healthyReset);
+        assertEquals(RepairPolicy.HEALTHY_CONNECTION_MS - 5_000L, healthyReset.getDelayMs());
+
+        // 4. 满 30s 后 HEALTHY_RESET 到点且连接仍健康：fastFailCount 真正清零
+        ServiceRepairStateMachine.Snapshot at32500 = snapshot(32_500L);
+        at32500.bound = true;
+        ServiceRepairStateMachine.Transition resetDone = machine.handle(
+                ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.HEALTHY_RESET,
+                        healthyReset.getGeneration()),
+                at32500);
+        assertEquals(ServiceRepairStateMachine.State.BOUND, resetDone.getTo());
+        assertEquals("连接稳定运行满 30s 后 fastFailCount 必须清零", 0, machine.getFastFailCount());
+    }
+
+    @Test
+    public void sync_doesNotInterruptNeedsRepairVerifyingOrBackoff() {
+        // 1. NEEDS_REPAIR 排队中收到未绑定 SYNC：必须 no-op，不能打回 SUSPECT
+        ServiceRepairStateMachine queued = new ServiceRepairStateMachine();
+        driveToNeedsRepair(queued, 1_000L);
+        assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR, queued.getState());
+        assertTrue(queued.handle(ServiceRepairStateMachine.Event.sync(), snapshot(5_000L)).isNoOp());
+        assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR, queued.getState());
+
+        // 若排队期间自愈且收到 SYNC：切回 BOUND 并通知协调器退队
+        ServiceRepairStateMachine.Snapshot boundSnap = snapshot(5_100L);
+        boundSnap.bound = true;
+        ServiceRepairStateMachine.Transition queuedBound = queued.handle(
+                ServiceRepairStateMachine.Event.sync(), boundSnap);
+        assertEquals(ServiceRepairStateMachine.State.BOUND, queuedBound.getTo());
+        assertTrue(queuedBound.hasEffect(ServiceRepairStateMachine.ActionType.REMOVE_FROM_BATCH));
+
+        // 2. VERIFYING 校验中收到未绑定 SYNC：不能取消 VERIFY 定时器
+        ServiceRepairStateMachine verifying = new ServiceRepairStateMachine();
+        driveToNeedsRepair(verifying, 1_000L);
+        verifying.handle(ServiceRepairStateMachine.Event.packageRepairStarted(), snapshot(5_000L));
+        verifying.handle(ServiceRepairStateMachine.Event.packageRepairApplied(), snapshot(5_500L));
+        assertEquals(ServiceRepairStateMachine.State.VERIFYING, verifying.getState());
+        assertTrue(verifying.handle(ServiceRepairStateMachine.Event.sync(), snapshot(5_600L)).isNoOp());
+        assertEquals(ServiceRepairStateMachine.State.VERIFYING, verifying.getState());
+
+        // 3. BACKOFF 退避中收到未绑定 SYNC：不能取消 BACKOFF 定时器
+        ServiceRepairStateMachine backoff = new ServiceRepairStateMachine();
+        driveToNeedsRepair(backoff, 1_000L);
+        backoff.handle(ServiceRepairStateMachine.Event.packageRepairStarted(), snapshot(5_000L));
+        backoff.handle(ServiceRepairStateMachine.Event.packageRepairFailed(), snapshot(5_500L));
+        assertEquals(ServiceRepairStateMachine.State.BACKOFF, backoff.getState());
+        assertTrue(backoff.handle(ServiceRepairStateMachine.Event.sync(), snapshot(5_600L)).isNoOp());
+        assertEquals(ServiceRepairStateMachine.State.BACKOFF, backoff.getState());
+    }
+
+    @Test
+    public void initializedSuccess_whileNeedsRepair_recoversAndRemovesFromBatch() {
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        driveToNeedsRepair(machine, 1_000L);
+        assertEquals(ServiceRepairStateMachine.State.NEEDS_REPAIR, machine.getState());
+
+        ServiceRepairStateMachine.Snapshot bound = snapshot(5_100L);
+        bound.bound = true;
+        ServiceRepairStateMachine.Transition t = machine.handle(
+                ServiceRepairStateMachine.Event.initialized(true), bound);
+
+        assertEquals(ServiceRepairStateMachine.State.BOUND, t.getTo());
+        assertTrue(t.hasEffect(ServiceRepairStateMachine.ActionType.NOTIFY_RECOVERED));
+        assertTrue(t.hasEffect(ServiceRepairStateMachine.ActionType.REMOVE_FROM_BATCH));
+        assertNotNull(t.findTimer(ServiceRepairStateMachine.TimerType.STABILITY));
+    }
+
+    @Test
+    public void packageRepairStarted_clearsBoundAt_soVerifyingFailureCountsFastFail() {
+        // 同包健康兄弟服务 B 已稳定绑定 1 小时；因 A 崩溃被卷入同包强杀关开，
+        // 进入 VERIFYING 后若重绑失败，不得误用 1 小时前的旧 boundAt 清零 fastFailCount。
+        ServiceRepairStateMachine siblingB = new ServiceRepairStateMachine();
+        initBound(siblingB, 1_000L);
+        // 先有 1 次快速失败记录（模拟此前短命过）或从 0 开始验证累加到 1
+        siblingB.handle(ServiceRepairStateMachine.Event.packageRepairStarted(),
+                snapshot(3_600_000L));
+        assertEquals(0L, siblingB.getBoundAt());
+        siblingB.handle(ServiceRepairStateMachine.Event.packageRepairApplied(),
+                snapshot(3_600_500L));
+
+        ServiceRepairStateMachine.Transition initFail = siblingB.handle(
+                ServiceRepairStateMachine.Event.initialized(false), snapshot(3_600_600L));
+        assertEquals(ServiceRepairStateMachine.State.SUSPECT, initFail.getTo());
+        assertEquals("关开后重绑失败必须计入快速失败，不能用旧 boundAt 误清零",
+                1, siblingB.getFastFailCount());
+    }
+
+    @Test
+    public void dryRun_unboundOrMissing_doesNotGetStuckInNeedsRepairOrLoop() {
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        ServiceRepairStateMachine.Snapshot dryUnbound = snapshot(1_000L);
+        dryUnbound.dryRun = true;
+        ServiceRepairStateMachine.Transition sync = machine.handle(
+                ServiceRepairStateMachine.Event.sync(), dryUnbound);
+
+        dryUnbound.now = 4_000L;
+        ServiceRepairStateMachine.Transition settle = machine.handle(
+                ServiceRepairStateMachine.Event.timer(
+                        ServiceRepairStateMachine.TimerType.SETTLE, sync.getGeneration()),
+                dryUnbound);
+        assertEquals("演练模式下不得卡死在 NEEDS_REPAIR",
+                ServiceRepairStateMachine.State.SUSPECT, settle.getTo());
+        assertNotNull(settle.findEffect(ServiceRepairStateMachine.ActionType.REQUEST_REPAIR));
+
+        // 退出演练后 SYNC 可以立刻重新进入修复流程
+        ServiceRepairStateMachine.Snapshot realUnbound = snapshot(5_000L);
+        realUnbound.dryRun = false;
+        ServiceRepairStateMachine.Transition resumed = machine.handle(
+                ServiceRepairStateMachine.Event.sync(), realUnbound);
+        assertEquals(ServiceRepairStateMachine.State.SUSPECT, resumed.getTo());
+        assertNotNull(resumed.findTimer(ServiceRepairStateMachine.TimerType.SETTLE));
+
+        // 演练模式下缺失启用项：首次进入 RESTORING 请求日志，后续 SYNC 不再重复触发
+        ServiceRepairStateMachine restoring = new ServiceRepairStateMachine();
+        ServiceRepairStateMachine.Snapshot dryMissing = snapshot(6_000L);
+        dryMissing.dryRun = true;
+        dryMissing.inEnabledList = false;
+        ServiceRepairStateMachine.Transition firstMissing = restoring.handle(
+                ServiceRepairStateMachine.Event.sync(), dryMissing);
+        assertEquals(ServiceRepairStateMachine.State.RESTORING, firstMissing.getTo());
+        assertTrue(firstMissing.hasEffect(ServiceRepairStateMachine.ActionType.REQUEST_RESTORE));
+
+        ServiceRepairStateMachine.Transition repeatSync = restoring.handle(
+                ServiceRepairStateMachine.Event.sync(), dryMissing);
+        assertTrue("演练模式下 RESTORING 再次收到 SYNC 应为 no-op 避免重复刷日志",
+                repeatSync.isNoOp());
+    }
+
+    @Test
+    public void enabledListRemoved_duringBootGrace_defersWithBootGraceTimer() {
+        ServiceRepairStateMachine machine = new ServiceRepairStateMachine();
+        initBound(machine, 1_000L);
+
+        ServiceRepairStateMachine.Snapshot missingBoot = snapshot(2_000L);
+        missingBoot.inEnabledList = false;
+        missingBoot.bootGraceActive = true;
+        missingBoot.bootGraceRemainingMs = 8_000L;
+
+        ServiceRepairStateMachine.Transition t = machine.handle(
+                ServiceRepairStateMachine.Event.enabledListChanged(), missingBoot);
+        assertEquals(ServiceRepairStateMachine.State.SUSPECT, t.getTo());
+        assertFalse(t.hasEffect(ServiceRepairStateMachine.ActionType.REQUEST_RESTORE));
+        assertEquals(8_000L, t.findTimer(ServiceRepairStateMachine.TimerType.BOOT_GRACE).getDelayMs());
+    }
 }

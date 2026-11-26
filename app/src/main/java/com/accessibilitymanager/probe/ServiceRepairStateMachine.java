@@ -43,8 +43,6 @@ final class ServiceRepairStateMachine {
         SUSPECT,
         /** 已确认未绑定且允许修复，等待包级协调器收编 */
         NEEDS_REPAIR,
-        /** 已被包级协调器收编，等待事务开始 */
-        QUEUED,
         /** 正在执行包级关开/强杀事务；此期间的断开是预期行为 */
         REPAIRING,
         /** 关开写入已完成，等待绑定校验 */
@@ -63,6 +61,8 @@ final class ServiceRepairStateMachine {
         VERIFY,
         /** 修复成功后的稳定性复查 */
         STABILITY,
+        /** 快速失败后等待连接存活满 30s 再清零计数 */
+        HEALTHY_RESET,
         /** 快速失败退避 */
         BACKOFF,
         /** 开机/解锁启动潮冷却，期间不修复 */
@@ -248,6 +248,7 @@ final class ServiceRepairStateMachine {
         boolean bootGraceActive;
         long bootGraceRemainingMs;
         boolean bindingInProgress;
+        boolean dryRun;
         long now;
     }
 
@@ -450,8 +451,36 @@ final class ServiceRepairStateMachine {
     }
 
     private Transition handleSync(Snapshot snapshot, State from) {
-        // 修复事务进行中不重新评估，避免把协调器的临时移除误判成“服务被关闭”
-        if (from == State.REPAIRING || from == State.QUEUED) {
+        // 1. 解决场景：包级事务进行中（REPAIRING）或成员已入包级修复队列（NEEDS_REPAIR）、
+        //    正在等待校验/退避（VERIFYING/BACKOFF）时，管理器 onResume/配置同步或定时扫描会投递 SYNC。
+        // 2. 前置条件与边界：
+        //    - REPAIRING 期间的移除/断开均为预期行为，完全忽略 SYNC；
+        //    - NEEDS_REPAIR 成员若已自愈则迁入 BOUND 并通知协调器退队，若从启用列表消失（非开机冷却）
+        //      则迁入 RESTORING 并退队，仍在等待队列时返回 no-op 绝不打回 SUSPECT；
+        //    - VERIFYING / BACKOFF 成员同理仅在已绑定或缺失时切换，否则保留现有 VERIFY/BACKOFF 定时器；
+        //    - RESTORING 在演练模式下不再重复触发补回，避免写日志风暴。
+        if (from == State.REPAIRING) {
+            return noop(from);
+        }
+        if (from == State.NEEDS_REPAIR) {
+            if (snapshot.bound) {
+                return recoveryTransitionWithBatchRemoval(from, snapshot, "sync_bound_while_queued");
+            }
+            if (!snapshot.inEnabledList && !snapshot.bootGraceActive) {
+                return change(from, State.RESTORING, "sync_missing_enabled",
+                        Effect.removeFromBatch(),
+                        Effect.requestRestore("sync"));
+            }
+            return noop(from);
+        }
+        if (from == State.VERIFYING || from == State.BACKOFF) {
+            if (snapshot.bound) {
+                return recoveryTransition(from, snapshot, "sync_bound");
+            }
+            if (!snapshot.inEnabledList && !snapshot.bootGraceActive) {
+                return change(from, State.RESTORING, "sync_missing_enabled",
+                        Effect.requestRestore("sync"));
+            }
             return noop(from);
         }
         if (snapshot.bootGraceActive && !snapshot.bound) {
@@ -459,16 +488,19 @@ final class ServiceRepairStateMachine {
                     Effect.timer(TimerType.BOOT_GRACE, bootGraceDelay(snapshot), "sync"));
         }
         if (!snapshot.inEnabledList) {
+            if (from == State.RESTORING && snapshot.dryRun) {
+                return noop(from);
+            }
             return change(from, State.RESTORING, "sync_missing_enabled",
                     Effect.requestRestore("sync"));
         }
         if (snapshot.bound) {
             // 1. 解决场景：管理器每次 onResume/配置对账都会发送 SYNC，若服务刚恢复并处于 BOUND 阶段，
-            //    此时仍可能挂着 5 秒 STABILITY 稳定性复查定时器（用于捕捉 ColorOS/HyperOS 二次查杀）。
+            //    此时仍可能挂着 5 秒 STABILITY 稳定性复查（或 30 秒 HEALTHY_RESET）定时器。
             // 2. 前置条件与边界：仅当状态已为 BOUND 且快照确认 bound==true 时，保持当前状态与 generation 不变，
-            //    避免 change() 递增 generation 并下发 CANCEL_TIMERS 把尚在倒计时的 STABILITY 定时器提前取消。
+            //    避免 change() 递增 generation 并下发 CANCEL_TIMERS 把尚在倒计时的定时器提前取消。
             // 3. 兜底策略：若期间发生二次崩溃，binderDied / INITIALIZED(false) 会照常将状态切回 SUSPECT 并重新排期；
-            //    若原 STABILITY 到期时连接仍健康，则顺手清理 crashed 标记；若状态原本不是 BOUND，仍走 change() 切入 BOUND。
+            //    若原定时器到期时连接仍健康，则顺手清理 crashed 标记；若状态原本不是 BOUND，仍走 change() 切入 BOUND。
             if (from == State.BOUND) {
                 return stay(from, Effect.clearCrashedMarker());
             }
@@ -494,6 +526,10 @@ final class ServiceRepairStateMachine {
             if (from == State.BOUND) {
                 return stay(from, Effect.clearCrashedMarker());
             }
+            if (from == State.NEEDS_REPAIR) {
+                return recoveryTransitionWithBatchRemoval(
+                        from, snapshot, "old_connection_died_new_bound");
+            }
             if (from == State.SUSPECT || from == State.VERIFYING
                     || from == State.BACKOFF || from == State.RESTORING
                     || from == State.DISABLED) {
@@ -505,7 +541,7 @@ final class ServiceRepairStateMachine {
             return noop(from);
         }
         // 已经排队等待修复时，新的断开事件不重复入队；协调器会按批次统一校验
-        if (from == State.NEEDS_REPAIR || from == State.QUEUED) {
+        if (from == State.NEEDS_REPAIR) {
             return noop(from);
         }
 
@@ -538,13 +574,15 @@ final class ServiceRepairStateMachine {
             if (from == State.BOUND) {
                 return stay(from, Effect.clearCrashedMarker());
             }
+            if (from == State.NEEDS_REPAIR || from == State.REPAIRING) {
+                return recoveryTransitionWithBatchRemoval(from, snapshot, "init_success");
+            }
             boundAt = snapshot.now;
             bindRetryAttempts = 0;
             bindingGraceAttempts = 0;
             boolean recovered = from == State.SUSPECT || from == State.VERIFYING
                     || from == State.RESTORING || from == State.BACKOFF
-                    || from == State.DISABLED || from == State.QUEUED
-                    || from == State.REPAIRING;
+                    || from == State.DISABLED;
             if (recovered) {
                 return recoveryTransition(from, snapshot, "init_success");
             }
@@ -553,7 +591,7 @@ final class ServiceRepairStateMachine {
         }
 
         // 重绑失败：事务/队列中的服务由协调器统一校验，不在单服务路径重复排期
-        if (from == State.REPAIRING || from == State.NEEDS_REPAIR || from == State.QUEUED) {
+        if (from == State.REPAIRING || from == State.NEEDS_REPAIR) {
             return noop(from);
         }
         if (from == State.UNMANAGED || from == State.DISABLED || from == State.SUSPENDED) {
@@ -590,7 +628,26 @@ final class ServiceRepairStateMachine {
                     || from == State.SUSPENDED) {
                 return noop(from);
             }
+            if (snapshot.bootGraceActive) {
+                if (from == State.NEEDS_REPAIR) {
+                    return change(from, State.SUSPECT, "enabled_missing_boot_grace",
+                            Effect.removeFromBatch(),
+                            Effect.timer(TimerType.BOOT_GRACE,
+                                    bootGraceDelay(snapshot), "enabled_changed"));
+                }
+                return change(from, State.SUSPECT, "enabled_missing_boot_grace",
+                        Effect.timer(TimerType.BOOT_GRACE,
+                                bootGraceDelay(snapshot), "enabled_changed"));
+            }
+            if (from == State.RESTORING && snapshot.dryRun) {
+                return noop(from);
+            }
             // OEM force-stop 会直接把整包服务从启用列表移除；这里只补回，不强杀
+            if (from == State.NEEDS_REPAIR) {
+                return change(from, State.RESTORING, "enabled_missing",
+                        Effect.removeFromBatch(),
+                        Effect.requestRestore("enabled_changed"));
+            }
             return change(from, State.RESTORING, "enabled_missing",
                     Effect.requestRestore("enabled_changed"));
         }
@@ -624,12 +681,15 @@ final class ServiceRepairStateMachine {
         if (!snapshot.managed || snapshot.userDisabled || !snapshot.moduleEnabled) {
             return stay(from, Effect.removeFromBatch());
         }
+        // 同包健康兄弟服务随触发者一起关开时必须清零旧 boundAt，避免 VERIFYING 期间重绑失败
+        // 误用关开前的旧连接寿命，错误把 fastFailCount 清零。
+        boundAt = 0L;
         bindingGraceAttempts = 0;
         return change(from, State.REPAIRING, "package_repair_started");
     }
 
     private Transition handlePackageApplied(State from) {
-        if (from != State.REPAIRING && from != State.QUEUED) {
+        if (from != State.REPAIRING) {
             return noop(from);
         }
         return change(from, State.VERIFYING, "package_repair_applied",
@@ -637,7 +697,7 @@ final class ServiceRepairStateMachine {
     }
 
     private Transition handlePackageFailed(State from) {
-        if (from != State.REPAIRING && from != State.QUEUED) {
+        if (from != State.REPAIRING) {
             return noop(from);
         }
         long delay = RepairPolicy.repairBackoffMs(fastFailCount);
@@ -655,6 +715,16 @@ final class ServiceRepairStateMachine {
                         ? Math.max(0L, snapshot.now - boundAt) : -1L;
                 if (RepairPolicy.shouldResetFastFail(lifetime)) {
                     fastFailCount = 0;
+                } else if (fastFailCount > 0 && boundAt > 0L) {
+                    // 1. 解决场景：STABILITY(5s) 到点时连接尚未满 30s 健康门槛，若不续排一次
+                    //    HEALTHY_RESET 定时器，fastFailCount 将永远不会在稳定运行后自动清零。
+                    // 2. 前置条件与边界：仅当 fastFailCount > 0 且 boundAt 已知、尚未满 30s 时，
+                    //    补排唯一一次 HEALTHY_RESET 定时器等待至满 30s。
+                    // 3. 兜底策略：若等待期间发生掉线，binderDied/HEALTHY_RESET_UNBOUND 会照常接管。
+                    long remaining = RepairPolicy.remainingHealthyResetMs(lifetime);
+                    return change(from, State.BOUND, "stability_schedule_healthy_reset",
+                            Effect.clearCrashedMarker(),
+                            Effect.timer(TimerType.HEALTHY_RESET, remaining, "healthy_reset"));
                 }
                 if (from == State.BOUND) {
                     // 确认已绑定时顺手清掉 AMS 可能残留的 crashed 标记，避免设置页显示崩溃
@@ -663,6 +733,20 @@ final class ServiceRepairStateMachine {
                 return recoveryTransition(from, snapshot, "stability_ok");
             }
             return evaluateUnbound(snapshot, from, "stability_unbound");
+        }
+        if (event.getTimerType() == TimerType.HEALTHY_RESET) {
+            if (snapshot.bound) {
+                long lifetime = boundAt > 0L
+                        ? Math.max(0L, snapshot.now - boundAt) : -1L;
+                if (RepairPolicy.shouldResetFastFail(lifetime)) {
+                    fastFailCount = 0;
+                }
+                if (from == State.BOUND) {
+                    return stay(from, Effect.clearCrashedMarker());
+                }
+                return recoveryTransition(from, snapshot, "healthy_reset_ok");
+            }
+            return evaluateUnbound(snapshot, from, "healthy_reset_unbound");
         }
         if (event.getTimerType() == TimerType.SETTLE
                 || event.getTimerType() == TimerType.VERIFY
@@ -738,6 +822,12 @@ final class ServiceRepairStateMachine {
                     Effect.timer(TimerType.BACKOFF, backoff, reason));
         }
         boolean allowKill = RepairPolicy.shouldUseKillForFastFail(fastFailCount);
+        if (snapshot.dryRun) {
+            // 演练模式：发出一次请求供协调器记录日志，但停留在 SUSPECT 而不进入 NEEDS_REPAIR 队列，
+            // 避免把服务锁死在 NEEDS_REPAIR，关闭演练后可由 SYNC 立即恢复修复。
+            return change(from, State.SUSPECT, reason + "_dry_run",
+                    Effect.requestRepair(allowKill, reason));
+        }
         return change(from, State.NEEDS_REPAIR, reason + "_needs_repair",
                 Effect.requestRepair(allowKill, reason));
     }
@@ -753,14 +843,26 @@ final class ServiceRepairStateMachine {
                 Effect.timer(TimerType.STABILITY, RepairPolicy.FSM_STABILITY_MS, reason));
     }
 
+    /** 从排队/修复态直接恢复为 BOUND：额外通知协调器把该成员移出队列。 */
+    private Transition recoveryTransitionWithBatchRemoval(
+            State from, Snapshot snapshot, String reason) {
+        boundAt = snapshot.now;
+        bindRetryAttempts = 0;
+        bindingGraceAttempts = 0;
+        return change(from, State.BOUND, reason,
+                Effect.removeFromBatch(),
+                Effect.clearCrashedMarker(),
+                Effect.notifyRecovered(),
+                Effect.timer(TimerType.STABILITY, RepairPolicy.FSM_STABILITY_MS, reason));
+    }
+
     private Transition toSuspended(State from) {
         if (from == State.SUSPENDED) {
             return noop(from);
         }
         bindingGraceAttempts = 0;
         List<Effect> effects = new ArrayList<>();
-        // 排队等待修复的成员实际停留在 NEEDS_REPAIR（QUEUED 为历史保留态），停用时一并移除队列
-        if (from == State.NEEDS_REPAIR || from == State.QUEUED || from == State.REPAIRING) {
+        if (from == State.NEEDS_REPAIR || from == State.REPAIRING) {
             effects.add(Effect.removeFromBatch());
         }
         return change(from, State.SUSPENDED, "module_disabled", effects);
@@ -772,7 +874,7 @@ final class ServiceRepairStateMachine {
         }
         bindingGraceAttempts = 0;
         List<Effect> effects = new ArrayList<>();
-        if (from == State.NEEDS_REPAIR || from == State.QUEUED || from == State.REPAIRING) {
+        if (from == State.NEEDS_REPAIR || from == State.REPAIRING) {
             effects.add(Effect.removeFromBatch());
         }
         return change(from, State.DISABLED, "user_disabled", effects);
@@ -784,7 +886,7 @@ final class ServiceRepairStateMachine {
         }
         bindingGraceAttempts = 0;
         List<Effect> effects = new ArrayList<>();
-        if (from == State.NEEDS_REPAIR || from == State.QUEUED || from == State.REPAIRING) {
+        if (from == State.NEEDS_REPAIR || from == State.REPAIRING) {
             effects.add(Effect.removeFromBatch());
         }
         return change(from, State.UNMANAGED, "unmanaged", effects);

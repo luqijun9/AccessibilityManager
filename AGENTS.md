@@ -24,10 +24,13 @@
 
 | 机制 / 变量 | 设计初衷 | 应对场景 | 兜底与边界策略 |
 | :--- | :--- | :--- | :--- |
-| `sSuppressUntil` (抑制期) | 防止关开修复后旧连接延迟的 `binderDied` 造成假崩溃与死循环 | AMS 解绑/强杀异步回调 | **若无存活连接（真死）**：严禁丢弃，必须排期延后检查并在抑制期结束后自动二次修复。 |
-| `BOOT_GRACE_MS` (开机冷却) | 防止开机阶段与用户首次解锁时服务冷启动慢被误杀 | 开机 CPU 占满导致启动超时 | 冷却期内跳过修复，但必须排期在开机冷却期结束后执行兜底扫描。 |
-| `PACKAGE_KILL_COOLDOWN_MS` | 避免同包多服务同时崩溃时频繁 `killAppProcesses` | 多服务应用（如 MacroDroid） | 10 秒内同包名只执行一次强杀，后续服务复用关开设置。 |
-| `sCheckRetries` (启动宽限) | 避免应用正在被系统冷启动拉起时直接强杀修复 | 慢启动应用进程已在但 Binder 未绑 | 检测到应用进程存活时宽限 2 次（每次 2 秒），超时才发起修复。 |
+| `ServiceRepairStateMachine` (`generation`) | 单服务显式生命周期状态机与代数校验 | 修复期间预期断开、旧定时器穿透、快速失败退避 | 所有迁移递增 `generation` 并自动 `CANCEL_TIMERS`，过期回调一律丢弃；`VERIFYING` 内二次死亡累计 `fastFailCount`。 |
+| `SettingsWriter` (串行 delta) | 保证 `ENABLED_ACCESSIBILITY_SERVICES` 读改写不丢成员 | 用户/OEM 并发改写列表、同包同时缺失多个服务 | 短临界区仅包住 read-apply-write，不跨 500ms 等待；读失败/null 绝不写回，精确比对自写值避免自我触发。 |
+| `ConnectionBindProbe` (`UNKNOWN` 熔断) | 跨 Android 10~17 探测连接绑定状态 | Android 17 字段改名（`mClient`/`mClientBinder`）或 ROM 魔改 | 在 `mLock` 下依次探测多种策略；全不可识别时返回 `UNKNOWN` 并暂停自动关开，防止误杀风暴。 |
+| `BINDING_GRACE` (`mBindingServices`) | 避免打断应用冷启动中的正常绑定 | 慢启动服务已在 `bindLocked` 但 `onServiceConnected` 耗时 2~4s | 最多宽限 2 次（每次 2s），超时仍未绑定再按 `fastFailCount` 推进修复/退避。 |
+| `STABILITY` + `HEALTHY_RESET` | 验证修复后长效稳定并在健康运行后复位退避 | ColorOS 数秒内二次查杀、反复快速失败后的退避清零 | 恢复后 5s 触发 `STABILITY`，若 `fastFailCount > 0` 再排期 `HEALTHY_RESET` 至满 30s 后清零；掉线立即重启评估。 |
+| `BOOT_GRACE_MS` (开机/软重启冷却) | 防止开机阶段与用户首次解锁时服务冷启动慢被误杀 | 开机/软重启后 CPU 占满导致启动超时 | 冷却期内跳过修复并排 `BOOT_GRACE` / `schedulePostBootCheck`，冷却结束后自动触发 `syncMachines("boot_ready")`。 |
+| `PACKAGE_KILL_COOLDOWN_MS` | 避免同包多服务崩溃时连环 `forceStop` / `kill` | 多服务应用（如 MacroDroid）及不强杀场景 | 10 秒内同包最多强杀一次；整包任一成员在免强杀名单或 `fastFailCount >= 2` 时禁止强杀，不强杀仅关开未绑定成员。 |
 
 ---
 
@@ -47,3 +50,4 @@
    powershell -ExecutionPolicy Bypass -File "C:\Users\LP\.gemini\config\scripts\smart_adb_install.ps1" -ApkPath <apk-path-or-dir>
    ```
 3. **Git 提交**：测试与安装流程完成后，立即执行 Git 提交并推送到远程仓库。
+
