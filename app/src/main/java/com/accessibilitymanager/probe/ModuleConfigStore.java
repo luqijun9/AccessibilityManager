@@ -15,42 +15,14 @@ import android.provider.Settings;
 import android.widget.Toast;
 
 import java.lang.reflect.Method;
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
 /**
- * 模块配置缓存、Settings.Secure 串行读写、包状态三态查询与省电诊断摘要。
+ * 模块配置缓存、Settings.Secure 串行读写、包状态三态查询与电源状态诊断摘要。
  */
 final class ModuleConfigStore {
-
-    private static final int TABLE_GLOBAL = 0;
-    private static final int TABLE_SYSTEM = 1;
-    private static final int TABLE_SECURE = 2;
-
-    // 常见国产 ROM 超级省电/低电量 Settings 键名（仅用于修复日志诊断，首次探测后仅读有效键）
-    private static final String[] OEM_POWER_SAVE_KEYS = {
-            "super_powersave_mode_state",
-            "super_powersave_launcher_enter",
-            "power_save_mode",
-            "power_supersave_mode_open",
-            "EXTREME_POWER_MODE",
-            "bbk_super_save_power_mode",
-            "pem_in_sleepmode",
-            "SmartModeStatus",
-            "low_power"
-    };
-
-    private static final class PowerKeyEntry {
-        final int table;
-        final String key;
-
-        PowerKeyEntry(int table, String key) {
-            this.table = table;
-            this.key = key;
-        }
-    }
 
     private static volatile Context sContext;
     private static volatile ClassLoader sClassLoader;
@@ -70,9 +42,6 @@ final class ModuleConfigStore {
     // 启用列表读取为 null 时的原因：非 null 表示读取异常，null 表示设置项不存在
     private static volatile Throwable sLastEnabledReadError;
     private static SettingsWriter sSettingsWriter;
-
-    private static volatile boolean sOemPowerKeysProbed;
-    private static volatile List<PowerKeyEntry> sDetectedOemPowerKeys = new ArrayList<>();
 
     private ModuleConfigStore() {
     }
@@ -660,8 +629,7 @@ final class ModuleConfigStore {
     }
 
     /**
-     * 采集省电与屏幕状态摘要；对 9 个 OEM 省电键首次探测存在的键后缓存列表，
-     * 避免每次崩溃/修复都产生高达 27 次同步 Settings Binder IPC。
+     * 采集标准省电、Doze 与亮屏状态摘要（仅通过 PowerManager 读取，不再轮询 OEM Settings 键）。
      */
     static String getPowerStateSummary() {
         Context ctx = sContext;
@@ -686,78 +654,7 @@ final class ModuleConfigStore {
             }
         } catch (Throwable ignored) {
         }
-        ContentResolver resolver = ctx.getContentResolver();
-        StringBuilder oem = new StringBuilder();
-        if (!sOemPowerKeysProbed) {
-            probeOemPowerKeys(resolver, oem);
-        } else {
-            for (PowerKeyEntry entry : sDetectedOemPowerKeys) {
-                String val = readSettingFromTable(resolver, entry.table, entry.key);
-                if (val != null && !val.isEmpty()) {
-                    if (oem.length() > 0) {
-                        oem.append(',');
-                    }
-                    oem.append(entry.key).append('=').append(val);
-                }
-            }
-        }
-        if (oem.length() > 0) {
-            if (sb.length() > 0) sb.append(' ');
-            sb.append("oemPower={").append(oem).append('}');
-        }
         return sb.length() == 0 ? "powerSave=unknown" : sb.toString();
-    }
-
-    private static void probeOemPowerKeys(ContentResolver resolver, StringBuilder oemOut) {
-        List<PowerKeyEntry> detected = new ArrayList<>();
-        boolean anyReadSucceeded = false;
-        for (String key : OEM_POWER_SAVE_KEYS) {
-            PowerKeyEntry found = null;
-            String val = null;
-            for (int table = TABLE_GLOBAL; table <= TABLE_SECURE; table++) {
-                try {
-                    String candidate = readSettingFromTableStrict(resolver, table, key);
-                    anyReadSucceeded = true;
-                    if (candidate != null && !candidate.isEmpty()) {
-                        found = new PowerKeyEntry(table, key);
-                        val = candidate;
-                        break;
-                    }
-                } catch (Throwable ignored) {
-                }
-            }
-            if (found != null) {
-                detected.add(found);
-                if (oemOut.length() > 0) {
-                    oemOut.append(',');
-                }
-                oemOut.append(key).append('=').append(val);
-            }
-        }
-        if (anyReadSucceeded) {
-            sDetectedOemPowerKeys = detected;
-            sOemPowerKeysProbed = true;
-        }
-    }
-
-    private static String readSettingFromTable(ContentResolver resolver, int table, String key) {
-        try {
-            return readSettingFromTableStrict(resolver, table, key);
-        } catch (Throwable ignored) {
-            return null;
-        }
-    }
-
-    private static String readSettingFromTableStrict(ContentResolver resolver, int table, String key) {
-        switch (table) {
-            case TABLE_GLOBAL:
-                return Settings.Global.getString(resolver, key);
-            case TABLE_SYSTEM:
-                return Settings.System.getString(resolver, key);
-            case TABLE_SECURE:
-            default:
-                return Settings.Secure.getString(resolver, key);
-        }
     }
 
     static String getPackageProcessSummary(String pkg) {
@@ -847,8 +744,6 @@ final class ModuleConfigStore {
         sToastCache = null;
         sDebugPauseUnbindCache = null;
         sSettingsWriter = null;
-        sOemPowerKeysProbed = false;
-        sDetectedOemPowerKeys = new ArrayList<>();
     }
 
     static void resetForTesting() {
